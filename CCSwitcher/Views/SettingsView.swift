@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage("appLanguage") private var appLanguage = "auto"
     @AppStorage("autoSwitchEnabled") private var autoSwitchEnabled = false
     @AppStorage("autoSwitchThreshold") private var autoSwitchThreshold = 90.0
+    @AppStorage("transcriptLookbackHours") private var transcriptLookbackHours = 24
     @State private var launchAtLogin = false
 
     var body: some View {
@@ -57,6 +58,19 @@ struct SettingsView: View {
                 .onChange(of: refreshInterval) { _, newValue in
                     appState.startAutoRefresh(interval: newValue)
                 }
+                Picker("Usage history window", selection: $transcriptLookbackHours) {
+                    Text("Last 24 hours").tag(24)
+                    Text("Last 3 days").tag(72)
+                    Text("Last 7 days").tag(168)
+                    Text("Last 30 days").tag(720)
+                    Text("All history").tag(0)
+                }
+                .onChange(of: transcriptLookbackHours) { _, _ in
+                    Task { await appState.refresh() }
+                }
+                Text("How far back to parse Claude session transcripts for cost and activity stats. Memory use grows with the window; longer windows also lengthen the first scan after launch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Auto-switch") {

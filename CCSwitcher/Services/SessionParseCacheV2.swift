@@ -128,8 +128,19 @@ actor SessionParseCacheV2 {
         PricingService.shared.refreshInBackground()
 
         let start = Date()
+        // Only parse transcripts modified within the configured lookback
+        // window (default 24h; 0 = unlimited, the original behavior). A file
+        // whose mtime predates the cutoff cannot contain rows newer than the
+        // cutoff, so skipping it loses nothing inside the window. Skipped
+        // files fall out of the scan's live set, so the existing evict pass
+        // drops them from the cache — memory and cache-file size stay
+        // proportional to the window, not to every session ever recorded.
+        let lookbackHours = (UserDefaults.standard.object(forKey: "transcriptLookbackHours") as? Int) ?? 24
+        let cutoffMtime: Double? = lookbackHours > 0
+            ? Date().timeIntervalSince1970 - Double(lookbackHours) * 3600
+            : nil
         let cachedMtimes: [String: Double] = files.mapValues { $0.mtimeUnix }
-        let result = Self.scanAndParse(projectsDir: claudeProjectsDir, cachedMtimes: cachedMtimes)
+        let result = Self.scanAndParse(projectsDir: claudeProjectsDir, cachedMtimes: cachedMtimes, cutoffMtime: cutoffMtime)
 
         for (path, entry) in result.updates {
             files[path] = entry
@@ -147,6 +158,7 @@ actor SessionParseCacheV2 {
             + "hit=\(result.hits) miss=\(result.missesNew + result.missesMtime) "
             + "(new=\(result.missesNew), mtime=\(result.missesMtime)) "
             + "evicted=\(evicted) parse_total=\(result.parseElapsedMs)ms total=\(totalMs)ms "
+            + "lookback=\(lookbackHours == 0 ? "all" : "\(lookbackHours)h") "
             + "pricing=\(pricingMeta.source)"
         )
 
@@ -325,7 +337,8 @@ actor SessionParseCacheV2 {
 
     private static func scanAndParse(
         projectsDir: String,
-        cachedMtimes: [String: Double]
+        cachedMtimes: [String: Double],
+        cutoffMtime: Double?
     ) -> ScanResult {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(atPath: projectsDir) else {
@@ -343,6 +356,7 @@ actor SessionParseCacheV2 {
             guard let attrs = try? fm.attributesOfItem(atPath: filePath),
                   let mtimeDate = attrs[.modificationDate] as? Date else { continue }
             let mtime = mtimeDate.timeIntervalSince1970
+            if let cutoff = cutoffMtime, mtime < cutoff { continue }
             live.insert(filePath)
 
             if let cached = cachedMtimes[filePath], cached == mtime {
