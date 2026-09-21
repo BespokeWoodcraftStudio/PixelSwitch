@@ -1,15 +1,15 @@
-# CCSwitcher Agent Guidelines
+# PixelSwitch Agent Guidelines
 
 **Rules**:
 - `project.yml` is the ONLY source of truth. NEVER edit `.pbxproj` or `Info.plist` directly. Run `xcodegen generate` after changes.
-- `CCSwitcher.xcodeproj` is disposable (git-ignored).
+- `PixelSwitch.xcodeproj` is disposable (git-ignored).
 
 **App**: Minimalist macOS menu bar app for managing/switching Claude Code accounts.
 **Features**: Terminal-free login (Process/Pipe interception), zero-interaction token refresh (`security` CLI workaround), API usage tracking.
 
 **Architecture & Files**:
 - **Docs**: `ARCHITECTURE.md` (token flow), `BUILD_GUIDE.md`, `project.yml` (Xcode config).
-- **Entry**: `CCSwitcherApp.swift` (MenuBarExtra, lifecycle), `AppState.swift` (@MainActor state).
+- **Entry**: `PixelSwitchApp.swift` (MenuBarExtra, lifecycle), `AppState.swift` (@MainActor state).
 - **Services**: 
   - `ClaudeService.swift`: Wraps `claude` CLI (auth/status).
   - `KeychainService.swift`: Manages OAuth tokens via `/usr/bin/security`.

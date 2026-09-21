@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # fetch_litellm.sh — Pull the latest LiteLLM model-pricing JSON, filter it
-# down to Claude rows, and write the result into CCSwitcher/Resources/ so
+# down to Claude rows, and write the result into PixelSwitch/Resources/ so
 # it bundles with the app.
 #
 # Run this before tagging a release. The result is committed to the repo
@@ -13,7 +13,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-DEST_DIR="$ROOT/CCSwitcher/Resources"
+DEST_DIR="$ROOT/PixelSwitch/Resources"
 DEST="$DEST_DIR/litellm-pricing.json"
 URL="https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 
@@ -67,4 +67,4 @@ print(f"  fetched_at: {fetched_at}")
 PY
 
 echo
-echo "Next: commit CCSwitcher/Resources/litellm-pricing.json before tagging the release."
+echo "Next: commit PixelSwitch/Resources/litellm-pricing.json before tagging the release."

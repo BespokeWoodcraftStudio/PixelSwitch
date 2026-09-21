@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 /// Data shared between the main app and widget via direct file in the widget's sandbox container.
 ///
@@ -27,15 +28,30 @@ struct WidgetData: Codable {
     let modelUsage: [String: Int]
     let lastUpdated: Date
 
-    // Team-ID-prefixed App Group. macOS Sequoia (15+) prompts for App
-    // Management on `group.<bundle-id>` style identifiers; the
-    // `<TEAMID>.<bundle-id>` form is auto-authorized for Developer-ID-signed
-    // apps without a provisioning profile and avoids the prompt entirely.
-    private static let appGroupID = "584KQTRF3B.me.xueshi.ccswitcher"
+    // Team-ID-prefixed App Group (`$(TeamIdentifierPrefix)ai.pixelventures.pixelswitch`
+    // in project.yml). macOS Sequoia (15+) prompts for App Management on
+    // `group.<bundle-id>` style identifiers; the `<TEAMID>.<bundle-id>` form is
+    // auto-authorized for Developer-ID-signed apps without a provisioning
+    // profile and avoids the prompt entirely.
+    //
+    // The ID is read from this process's own signed entitlements rather than
+    // hard-coded, so it always carries whichever team signed the build. An
+    // unsigned or ad-hoc build has no entitlements, gets nil here, and never
+    // touches a group container: touching one it is not entitled to makes
+    // macOS ask "would like to access data from other apps", and the widget
+    // cannot load in such a build anyway.
+    private static let appGroupID: String? = {
+        guard let task = SecTaskCreateFromSelf(kCFAllocatorDefault),
+              let value = SecTaskCopyValueForEntitlement(
+                task, "com.apple.security.application-groups" as CFString, nil),
+              let groups = value as? [String] else { return nil }
+        return groups.first
+    }()
     private static let fileName = "widget-data.json"
 
     private static var sharedContainerURL: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
+        guard let appGroupID else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
     }
 
     /// Load from the shared App Group container.

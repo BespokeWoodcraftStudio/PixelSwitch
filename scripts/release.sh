@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# CCSwitcher Release Script
+# PixelSwitch Release Script
 # Ensures version is synced across: project.yml MARKETING_VERSION, git tag, and commit.
 #
 # Usage:
@@ -54,7 +54,7 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
 fi
 
 # Must have no untracked files in source directories
-UNTRACKED=$(git ls-files --others --exclude-standard CCSwitcher/ CCSwitcherWidget/ Shared/ project.yml)
+UNTRACKED=$(git ls-files --others --exclude-standard PixelSwitch/ PixelSwitchWidget/ Shared/ project.yml)
 [ -z "$UNTRACKED" ] || die "Untracked source files found:\n$UNTRACKED"
 
 # --- Determine version ---

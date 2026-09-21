@@ -19,7 +19,7 @@ Package.resolved
 # Misc
 *.swp
 *~
-CCSwitcher/Info.plist
+PixelSwitch/Info.plist
 
 # XcodeGen generated project
-CCSwitcher.xcodeproj/
+PixelSwitch.xcodeproj/

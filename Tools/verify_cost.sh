@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify_cost.sh — Cross-check CCSwitcher's JSONL cost calculation against
+# verify_cost.sh — Cross-check PixelSwitch's JSONL cost calculation against
 # the latest ccusage release. Run before tagging a new app version.
 #
 # Exit codes:
@@ -21,7 +21,7 @@ DAYS="${1:-30}"
 TOL="${COST_DIFF_TOLERANCE:-0.01}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-TMP="${TMPDIR:-/tmp}/ccswitcher-verify-cost"
+TMP="${TMPDIR:-/tmp}/pixelswitch-verify-cost"
 mkdir -p "$TMP"
 
 red()    { printf "\033[0;31m%s\033[0m\n" "$*"; }
@@ -88,7 +88,7 @@ for day in json.load(open(theirs_path))['daily']:
     day_key = day.get('period') or day.get('date')
     for m in day['modelBreakdowns']:
         # Claude-only: ccusage 20.x became a multi-provider tracker (Codex/Kilo/
-        # Kimi/OpenCode/...). CCSwitcher is a Claude account tool and only counts
+        # Kimi/OpenCode/...). PixelSwitch is a Claude account tool and only counts
         # Claude usage, so non-Claude models are out of scope for this diff.
         if 'claude' not in m['modelName']:
             continue
@@ -172,7 +172,7 @@ if [ $EXIT -eq 0 ]; then
     # Stamp the verification result into a bundled resource so the Cost tab
     # can show "Verified against ccusage X on Y" without a runtime fetch.
     # Regenerated on every successful run, including pre-release.
-    STAMP="$ROOT/CCSwitcher/Resources/verified-against.json"
+    STAMP="$ROOT/PixelSwitch/Resources/verified-against.json"
     TODAY=$(date -u +"%Y-%m-%d")
     TOTAL=$(python3 -c "
 import json, sys
@@ -204,6 +204,6 @@ else
     red "FAIL — DO NOT RELEASE."
     yellow "Investigate: compare $TMP/ours.json against $TMP/ccusage.json"
     yellow "If ccusage changed its algorithm, update Tools/recalc_cost.swift first,"
-    yellow "then port the change into CCSwitcher/Services/SessionParseCacheV2.swift."
+    yellow "then port the change into PixelSwitch/Services/SessionParseCacheV2.swift."
 fi
 exit $EXIT

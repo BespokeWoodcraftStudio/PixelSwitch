@@ -1,6 +1,6 @@
-name: CCSwitcher
+name: PixelSwitch
 options:
-  bundleIdPrefix: me.xueshi
+  bundleIdPrefix: ai.pixelventures
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.0"
@@ -24,89 +24,90 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     ENABLE_HARDENED_RUNTIME: false
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: 584KQTRF3B
+    # No team: CI builds unsigned, then ad-hoc signs. Put your own Apple team
+    # here and in the widget target to sign locally with Xcode.
+    DEVELOPMENT_TEAM: ""
     SWIFT_STRICT_CONCURRENCY: targeted
 
 targets:
-  CCSwitcher:
+  PixelSwitch:
     type: application
     platform: macOS
     sources:
-      - path: CCSwitcher
+      - path: PixelSwitch
       - path: Shared
     info:
-      path: CCSwitcher/Info.plist
+      path: PixelSwitch/Info.plist
       properties:
         LSUIElement: true
         CFBundleDisplayName: $(PRODUCT_NAME)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleURLTypes:
-          - CFBundleURLName: me.xueshi.ccswitcher
+          - CFBundleURLName: ai.pixelventures.pixelswitch
             CFBundleURLSchemes:
-              - ccswitcher
-        # Sparkle: feed URL points at the always-latest release's appcast asset.
-        # CI uploads `appcast.xml` to each release alongside the DMG.
-        # BWS fork: feed points at the fork (no releases published), and
-        # automatic checks are off, so upstream updates can never silently
-        # replace this customized build.
-        SUFeedURL: https://github.com/BespokeWoodcraftStudio/CCSwitcher/releases/latest/download/appcast.xml
-        SUEnableAutomaticChecks: false
-        # Public EdDSA key. The matching private key is the `SPARKLE_EDDSA_KEY`
-        # GitHub secret used by CI to sign each DMG.
-        SUPublicEDKey: N9jOZ2Xyo63FdNvkDCRiMwXFnFglOqTdmx6nw7ZwTS4=
+              - pixelswitch
+        # Sparkle: feed URL points at the always-latest PixelSwitch release's
+        # appcast asset. CI uploads `appcast.xml` to each tagged release
+        # alongside the DMG, signed with the PixelSwitch EdDSA key below.
+        SUFeedURL: https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/latest/download/appcast.xml
+        SUEnableAutomaticChecks: true
+        # PixelSwitch public EdDSA key. The private half lives in the founder's
+        # login keychain (Sparkle generate_keys, account "pixelswitch") and in the
+        # `SPARKLE_EDDSA_KEY` GitHub secret used by CI to sign each DMG.
+        SUPublicEDKey: rk8t6LzU0KnCEzj6+xCXL5XC0CUSfLwtUneaNWX+5/U=
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: me.xueshi.ccswitcher
-        CODE_SIGN_ENTITLEMENTS: CCSwitcher/Resources/CCSwitcher.entitlements
-        PRODUCT_NAME: CCSwitcher
-        MARKETING_VERSION: "1.12.0-bws.1"
-        CURRENT_PROJECT_VERSION: "67"
+        PRODUCT_BUNDLE_IDENTIFIER: ai.pixelventures.pixelswitch
+        CODE_SIGN_ENTITLEMENTS: PixelSwitch/Resources/PixelSwitch.entitlements
+        PRODUCT_NAME: PixelSwitch
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
         COMBINE_HIDPI_IMAGES: true
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
     entitlements:
-      path: CCSwitcher/Resources/CCSwitcher.entitlements
+      path: PixelSwitch/Resources/PixelSwitch.entitlements
       properties:
         com.apple.security.application-groups:
-          - 584KQTRF3B.me.xueshi.ccswitcher
+          - $(TeamIdentifierPrefix)ai.pixelventures.pixelswitch
     dependencies:
-      - target: CCSwitcherWidgetExtension
+      - target: PixelSwitchWidgetExtension
         embed: true
         codeSign: true
       - package: Sparkle
 
-  CCSwitcherWidgetExtension:
+  PixelSwitchWidgetExtension:
     type: extensionkit-extension
     platform: macOS
     sources:
-      - path: CCSwitcherWidget
+      - path: PixelSwitchWidget
       - path: Shared
     info:
-      path: CCSwitcherWidget/Info.plist
+      path: PixelSwitchWidget/Info.plist
       properties:
-        CFBundleDisplayName: CCSwitcher Widget
+        CFBundleDisplayName: PixelSwitch Widget
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         EXAppExtensionAttributes:
           EXExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: me.xueshi.ccswitcher.widget
-        CODE_SIGN_ENTITLEMENTS: CCSwitcherWidget/Resources/CCSwitcherWidget.entitlements
-        PRODUCT_NAME: CCSwitcherWidgetExtension
-        MARKETING_VERSION: "1.12.0-bws.1"
-        CURRENT_PROJECT_VERSION: "67"
+        PRODUCT_BUNDLE_IDENTIFIER: ai.pixelventures.pixelswitch.widget
+        CODE_SIGN_ENTITLEMENTS: PixelSwitchWidget/Resources/PixelSwitchWidget.entitlements
+        PRODUCT_NAME: PixelSwitchWidgetExtension
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: 584KQTRF3B
+        DEVELOPMENT_TEAM: ""
         SWIFT_STRICT_CONCURRENCY: targeted
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks"
         SKIP_INSTALL: true
     entitlements:
-      path: CCSwitcherWidget/Resources/CCSwitcherWidget.entitlements
+      path: PixelSwitchWidget/Resources/PixelSwitchWidget.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.application-groups:
-          - 584KQTRF3B.me.xueshi.ccswitcher
+          - $(TeamIdentifierPrefix)ai.pixelventures.pixelswitch

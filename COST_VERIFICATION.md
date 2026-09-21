@@ -1,6 +1,6 @@
 # Cost Calculation Verification
 
-CCSwitcher computes today's API spend from the JSONL session logs in
+PixelSwitch computes today's API spend from the JSONL session logs in
 `~/.claude/projects/`. The math has to stay aligned with [ccusage], the
 canonical community tool — if our numbers drift from ccusage, users will
 notice and lose trust in everything else in the menu bar.
@@ -10,7 +10,7 @@ This document describes how to verify alignment and what to do if it fails.
 ## The contract
 
 For any window of recent days, the totals reported by our parser
-(`CCSwitcher/Services/SessionParseCacheV2.swift` → `costSummary()`) must
+(`PixelSwitch/Services/SessionParseCacheV2.swift` → `costSummary()`) must
 match `npx ccusage@latest daily --since YYYYMMDD --json` exactly, on:
 
 - `inputTokens`, `outputTokens`, `cacheCreationTokens`, `cacheReadTokens`
@@ -46,7 +46,7 @@ If it fails, **do not release.** Find and fix the divergence first.
 
 1. **A `(date, model)` key exists on one side but not the other.**
    Usually means we either dropped a row ccusage kept, or kept one
-   ccusage filtered. Inspect `/tmp/ccswitcher-verify-cost/ours.json`
+   ccusage filtered. Inspect `/tmp/pixelswitch-verify-cost/ours.json`
    vs `ccusage.json`, find the missing row, trace it back to JSONL.
 
 2. **Token counts disagree.**
@@ -73,7 +73,7 @@ Fix order when ccusage changes:
 
 1. **Update `Tools/recalc_cost.swift` first** to mirror the new
    algorithm. Iterate until `verify_cost.sh` passes again.
-2. **Then port the change into `CCSwitcher/Services/SessionParseCacheV2.swift`.**
+2. **Then port the change into `PixelSwitch/Services/SessionParseCacheV2.swift`.**
 3. Re-run `verify_cost.sh` and run the app to confirm the UI shows
    matching numbers.
 4. Then release.
@@ -88,10 +88,10 @@ ccusage in isolation.
 |---|---|
 | `Tools/verify_cost.sh` | One-shot verification — what you run before releasing. |
 | `Tools/recalc_cost.swift` | Standalone reparser that mirrors ccusage's algorithm. Single source of truth for "what's the right answer." |
-| `CCSwitcher/Services/SessionParseCacheV2.swift` | The in-app version that the UI consumes. Must match the recalc script's outputs. |
-| `CCSwitcher/Models/CostData.swift` → `ModelPricing` | App's pricing table. Should track LiteLLM. |
+| `PixelSwitch/Services/SessionParseCacheV2.swift` | The in-app version that the UI consumes. Must match the recalc script's outputs. |
+| `PixelSwitch/Models/CostData.swift` → `ModelPricing` | App's pricing table. Should track LiteLLM. |
 | `/tmp/litellm-pricing.json` | Cached LiteLLM pricing snapshot (auto-refreshed by `recalc_cost.swift` once per hour). |
-| `/tmp/ccswitcher-verify-cost/` | Raw JSON outputs from the last verification run — keep around for debugging. |
+| `/tmp/pixelswitch-verify-cost/` | Raw JSON outputs from the last verification run — keep around for debugging. |
 
 ## Surprising things we learned
 

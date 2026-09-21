@@ -1,8 +1,8 @@
-# CCSwitcher Architecture
+# PixelSwitch Architecture
 
 ## Keychain Token Storage
 
-CCSwitcher manages two sets of keychain entries:
+PixelSwitch manages two sets of keychain entries:
 
 ```
 macOS Keychain
@@ -14,17 +14,17 @@ macOS Keychain
 │  │  Password: <Active OAuth Token JSON>                  │   │
 │  │                                                       │   │
 │  │  Claude CLI reads/writes this to authenticate.        │   │
-│  │  CCSwitcher accesses it via `security` CLI tool       │   │
+│  │  PixelSwitch accesses it via `security` CLI tool       │   │
 │  │  (NOT Security framework) to avoid repeated password  │   │
 │  │  prompts. User clicks "Always Allow" once.            │   │
 │  └───────────────────────────────────────────────────────┘   │
 │                                                              │
-│  ┌─ CCSwitcher owns these entries ──────────────────────┐   │
-│  │  Service:  "com.ccswitcher.tokens"                    │   │
+│  ┌─ PixelSwitch owns these entries ──────────────────────┐   │
+│  │  Service:  "com.pixelswitch.tokens"                    │   │
 │  │  Account:  "<Account-A UUID>"                         │   │
 │  │  Password: <Account A's backed-up OAuth Token JSON>   │   │
 │  │                                                       │   │
-│  │  Service:  "com.ccswitcher.tokens"                    │   │
+│  │  Service:  "com.pixelswitch.tokens"                    │   │
 │  │  Account:  "<Account-B UUID>"                         │   │
 │  │  Password: <Account B's backed-up OAuth Token JSON>   │   │
 │  │                                                       │   │
@@ -65,12 +65,12 @@ The token stored in keychain is a single JSON object (captured from real keychai
 - `expiresAt` is a Unix timestamp in **milliseconds** (not seconds)
 - `scopes` is an **array of strings** (not a single string)
 - The token JSON does **NOT** contain email or account identity — the only way to determine which account a token belongs to is by calling `claude auth status` while that token is active
-- This lack of embedded identity is why CCSwitcher must verify CLI state before backing up tokens (see "Token Corruption Prevention" below)
+- This lack of embedded identity is why PixelSwitch must verify CLI state before backing up tokens (see "Token Corruption Prevention" below)
 
 ### Token Corruption Prevention
 
 A critical invariant: each account's backup token must belong to that account.
-Since the token JSON contains no email/identity, CCSwitcher cannot verify ownership
+Since the token JSON contains no email/identity, PixelSwitch cannot verify ownership
 from the token alone. To prevent saving the wrong token under the wrong account:
 
 1. **Before backup**: always call `claude auth status` and verify the email matches
@@ -457,7 +457,7 @@ diagnoseTokenHealth()
  │   → extract fp(LIVE) = last 8 chars of accessToken
  │
  ├── For each account in accounts[]:
- │   └── Read Backup from "com.ccswitcher.tokens/<UUID>"
+ │   └── Read Backup from "com.pixelswitch.tokens/<UUID>"
  │       → extract fp(backup)
  │       → if missing: log WARNING "account has no stored token, switch will fail"
  │
@@ -515,7 +515,7 @@ diagnoseTokenHealth()
 ┌─────────────────────────────┐
 │      macOS Keychain         │
 │  Claude Code-credentials ───┼──► KeychainService (via `security` CLI)
-│  com.ccswitcher.tokens/* ───┼──► KeychainService (via `security` CLI)
+│  com.pixelswitch.tokens/* ───┼──► KeychainService (via `security` CLI)
 └─────────────────────────────┘
 
          All services feed into:
@@ -540,12 +540,12 @@ diagnoseTokenHealth()
 
 ## SwiftUI Settings Window Workaround for LSUIElement
 
-Because CCSwitcher is a pure menu bar application (`LSUIElement` = `true` in `Info.plist`), SwiftUI's native `Settings { ... }` scene and `SettingsLink` often fail to open or gain foreground focus. This happens because SwiftUI does not consider the application to have any active interactive scenes when only a `MenuBarExtra` is present.
+Because PixelSwitch is a pure menu bar application (`LSUIElement` = `true` in `Info.plist`), SwiftUI's native `Settings { ... }` scene and `SettingsLink` often fail to open or gain foreground focus. This happens because SwiftUI does not consider the application to have any active interactive scenes when only a `MenuBarExtra` is present.
 
-To circumvent this macOS limitation, CCSwitcher uses the **Lifecycle Keepalive** pattern:
+To circumvent this macOS limitation, PixelSwitch uses the **Lifecycle Keepalive** pattern:
 
-1. **Hidden Keepalive Window:** At startup, we declare a 1x1 pixel `WindowGroup("CCSwitcherKeepalive") { HiddenWindowView() }`.
+1. **Hidden Keepalive Window:** At startup, we declare a 1x1 pixel `WindowGroup("PixelSwitchKeepalive") { HiddenWindowView() }`.
 2. **True Invisibility:** The `HiddenWindowView` intercepts its own NSWindow on appearance and sets it to be `[.borderless]`, `alphaValue = 0`, positioned far off-screen (`x: -5000, y: -5000`), and configured to ignore all mouse events.
-3. **Triggering Settings:** `HiddenWindowView` listens for a custom `Notification.Name.ccswitcherOpenSettings` via Combine. When received, it invokes the native SwiftUI `@Environment(\.openSettings)` action.
+3. **Triggering Settings:** `HiddenWindowView` listens for a custom `Notification.Name.pixelswitchOpenSettings` via Combine. When received, it invokes the native SwiftUI `@Environment(\.openSettings)` action.
 4. **Invocation:** In `MainMenuView`, when the user clicks the Settings gear icon, we post this notification. The hidden window (which SwiftUI recognizes as a valid, active scene) catches it and smoothly opens the native Settings window with proper focus.
 

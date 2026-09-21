@@ -1,0 +1,183 @@
+/* Navigation - Tab Bar */
+"Usage" = "使用量";
+"Costs" = "コスト";
+"Accounts" = "アカウント";
+
+/* Main Menu */
+"Double Usage Active" = "ダブル使用量が有効";
+"No account connected" = "アカウント未接続";
+"Refresh" = "更新";
+"Settings" = "設定";
+"Quit" = "終了";
+
+/* Settings - General */
+"General" = "一般";
+"About" = "情報";
+"Appearance" = "外観";
+"System" = "システム";
+"Auto-refresh interval" = "自動更新間隔";
+"15 seconds" = "15 秒";
+"30 seconds" = "30 秒";
+"1 minute" = "1 分";
+"5 minutes" = "5 分";
+"10 minutes" = "10 分";
+"Show account name in menu bar" = "メニューバーにアカウント名を表示";
+"Show head icon in menu bar" = "メニューバーにヘッドアイコンを表示";
+"Show full email address" = "メールアドレスを完全に表示";
+"Launch at login" = "ログイン時に起動";
+
+/* Language */
+"Language" = "言語";
+"Automatic" = "自動";
+
+/* Settings - About */
+"Claude Code Account Switcher" = "Claude Code アカウント切り替えツール";
+"Version %@" = "バージョン %@";
+"Checking..." = "確認中...";
+"Check for Updates" = "アップデートを確認";
+"Switch Claude Code accounts from the menu bar in one click." = "メニューバーからワンクリックで Claude Code アカウントを切り替えます。";
+"Reads only recent usage history (24 hours by default), so it stays light on memory." = "最近の使用履歴だけを読み込むため（既定は 24 時間）、メモリをあまり使いません。";
+"Can switch for you before an account runs out." = "アカウントの上限に達する前に自動で切り替えることもできます。";
+"Based on CCSwitcher by Xueshi Qiao" = "Xueshi Qiao 氏の CCSwitcher をベースにしています";
+
+/* Usage Dashboard */
+"Loading usage data..." = "使用データを読み込み中...";
+"Usage data unavailable" = "使用データが利用不可";
+"Today's API-Equivalent Cost" = "本日の API 換算コスト";
+"Today's Activity" = "本日のアクティビティ";
+"Turns" = "ターン";
+"Active" = "アクティブ";
+"Lines" = "行数";
+"Messages you sent to Claude Code today" = "本日 Claude Code に送信したメッセージ数";
+"Estimated total time Claude worked for you today. Parallel sessions stack. Idle gaps >10 min excluded. This is an approximation based on message timestamps, not exact." = "本日 Claude があなたのために作業した推定合計時間。並列セッションは合算されます。10 分以上のアイドル時間は除外。メッセージのタイムスタンプに基づく概算値です。";
+"Estimated lines of code written by Claude via Edit/Write tools" = "Claude が Edit/Write ツールで書いた推定コード行数";
+"Claude Opus 4 — most capable model, best for complex tasks" = "Claude Opus 4 — 最も高性能なモデル、複雑なタスクに最適";
+"Claude Sonnet 4 — balanced speed and capability" = "Claude Sonnet 4 — 速度と能力のバランス";
+"Claude Haiku 4 — fastest model, best for simple tasks" = "Claude Haiku 4 — 最速モデル、シンプルなタスクに最適";
+"Estimated API-equivalent cost of your Claude Code usage, for reference only." = "Claude Code 使用量の API 換算コスト（参考値）。";
+"Token expired. Switch to this account in Claude Code to refresh." = "トークンが期限切れです。Claude Code でこのアカウントに切り替えて更新してください。";
+"Session" = "セッション";
+"Weekly" = "週間";
+"Extra usage" = "追加使用量";
+"On" = "オン";
+"Off" = "オフ";
+"Resets in %@" = "%@ 後にリセット";
+
+/* Cost Detail */
+"Today" = "今日";
+"Last 7 Days" = "過去 7 日間";
+"Last 30 Days" = "過去 30 日間";
+"Daily History" = "日別履歴";
+"Total: %@" = "合計：%@";
+"No cost data available" = "コストデータがありません";
+"How We Calculate" = "計算方法";
+"Cost is computed from Claude Code session logs (~/.claude/projects/), deduplicated by request ID." = "コストは Claude Code セッションログ（~/.claude/projects/）からリクエスト ID で重複排除して計算されます。";
+"Cache write = 5-min tier (1.25× base input). Cache read = 0.1× base input." = "キャッシュ書込 = 5 分枠（1.25× 基本入力）。キャッシュ読取 = 0.1× 基本入力。";
+"Official Pricing — platform.claude.com" = "公式料金 — platform.claude.com";
+"Model" = "モデル";
+"Input" = "入力";
+"Output" = "出力";
+"Cache W" = "キャッシュ書";
+"Cache R" = "キャッシュ読";
+"%lld sessions" = "%lld セッション";
+"%@ tokens" = "%@ トークン";
+
+/* Account Switcher */
+"No Accounts" = "アカウントなし";
+"Add your current Claude Code account to get started." = "現在の Claude Code アカウントを追加して開始します。";
+"Custom label" = "カスタムラベル";
+"Edit label" = "ラベルを編集";
+"Switch" = "切替";
+"Login New Account" = "新規アカウントでログイン";
+"Add Current Account" = "現在のアカウントを追加";
+"Waiting for browser login..." = "ブラウザでのログインを待機中...";
+"Complete the login in your browser, then return here." = "ブラウザでログインを完了し、ここに戻ってください。";
+"This will capture the currently logged-in Claude Code account." = "現在ログイン中の Claude Code アカウントを取り込みます。";
+"Cancel" = "キャンセル";
+"Add Account" = "アカウントを追加";
+"Re-authenticate (fix stale token)" = "再認証（期限切れトークンの修復）";
+"Remove account" = "アカウントを削除";
+
+/* Usage Chart */
+"No Data" = "データなし";
+"Usage data will appear here" = "使用データがここに表示されます";
+
+/* Update Checker */
+"A new version of PixelSwitch is available!" = "PixelSwitch の新しいバージョンが利用可能です！";
+"Version %@ is available. You are currently running version %@.\n\nWould you like to download it now?" = "バージョン %1$@ が利用可能です。現在のバージョンは %2$@ です。\n\n今すぐダウンロードしますか？";
+"Download & Install" = "ダウンロードしてインストール";
+"View Release" = "リリースを表示";
+"Later" = "あとで";
+"Update Check Failed" = "アップデート確認失敗";
+"Could not connect to GitHub. Please try again later." = "GitHub に接続できませんでした。後でもう一度お試しください。";
+"Rate Limit Exceeded" = "レート制限超過";
+"GitHub API rate limit exceeded. Please try again later." = "GitHub API のレート制限を超過しました。後でもう一度お試しください。";
+"Up to date" = "最新版です";
+"No releases found on GitHub." = "GitHub にリリースが見つかりません。";
+"GitHub API returned status code %lld." = "GitHub API がステータスコード %lld を返しました。";
+"You are running the latest version of PixelSwitch (%@)." = "PixelSwitch の最新バージョン（%@）を使用中です。";
+"Downloading PixelSwitch.dmg..." = "PixelSwitch.dmg をダウンロード中...";
+"Downloading Update" = "アップデートをダウンロード中";
+"Download Complete" = "ダウンロード完了";
+"The update has been downloaded and opened. Please drag the new PixelSwitch to your Applications folder to replace the old one.\n\nDo you want to quit the current app now?" = "アップデートがダウンロードされ開かれました。新しい PixelSwitch をアプリケーションフォルダにドラッグして古いバージョンと置き換えてください。\n\n現在のアプリを終了しますか？";
+"Quit PixelSwitch" = "PixelSwitch を終了";
+"Download Failed" = "ダウンロード失敗";
+"OK" = "OK";
+
+/* AppState Errors */
+"Claude CLI not found" = "Claude CLI が見つかりません";
+"Not logged in to Claude. Run 'claude auth login' first." = "Claude にログインしていません。先に 'claude auth login' を実行してください。";
+"Account already exists" = "アカウントは既に存在します";
+"Could not capture auth token from keychain" = "キーチェーンから認証トークンを取得できませんでした";
+"Login did not complete" = "ログインが完了しませんでした";
+"Account already exists - credentials refreshed" = "アカウントは既に存在します - 認証情報を更新しました";
+"Could not capture credentials" = "認証情報を取得できませんでした";
+"No stored credentials for %@. Use re-authenticate to fix." = "%@ の保存済み認証情報がありません。再認証で修復してください。";
+"Logged in as %@, but expected %@. Credentials not updated." = "%1$@ としてログインしましたが、%2$@ が期待されていました。認証情報は更新されません。";
+"Claude CLI is authenticating via %@ instead of a stored claude.ai login, so it reports no account. Unset ANTHROPIC_AUTH_TOKEN / CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_PROFILE and remove any apiKeyHelper, then try again." = "Claude CLI は保存された claude.ai ログインではなく %@ で認証しているため、アカウントを報告しません。ANTHROPIC_AUTH_TOKEN / CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_PROFILE を解除し、apiKeyHelper があれば削除してから、もう一度お試しください。";
+"Switched to %@, but the Claude CLI is authenticating via %@ instead of the stored login, so it will not use this account." = "%1$@ に切り替えましたが、Claude CLI は保存されたログインではなく %2$@ で認証しているため、このアカウントは使用されません。";
+"Token expired. Switch to refresh." = "トークンが期限切れです。切り替えて更新してください。";
+"Token expired. Switch to this account to refresh." = "トークンが期限切れです。このアカウントに切り替えて更新してください。";
+"API Rate Limited. Try again later." = "API レート制限中。後でもう一度お試しください。";
+"Could not fetch usage: %@" = "使用量を取得できませんでした：%@";
+
+/* Promo */
+"%@ - %@ (Weekdays) & Weekends" = "%1$@ - %2$@（平日）& 週末";
+"Double limits: 2 PM - 8 AM ET & Weekends" = "ダブル制限：米国東部時間 午後 2 時〜午前 8 時 & 週末";
+
+/* Menu Bar */
+"Menu bar" = "メニューバー";
+"Menu bar modules" = "メニューバー モジュール";
+"Drag to reorder, toggle to enable. Disabled modules sit at the bottom." = "ドラッグで並び替え、トグルで有効化。無効モジュールは下に表示されます。";
+"Preview" = "プレビュー";
+"Customize limit bar colors" = "制限バーの色をカスタマイズ";
+"Warns when this much quota or less is left. At 30%, bars turn at 70% used." = "残量がこの割合以下になると警告色に変わります。30% なら使用率 70% で変色します。";
+"Limit bars" = "制限バー";
+"Session bar color" = "セッションバーの色";
+"Weekly bar color" = "週間バーの色";
+"Low remaining color" = "残量低下時の色";
+"Low remaining threshold" = "残量低下しきい値";
+"Account name" = "アカウント名";
+"Session usage (5h)" = "セッション使用量（5時間）";
+"Weekly usage (7d)" = "週間使用量（7日）";
+"Daily cost" = "本日の料金";
+"Session reset countdown" = "セッション リセット カウントダウン";
+"Weekly reset countdown" = "週間 リセット カウントダウン";
+"Menu Bar" = "メニューバー";
+"Account display" = "アカウント表示";
+"Session — usage vs time (5h)" = "セッション — 使用量 vs 時間（5時間）";
+"Weekly — usage vs time (7d)" = "週間 — 使用量 vs 時間（7日）";
+"The vertical line marks time elapsed in the window; fill past it means you're using faster than the clock." = "縦線 = 経過時間（その時間枠の進捗）。塗りつぶしがこれを超える = 時間より速く消費しています。";
+"Claude Fable 5 — most powerful model, the new flagship tier" = "Claude Fable 5 — 最も強力なモデル、新しいフラッグシップ層";
+
+/* Auto-switch & rate-limit resilience */
+"Waiting for usage data..." = "使用データを待っています...";
+"No active subscription on this account (OAuth not allowed)." = "このアカウントに有効なサブスクリプションがありません（OAuth は許可されていません）。";
+"Session expired. Re-authenticate (↻) to fix." = "セッションの期限が切れました。再認証（↻）で修復してください。";
+"Auto-switch" = "自動切り替え";
+"Switch account before hitting the limit" = "上限に達する前にアカウントを切り替える";
+"Switch at" = "切り替えしきい値";
+"When the active account's 5-hour or weekly usage reaches this level, PixelSwitch switches to the account with the most quota left. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping." = "アクティブなアカウントの 5 時間または週間使用量がこのレベルに達すると、PixelSwitch は残りクォータが最も多いアカウントに切り替えます。更新のたびにチェックされ、5 分間のクールダウンで頻繁な切り替えを防ぎます。";
+"Updated %@ ago" = "%@前に更新";
+"Could not save the refreshed sign-in; will retry automatically." = "更新されたログイン情報を保存できませんでした。自動的に再試行します。";
+"Credential storage is temporarily unavailable. Try again shortly." = "認証情報ストレージは一時的に利用できません。しばらくしてからもう一度お試しください。";

@@ -1,7 +1,7 @@
-# CCSwitcher - macOS Menubar App Build Guide
+# PixelSwitch - macOS Menubar App Build Guide
 
 A step-by-step guide to building a native macOS menubar app with SwiftUI + AppKit.
-This documents how CCSwitcher was created from scratch for future reference.
+This documents how PixelSwitch was created from scratch for future reference.
 
 ---
 
@@ -20,11 +20,11 @@ brew install xcodegen
 ## 2. Project Structure
 
 ```
-CCSwitcher/
+PixelSwitch/
 ├── project.yml                    # XcodeGen project spec
-├── CCSwitcher.xcodeproj/          # Generated Xcode project
-├── CCSwitcher/
-│   ├── CCSwitcherApp.swift        # @main App entry point with MenuBarExtra
+├── PixelSwitch.xcodeproj/          # Generated Xcode project
+├── PixelSwitch/
+│   ├── PixelSwitchApp.swift        # @main App entry point with MenuBarExtra
 │   ├── AppState.swift             # Central ObservableObject state manager
 │   ├── Info.plist                 # App config (LSUIElement for menubar-only)
 │   ├── Models/
@@ -42,7 +42,7 @@ CCSwitcher/
 │   │   └── StatsParser.swift      # Parse ~/.claude/stats-cache.json
 │   └── Resources/
 │       ├── Assets.xcassets/       # App icon + accent color
-│       └── CCSwitcher.entitlements
+│       └── PixelSwitch.entitlements
 └── BUILD_GUIDE.md                 # This file
 ```
 
@@ -66,7 +66,7 @@ SwiftUI's `MenuBarExtra` scene creates a native menubar item. Use `.menuBarExtra
 
 ```swift
 @main
-struct CCSwitcherApp: App {
+struct PixelSwitchApp: App {
     var body: some Scene {
         MenuBarExtra {
             ContentView()
@@ -219,10 +219,10 @@ Generate with: `xcodegen generate`
 xcodegen generate
 
 # Build
-xcodebuild -project CCSwitcher.xcodeproj -scheme CCSwitcher -configuration Debug build
+xcodebuild -project PixelSwitch.xcodeproj -scheme PixelSwitch -configuration Debug build
 
 # Find the built app
-find ~/Library/Developer/Xcode/DerivedData -name "CCSwitcher.app" -type d 2>/dev/null | head -1
+find ~/Library/Developer/Xcode/DerivedData -name "PixelSwitch.app" -type d 2>/dev/null | head -1
 ```
 
 ---

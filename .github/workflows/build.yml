@@ -71,8 +71,8 @@ jobs:
 
       - name: Build Universal App (arm64 + x86_64)
         run: |
-          xcodebuild -project CCSwitcher.xcodeproj \
-            -scheme CCSwitcher \
+          xcodebuild -project PixelSwitch.xcodeproj \
+            -scheme PixelSwitch \
             -configuration Release \
             ARCHS="arm64 x86_64" \
             ONLY_ACTIVE_ARCH=NO \
@@ -93,7 +93,7 @@ jobs:
           # explicit list below matches Sparkle's own distribution recipe.
           # `--preserve-metadata=entitlements` keeps each helper's bundled
           # entitlements (we must not clobber Sparkle's installer entitlements).
-          APP=build/Release/CCSwitcher.app
+          APP=build/Release/PixelSwitch.app
           IDENTITY="Developer ID Application"
           SPARKLE_V="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 
@@ -112,16 +112,33 @@ jobs:
           done
 
           # Widget extension with its own entitlements file
+          # The entitlements files carry $(TeamIdentifierPrefix), which Xcode
+          # expands at signing time but raw codesign does not.
+          ENT_DIR=$(mktemp -d)
+          sed "s/\$(TeamIdentifierPrefix)/${{ secrets.APPLE_TEAM_ID }}./" PixelSwitchWidget/Resources/PixelSwitchWidget.entitlements > "$ENT_DIR/widget.entitlements"
+          sed "s/\$(TeamIdentifierPrefix)/${{ secrets.APPLE_TEAM_ID }}./" PixelSwitch/Resources/PixelSwitch.entitlements > "$ENT_DIR/app.entitlements"
+
           codesign --force --options runtime --sign "$IDENTITY" --timestamp \
-            --entitlements CCSwitcherWidget/Resources/CCSwitcherWidget.entitlements \
-            "$APP/Contents/Extensions/CCSwitcherWidgetExtension.appex"
+            --entitlements "$ENT_DIR/widget.entitlements" \
+            "$APP/Contents/Extensions/PixelSwitchWidgetExtension.appex"
 
           # Main app
           codesign --force --options runtime --sign "$IDENTITY" --timestamp \
-            --entitlements CCSwitcher/Resources/CCSwitcher.entitlements \
+            --entitlements "$ENT_DIR/app.entitlements" \
             "$APP"
 
           # Verify everything is correctly sealed for notarization
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Ad-hoc Sign App (no Developer ID)
+        if: ${{ env.HAS_APPLE_SECRETS != 'true' }}
+        run: |
+          # No Apple Developer ID yet, so seal the bundle with an ad-hoc
+          # signature (inside-out: Sparkle's helpers, the widget, the app).
+          # No entitlements: an ad-hoc build must not claim an App Group, and
+          # the app skips the group container when it has none (WidgetData).
+          APP=build/Release/PixelSwitch.app
+          codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
 
       - name: Create DMG
@@ -129,21 +146,21 @@ jobs:
           cd build/Release
           # Create DMG
           create-dmg \
-            --volname "CCSwitcher" \
+            --volname "PixelSwitch" \
             --window-pos 200 120 \
             --window-size 600 400 \
             --icon-size 100 \
-            --icon "CCSwitcher.app" 150 190 \
-            --hide-extension "CCSwitcher.app" \
+            --icon "PixelSwitch.app" 150 190 \
+            --hide-extension "PixelSwitch.app" \
             --app-drop-link 450 190 \
-            "CCSwitcher.dmg" \
-            "CCSwitcher.app"
+            "PixelSwitch.dmg" \
+            "PixelSwitch.app"
 
       - name: Sign DMG
         if: ${{ env.HAS_APPLE_SECRETS == 'true' }}
         run: |
           cd build/Release
-          codesign --force --sign "Developer ID Application" --timestamp CCSwitcher.dmg
+          codesign --force --sign "Developer ID Application" --timestamp PixelSwitch.dmg
 
       - name: Notarize DMG
         if: ${{ env.HAS_APPLE_SECRETS == 'true' }}
@@ -153,7 +170,7 @@ jobs:
           APP_SPECIFIC_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}
         run: |
           cd build/Release
-          xcrun notarytool submit CCSwitcher.dmg \
+          xcrun notarytool submit PixelSwitch.dmg \
             --apple-id "$APPLE_ID" \
             --team-id "$TEAM_ID" \
             --password "$APP_SPECIFIC_PASSWORD" \
@@ -163,7 +180,7 @@ jobs:
         if: ${{ env.HAS_APPLE_SECRETS == 'true' }}
         run: |
           cd build/Release
-          xcrun stapler staple CCSwitcher.dmg
+          xcrun stapler staple PixelSwitch.dmg
 
       - name: Download Sparkle tools
         if: ${{ env.HAS_SPARKLE_KEY == 'true' && startsWith(github.ref, 'refs/tags/v') }}
@@ -245,7 +262,7 @@ jobs:
 
           # Capture both stdout and stderr so any sign_update failure surfaces
           # in the action log instead of being swallowed by $() substitution.
-          if ! SIGN_OUTPUT=$("$RUNNER_TEMP/sparkle/bin/sign_update" CCSwitcher.dmg -f "$KEY_FILE" 2>&1); then
+          if ! SIGN_OUTPUT=$("$RUNNER_TEMP/sparkle/bin/sign_update" PixelSwitch.dmg -f "$KEY_FILE" 2>&1); then
             echo "ERROR: sign_update exited non-zero. Output:"
             echo "$SIGN_OUTPUT"
             rm -f "$KEY_FILE"
@@ -268,8 +285,8 @@ jobs:
             echo "ERROR: failed to parse CURRENT_PROJECT_VERSION from project.yml"
             exit 1
           fi
-          FILE_LENGTH=$(stat -f%z CCSwitcher.dmg)
-          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/CCSwitcher.dmg"
+          FILE_LENGTH=$(stat -f%z PixelSwitch.dmg)
+          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/PixelSwitch.dmg"
           PUB_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
 
           # Read the rendered notes (Prepare release notes step). Build the
@@ -283,7 +300,7 @@ jobs:
             echo '<?xml version="1.0" encoding="utf-8"?>'
             echo '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
             echo '  <channel>'
-            echo '    <title>CCSwitcher Updates</title>'
+            echo '    <title>PixelSwitch Updates</title>'
             echo "    <link>https://github.com/${GITHUB_REPOSITORY}/releases.atom</link>"
             echo '    <item>'
             echo "      <title>Version ${VERSION}</title>"
@@ -307,15 +324,15 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CCSwitcher-macOS
-          path: build/Release/CCSwitcher.dmg
+          name: PixelSwitch-macOS
+          path: build/Release/PixelSwitch.dmg
 
       - name: Generate latest.json
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/CCSwitcher.dmg"
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/PixelSwitch.dmg"
 
           cat > build/Release/latest.json <<EOF
           {
@@ -344,17 +361,8 @@ jobs:
           # fail the release if it (or any listed file) is absent.
           fail_on_unmatched_files: false
           files: |
-            build/Release/CCSwitcher.dmg
+            build/Release/PixelSwitch.dmg
             build/Release/latest.json
             build/Release/appcast.xml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Trigger Homebrew Tap Update
-        if: startsWith(github.ref, 'refs/tags/v') && success()
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.HOMEBREW_TAP_PAT }}
-          repository: XueshiQiao/homebrew_tap
-          event-type: update_cask
-          client-payload: '{"app_token": "ccswitcher"}'

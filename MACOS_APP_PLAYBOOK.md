@@ -1,6 +1,6 @@
 # The Universal Modern macOS App Playbook
 
-This document is a comprehensive master guide for bootstrapping, architecting, and deploying modern native macOS applications. Extracted from best practices and production-ready deployments (like CCSwitcher), it serves as a universal blueprint for both lightweight Menubar utilities and full-featured desktop applications.
+This document is a comprehensive master guide for bootstrapping, architecting, and deploying modern native macOS applications. Extracted from best practices and production-ready deployments (like PixelSwitch), it serves as a universal blueprint for both lightweight Menubar utilities and full-featured desktop applications.
 
 ---
 
@@ -40,7 +40,7 @@ Modern macOS apps should default to SwiftUI for the UI layer, dipping into `AppK
 
 ## 3. Sandboxing & Entitlements
 
-Security configurations fundamentally alter what your app can do. You must define this early in `CCSwitcher.entitlements` and reference it in `project.yml`.
+Security configurations fundamentally alter what your app can do. You must define this early in `PixelSwitch.entitlements` and reference it in `project.yml`.
 
 - **App Sandbox (`com.apple.security.app-sandbox`)**: 
   - **Mac App Store (MAS)**: Mandatory. You *must* sandbox your app.
