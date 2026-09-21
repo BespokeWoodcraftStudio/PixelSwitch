@@ -126,6 +126,11 @@ git tag "$TAG"
 git push origin main
 git push origin "$TAG"
 
+# This repository is a GitHub fork, and GitHub does not start workflows from
+# pushes on it (observed 2026-09-21: neither the main push nor the v1.0 tag
+# push triggered a run). Start the release build on the tag explicitly.
+gh workflow run build.yml --ref "$TAG"
+
 echo ""
 echo "Released ${TAG} (build ${NEW_BUILD})"
-echo "GitHub Actions will build, notarize, and publish the release."
+echo "GitHub Actions will build and publish the release. Watch it with: gh run list -L 1"
