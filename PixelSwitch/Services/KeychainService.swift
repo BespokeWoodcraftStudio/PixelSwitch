@@ -414,7 +414,7 @@ final class KeychainService: Sendable {
                 log.error("[loadBackupStore] Copy to the new keychain item failed; leaving the legacy item as the source of truth")
                 return .failed("could not copy the legacy keychain item")
             }
-            log.info("[loadBackupStore] Copy complete. The legacy item is deliberately left in place.")
+            retireLegacyBackupItem(expecting: dict)
             return .loaded(dict)
         case .failed(let reason):
             // The old item MAY hold every credential the user has. Treating an
@@ -469,6 +469,44 @@ final class KeychainService: Sendable {
 
         log.debug("[loadBackupStore] No existing backups")
         return .empty
+    }
+
+    /// Deletes the old keychain item, but only once the new one has been read
+    /// back and proven to hold the same accounts.
+    ///
+    /// Leaving it behind was the original plan, as a way back to an older build.
+    /// Two things changed that. It is a **second copy of every account's OAuth
+    /// token**, sitting in the keychain forever with nothing maintaining it,
+    /// which is a liability rather than a safety net. And an older build that
+    /// found it would carry on writing to it, so the two stores would drift
+    /// apart and whichever build ran last would look wrong.
+    ///
+    /// The read-back is the whole safeguard: nothing is deleted until the new
+    /// item has been fetched fresh from the keychain and holds exactly the same
+    /// account ids. If that check does not pass, the old item stays and the app
+    /// simply keeps working from it.
+    ///
+    /// Must be called with `storeLock` held.
+    private func retireLegacyBackupItem(expecting migrated: [String: AccountBackup]) {
+        guard case .loaded(let readBack) = readBackupItem(service: appBackupService),
+              readBack.count == migrated.count,
+              Set(readBack.keys) == Set(migrated.keys)
+        else {
+            log.error("[retireLegacyBackupItem] New item did not read back with the same \(migrated.count) accounts; keeping the legacy item")
+            return
+        }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: legacyBackupService,
+            kSecAttrAccount as String: appBackupAccount
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        if status == errSecSuccess || status == errSecItemNotFound {
+            log.info("[retireLegacyBackupItem] Verified \(readBack.count) accounts in \(appBackupService); legacy item removed")
+        } else {
+            log.error("[retireLegacyBackupItem] Verified the copy but could not remove the legacy item, OSStatus: \(status)")
+        }
     }
 
     /// Must be called with `storeLock` held.

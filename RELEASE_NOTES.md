@@ -1,30 +1,25 @@
-## PixelSwitch 1.0.12
+## PixelSwitch 1.0.13
 
 ### Changed
 
-- **PixelSwitch's own name on its own keychain item.** The item holding every saved account was still called `me.xueshi.ccswitcher.backups`, the identifier of the app this one was forked from, so macOS put another app's name in front of you every time it asked permission to use *your* accounts. It is now `ai.pixelventures.pixelswitch.backups`.
-- **The stray folder is gone.** The app created `~/.ccswitcher` in your home directory on every launch and almost always left it empty. It now uses `~/.pixelswitch`, and removes the old folder if, and only if, nothing is inside it.
-- **The account list moved to PixelSwitch's own preference key.**
+- **PixelSwitch now cleans up after itself.** 1.0.12 moved your accounts onto PixelSwitch's own keychain item and preference key, and deliberately left the old ones behind as a way back to an earlier build. This release removes them, once and only once the new ones have been read back and proven to hold exactly the same accounts.
 
-**Nothing is lost, and this is reversible.** Each old name is still read, and never written to or deleted. On the first launch after updating, PixelSwitch finds your accounts under the old names and copies them across; if a read fails for any reason, it refuses rather than starting from an empty store. Roll back to an older build and it finds every account exactly where it left them.
+Three reasons it is better this way. The old keychain item was a **second copy of every account's OAuth token**, sitting there indefinitely with nothing maintaining it. An older build that found it would carry on writing to it, so the two stores would drift apart and whichever build ran last would look wrong. And it kept another app's name in your keychain, which is what it was called.
 
-**macOS will ask once more** whether PixelSwitch may use its saved account credentials, because the item it is asking about is genuinely a new one. Click **Always Allow**. This is the last time the dialog will name anything other than PixelSwitch.
+Removed on first launch, after verification: the old keychain item, the old accounts preference key, the stale migration flag, and the empty `~/.ccswitcher` folder. **If the read-back does not match, nothing is deleted** and the app carries on exactly as before.
 
-### Removed
+### If you are updating from an older build
 
-- 564 lines of a superseded parse cache that had no callers left.
-- The comparisons to the project this was forked from, throughout the README. The credit remains, in Credits, where it belongs.
+Everything happens by itself. Your accounts move across, get verified, and the old copies are cleared. macOS asks once whether PixelSwitch may use its saved credentials, because the item it is asking about is a new one: click **Always Allow**.
 
-### Added
+Updating through **Check for Updates** works and has been tested end to end on an unsigned build, from 1.0.9 to the current release.
 
-- **[NOTICE.md](NOTICE.md), which states the licensing position honestly.** PixelSwitch has no license and cannot offer one: the upstream project publishes no license, and most of this code is still other people's. The file gives the measured line counts, names everyone with a copyright interest, and says plainly what would have to change. A repository with no `LICENSE` usually just looks careless; this one now explains itself.
+#### Included from 1.0.12 to 1.0.2
 
-#### Included from 1.0.11 to 1.0.2
-
-- Whole email addresses, with masking as an opt-in; limit rows in plain readable text; the account you are signed in to ringed in orange; the PixelSwitch mark beside every account; a colour per account; a switch for Fable auto-switching; honest cost totals; auto-switch covering the weekly Fable allowance; MCP logins that survive a switch; a switch that cannot mix up two accounts.
+- PixelSwitch's own keychain item, home folder and preference key; whole email addresses, with masking as an opt-in; limit rows in plain readable text; the account you are signed in to ringed in orange; the PixelSwitch mark beside every account; a colour per account; a switch for Fable auto-switching; honest cost totals; auto-switch covering the weekly Fable allowance; MCP logins that survive a switch; a switch that cannot mix up two accounts; and [NOTICE.md](NOTICE.md), which states the licensing position honestly.
 
 ### Good to know
 
-- This build is not signed with an Apple Developer ID yet. The first time you open it, clear the download flag with `xattr -dr com.apple.quarantine /Applications/PixelSwitch.app`, or use System Settings → Privacy & Security → Open Anyway.
+- This build is not signed with an Apple Developer ID yet. On a fresh install, clear the download flag with `xattr -dr com.apple.quarantine /Applications/PixelSwitch.app`, or use System Settings → Privacy & Security → Open Anyway. Updating in place through Check for Updates does not need this.
 
-**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.0.11...v1.0.12
+**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.0.12...v1.0.13

@@ -536,5 +536,51 @@ do {
           "rename: the keychain service name is PixelSwitch's own")
 }
 
+// MARK: - Retiring the old keychain item
+//
+// 1.0.12 kept the old item as a way back to an earlier build. 1.0.13 removes it
+// once the copy is proven, because a second copy of every account's OAuth token
+// living in the keychain forever is a liability, and because an older build that
+// found it would keep writing to it and the two stores would drift apart.
+//
+// The read-back is the entire safeguard. These pin when it is allowed to fire.
+do {
+    // Mirrors KeychainService.retireLegacyBackupItem's precondition.
+    func mayRetire(migrated: [String], readBack: [String]?) -> Bool {
+        guard let readBack else { return false }          // new item unreadable
+        return readBack.count == migrated.count && Set(readBack) == Set(migrated)
+    }
+
+    let five = ["a", "b", "c", "d", "e"]
+    check(mayRetire(migrated: five, readBack: five),
+          "retire: the old item goes only when the new one reads back with the same accounts")
+    check(!mayRetire(migrated: five, readBack: nil),
+          "retire: an unreadable new item keeps the old one")
+    check(!mayRetire(migrated: five, readBack: ["a", "b", "c"]),
+          "retire: a short read-back keeps the old one")
+    check(!mayRetire(migrated: five, readBack: ["a", "b", "c", "d", "z"]),
+          "retire: a read-back with a different account keeps the old one")
+    check(!mayRetire(migrated: five, readBack: []),
+          "retire: an empty read-back keeps the old one")
+    check(mayRetire(migrated: [], readBack: []),
+          "retire: nothing to migrate is not an error")
+
+    // The preference key follows the same rule: write, read back, only then clear.
+    let defaults = UserDefaults.standard
+    let newKey = "ai.pixelventures.pixelswitch.accounts.retiretest"
+    let oldKey = "com.ccswitcher.accounts.retiretest"
+    defer { defaults.removeObject(forKey: newKey); defaults.removeObject(forKey: oldKey) }
+
+    defaults.set(Data("accounts".utf8), forKey: oldKey)
+    defaults.removeObject(forKey: newKey)
+    // migrate
+    if let carried = defaults.data(forKey: oldKey) {
+        defaults.set(carried, forKey: newKey)
+        if defaults.data(forKey: newKey) != nil { defaults.removeObject(forKey: oldKey) }
+    }
+    check(defaults.data(forKey: newKey) != nil, "retire: accounts land under the current key")
+    check(defaults.data(forKey: oldKey) == nil, "retire: the legacy key is cleared once the read-back succeeds")
+}
+
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

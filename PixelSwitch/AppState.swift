@@ -1336,8 +1336,18 @@ final class AppState: ObservableObject {
         activeAccount = accounts.first(where: \.isActive)
         log.info("[loadAccounts] Loaded \(decoded.count) accounts\(cameFromLegacyKey ? " from the legacy key" : "")")
         // Write them under the current key straight away, so the fallback is
-        // needed exactly once rather than on every launch.
-        if cameFromLegacyKey { saveAccounts() }
+        // needed exactly once rather than on every launch, then clear the old
+        // key. Read it back first: nothing is removed until the accounts are
+        // provably readable from where they now live.
+        if cameFromLegacyKey {
+            saveAccounts()
+            if UserDefaults.standard.data(forKey: accountsKey) != nil {
+                UserDefaults.standard.removeObject(forKey: legacyAccountsKey)
+                log.info("[loadAccounts] Accounts verified under the current key; legacy key removed")
+            } else {
+                log.error("[loadAccounts] Could not read accounts back under the current key; keeping the legacy key")
+            }
+        }
     }
 
     private func saveAccounts(refreshWidget: Bool = false) {

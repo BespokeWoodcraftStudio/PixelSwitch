@@ -49,5 +49,9 @@ enum LegacyMigration {
             copied.append(key)
         }
         log.info("Copied \(copied.count) settings from \(legacyDomain): \(copied.sorted().joined(separator: ", "))")
+
+        // The flag PixelSwitch used before this key was renamed. It is dead
+        // weight now, and it names the app this one was forked from, so it goes.
+        defaults.removeObject(forKey: "migratedFromCCSwitcher")
     }
 }
