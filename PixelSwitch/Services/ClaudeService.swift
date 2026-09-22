@@ -608,6 +608,16 @@ final class ClaudeService: @unchecked Sendable {
                 log.error("[capture] REFUSED: ~/.claude.json names \(fileEmail ?? "nobody"), not \(account.email)")
                 return false
             }
+            // Without the API there is no proof whose login this is, and running
+            // sessions can leave the wrong account in ~/.claude.json. So never let
+            // it replace a DIFFERENT login already saved for this account.
+            if let existing = keychain.getAccountBackup(forAccountId: account.id.uuidString),
+               let existingLogin = CredentialOwnership.login(fromCredential: existing.token),
+               let liveLogin = CredentialOwnership.login(fromCredential: token),
+               !CredentialOwnership.sameGrant(existingLogin, liveLogin) {
+                log.error("[capture] REFUSED: without the API's confirmation, not replacing \(account.email)'s saved login with a different one")
+                return false
+            }
         }
         log.info("[capture] Login and identity confirmed for \(account.email); saving backup...")
         let result = keychain.saveAccountBackup(token: token, oauthAccount: oauthAccount, forAccountId: account.id.uuidString)

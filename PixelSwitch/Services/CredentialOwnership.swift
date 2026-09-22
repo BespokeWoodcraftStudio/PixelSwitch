@@ -74,6 +74,10 @@ extension CredentialOwnership {
     /// and `emailAddress`) describe the proven owner of a token. The permanent
     /// id decides when both sides have one; otherwise the email does. Missing
     /// information on both sides is never a match.
+    ///
+    /// Verified 2026-09-22 on the founder's Mac: `/api/oauth/profile`'s
+    /// `account.uuid` equals `oauthAccount.accountUuid` in ~/.claude.json for
+    /// the same account (1e4226c6-…), so the two ids are comparable.
     static func detailsBelong(uuid: String?, email: String?, toOwnerUuid ownerUuid: String?, ownerEmail: String?) -> Bool {
         if let uuid, let ownerUuid { return uuid == ownerUuid }
         if let email, let ownerEmail { return email.caseInsensitiveCompare(ownerEmail) == .orderedSame }
