@@ -47,7 +47,7 @@ struct AnyCodable: Codable, Equatable {
 }
 
 /// Manages token + identity storage:
-/// - Claude CLI's token: read/write via `security` CLI (keychain).
+/// - Claude CLI's token: read via `security` CLI, written by `ClaudeTokenWriter` (keychain).
 /// - Claude CLI's identity: read/write oauthAccount in ~/.claude.json.
 /// - Our backups: per-account {token, oauthAccount} in ~/.ccswitcher/backups.json.
 final class KeychainService: Sendable {
@@ -109,19 +109,46 @@ final class KeychainService: Sendable {
         }
     }
 
+    /// Writes Claude Code's credential and confirms the stored bytes match.
+    /// See `ClaudeTokenWriter` for how the secret reaches `/usr/bin/security`.
     func writeClaudeToken(_ token: String) -> Bool {
-        // Delete then add (security CLI doesn't have a pure "update" for generic passwords)
-        _ = runSecurityStatus(args: ["delete-generic-password", "-s", claudeService, "-a", claudeAccount])
+        let writer = ClaudeTokenWriter(
+            service: claudeService,
+            account: claudeAccount,
+            run: { [self] invocation in runSecurity(invocation) },
+            readBack: { [self] in readClaudeTokenExact() }
+        )
+        let bytes = token.utf8.count
+        switch writer.write(token) {
+        case .written(let path, let transport):
+            if path == .deleteAndAdd {
+                log.warning("[writeClaudeToken] Update in place did not read back; fell back to delete and add")
+            }
+            if transport == .argv {
+                log.warning("[writeClaudeToken] Credential is \(bytes) bytes, too long for security -i; passed as hex on the command line (the Claude CLI does the same)")
+            }
+            log.info("[writeClaudeToken] Written by \(path.rawValue), \(transport.rawValue); read back and matched (\(bytes) bytes)")
+            return true
+        case .failed(let reason):
+            log.error("[writeClaudeToken] Failed: \(reason)")
+            return false
+        }
+    }
 
-        let added = runSecurityStatus(args: [
-            "add-generic-password",
-            "-s", claudeService,
-            "-a", claudeAccount,
-            "-w", token,
-            "-U"
-        ])
-        log.info("[writeClaudeToken] Result: \(added)")
-        return added
+    /// Bumps the modification date of Claude Code's plaintext credential file,
+    /// if it exists, so running sessions re-read the Keychain on their next
+    /// request (see `ClaudeCredentialsFile`). Never fails the switch.
+    func touchClaudeCredentialsFile() {
+        let home = NSHomeDirectory()
+        let shortPath = { (path: String) in path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path }
+        switch ClaudeCredentialsFile.touch() {
+        case .bumped(let path):
+            log.info("[touchCredentialsFile] bumped mtime of \(shortPath(path))")
+        case .absent(let path):
+            log.info("[touchCredentialsFile] \(shortPath(path)) absent, nothing to do")
+        case .failed(let path, let reason):
+            log.warning("[touchCredentialsFile] could not bump mtime of \(shortPath(path)): \(reason)")
+        }
     }
 
     // MARK: - ~/.claude.json oauthAccount Operations
@@ -405,23 +432,54 @@ final class KeychainService: Sendable {
         }
     }
 
-    private func runSecurityStatus(args: [String]) -> Bool {
+    /// Runs `/usr/bin/security` with a prepared invocation, feeding its stdin
+    /// when there is one, and returns the exit status (-1 if it did not start).
+    private func runSecurity(_ invocation: ClaudeTokenWriter.Invocation) -> Int32 {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = args
+        process.arguments = invocation.arguments
         process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let input = Pipe()
+        process.standardInput = invocation.stdin == nil ? FileHandle.nullDevice : input
+        do {
+            try process.run()
+            if let data = invocation.stdin {
+                try input.fileHandleForWriting.write(contentsOf: data)
+                try input.fileHandleForWriting.close()
+            }
+            process.waitUntilExit()
+            if process.terminationStatus != 0 {
+                log.debug("[runSecurity] Exit \(process.terminationStatus) for: security \(invocation.arguments.first ?? "")")
+            }
+            return process.terminationStatus
+        } catch {
+            log.error("[runSecurity] Failed: \(error.localizedDescription)")
+            return -1
+        }
+    }
+
+    /// Claude Code's secret exactly as stored, with only `security`'s trailing
+    /// newline removed, for a byte comparison after a write. Reads the pipe
+    /// before waiting so a 10 KB credential cannot fill it and stall.
+    private func readClaudeTokenExact() -> String? {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", claudeService, "-a", claudeAccount, "-w"]
+        process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         do {
             try process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
-            let ok = process.terminationStatus == 0
-            if !ok {
-                log.debug("[runSecurityStatus] Exit \(process.terminationStatus) for: security \(args.prefix(3).joined(separator: " "))...")
-            }
-            return ok
+            guard process.terminationStatus == 0 else { return nil }
+            var value = String(decoding: data, as: UTF8.self)
+            if value.hasSuffix("\n") { value.removeLast() }
+            return value
         } catch {
-            log.error("[runSecurityStatus] Launch failed: \(error.localizedDescription)")
-            return false
+            log.error("[readClaudeTokenExact] Launch failed: \(error.localizedDescription)")
+            return nil
         }
     }
 }

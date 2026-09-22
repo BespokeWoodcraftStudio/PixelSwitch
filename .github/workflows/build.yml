@@ -38,6 +38,9 @@ jobs:
           # SDK-skew SwiftUI compat shims on newer host OS versions.
           xcode-version: 'latest-stable'
 
+      - name: Unit Tests (credential writing)
+        run: bash Tests/run-unit-tests.sh
+
       - name: Install Build Tools
         run: brew install xcodegen create-dmg
 

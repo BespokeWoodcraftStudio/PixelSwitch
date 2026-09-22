@@ -426,6 +426,10 @@ final class ClaudeService: @unchecked Sendable {
             throw ClaudeServiceError.oauthAccountWriteFailed
         }
         log.info("[switchAccount] Step 3: Both token and oauthAccount written")
+        // Running Claude Code sessions only re-read the Keychain when this
+        // file's mtime changes (or it is absent); without this they keep
+        // billing the old account for hours.
+        keychain.touchClaudeCredentialsFile()
 
         // 4. Verify
         log.info("[switchAccount] Step 4: Verifying with `claude auth status`...")
