@@ -68,3 +68,15 @@ enum CredentialOwnership {
     }
 }
 
+
+extension CredentialOwnership {
+    /// Whether saved account details (an `oauthAccount` block's `accountUuid`
+    /// and `emailAddress`) describe the proven owner of a token. The permanent
+    /// id decides when both sides have one; otherwise the email does. Missing
+    /// information on both sides is never a match.
+    static func detailsBelong(uuid: String?, email: String?, toOwnerUuid ownerUuid: String?, ownerEmail: String?) -> Bool {
+        if let uuid, let ownerUuid { return uuid == ownerUuid }
+        if let email, let ownerEmail { return email.caseInsensitiveCompare(ownerEmail) == .orderedSame }
+        return false
+    }
+}

@@ -437,7 +437,7 @@ final class ClaudeService: @unchecked Sendable {
     /// was about. Nothing is backed up unless both are known and the Keychain
     /// still holds that same login: saving an unproven login under an account
     /// is how one account's backup came to hold another's token.
-    func switchAccount(liveOwner: Account?, verifiedLiveCredential: String?, to targetAccount: Account, targetBackup: AccountBackup) async throws -> SwitchOutcome {
+    func switchAccount(liveOwner: Account?, liveOwnerIdentity: AccountIdentity?, verifiedLiveCredential: String?, to targetAccount: Account, targetBackup: AccountBackup) async throws -> SwitchOutcome {
         let keychain = KeychainService.shared
 
         log.info("[switchAccount] Switching to \(targetAccount.id); live login belongs to \(liveOwner?.id.uuidString ?? "an unproven account")")
@@ -445,23 +445,35 @@ final class ClaudeService: @unchecked Sendable {
         // 1. Back up the live login under the account it belongs to.
         log.info("[switchAccount] Step 1: Backing up the live login...")
         let freshCredential = keychain.readClaudeToken()
-        let stillTheCheckedLogin: Bool = {
-            guard let verified = verifiedLiveCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }),
-                  let fresh = freshCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }) else { return false }
-            return CredentialOwnership.sameGrant(verified, fresh)
-        }()
-        if let owner = liveOwner, let liveToken = freshCredential, stillTheCheckedLogin {
-            // Take the identity from ~/.claude.json only if it names the same
-            // account; running sessions can leave another account's there.
+        var provenFresh = false
+        if let owner = liveOwner,
+           let verified = verifiedLiveCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }),
+           let fresh = freshCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }) {
+            if CredentialOwnership.sameGrant(verified, fresh) {
+                provenFresh = true
+            } else if let identity = await accountIdentity(forAccessToken: fresh.accessToken),
+                      CredentialOwnership.detailsBelong(uuid: identity.uuid, email: identity.email,
+                                                        toOwnerUuid: liveOwnerIdentity?.uuid, ownerEmail: owner.email) {
+                // The CLI renewed the login during the checks; the API confirms it is
+                // still the owner's, and this is the only copy of the newest login.
+                provenFresh = true
+            }
+        }
+        if let owner = liveOwner, let liveToken = freshCredential, provenFresh {
+            // Save identity details only if they describe the owner: running
+            // sessions can leave another account's in ~/.claude.json.
+            func belongs(_ details: [String: AnyCodable]?) -> Bool {
+                CredentialOwnership.detailsBelong(uuid: details?["accountUuid"]?.value as? String,
+                                                  email: details?["emailAddress"]?.value as? String,
+                                                  toOwnerUuid: liveOwnerIdentity?.uuid, ownerEmail: owner.email)
+            }
             let fileIdentity = keychain.readOAuthAccount()
-            let fileEmail = fileIdentity?["emailAddress"]?.value as? String
-            let identity = (fileEmail == owner.email ? fileIdentity : nil)
-                ?? keychain.getAccountBackup(forAccountId: owner.id.uuidString)?.oauthAccount
-            if let identity {
+            let backupIdentity = keychain.getAccountBackup(forAccountId: owner.id.uuidString)?.oauthAccount
+            if let identity = belongs(fileIdentity) ? fileIdentity : (belongs(backupIdentity) ? backupIdentity : nil) {
                 let saved = keychain.saveAccountBackup(token: liveToken, oauthAccount: identity, forAccountId: owner.id.uuidString)
                 log.info("[switchAccount] Step 1: Backup saved for its owner: \(saved)")
             } else {
-                log.warning("[switchAccount] Step 1: No identity on record for the owner; skipping backup")
+                log.warning("[switchAccount] Step 1: No identity details on record that match the owner; skipping backup")
             }
         } else {
             log.warning("[switchAccount] Step 1: The live login's owner is not proven (or it changed since it was checked); skipping the backup so no account's backup is overwritten with another's login")
@@ -563,9 +575,12 @@ final class ClaudeService: @unchecked Sendable {
         return true
     }
 
-    /// Capture the current Claude auth token + oauthAccount and associate with an account
-    func captureCurrentCredentials(forAccountId accountId: String) -> Bool {
-        log.info("[capture] Capturing credentials for account \(accountId)...")
+    /// Saves the live login and identity details as `account`'s backup, but
+    /// only if the API confirms the login is `account`'s and ~/.claude.json
+    /// describes that same account (running sessions rewrite that file from
+    /// memory). If the API cannot answer, the file must at least name `account`.
+    func captureCurrentCredentials(for account: Account) async -> Bool {
+        log.info("[capture] Capturing credentials for account \(account.id)...")
         let keychain = KeychainService.shared
         guard let token = keychain.readClaudeToken() else {
             log.error("[capture] Failed: no token found in keychain")
@@ -575,9 +590,27 @@ final class ClaudeService: @unchecked Sendable {
             log.error("[capture] Failed: no oauthAccount found in ~/.claude.json")
             return false
         }
-        let email = (oauthAccount["emailAddress"]?.value as? String) ?? "?"
-        log.info("[capture] Token + oauthAccount found (email=\(email)), saving backup...")
-        let result = keychain.saveAccountBackup(token: token, oauthAccount: oauthAccount, forAccountId: accountId)
+        let fileUuid = oauthAccount["accountUuid"]?.value as? String
+        let fileEmail = oauthAccount["emailAddress"]?.value as? String
+        if let login = CredentialOwnership.login(fromCredential: token),
+           let identity = await accountIdentity(forAccessToken: login.accessToken) {
+            guard identity.email?.caseInsensitiveCompare(account.email) == .orderedSame else {
+                log.error("[capture] REFUSED: the live login belongs to \(identity.email ?? "another account"), not \(account.email)")
+                return false
+            }
+            guard CredentialOwnership.detailsBelong(uuid: fileUuid, email: fileEmail, toOwnerUuid: identity.uuid, ownerEmail: identity.email) else {
+                log.error("[capture] REFUSED: ~/.claude.json describes \(fileEmail ?? "another account"), not the login's owner")
+                return false
+            }
+        } else {
+            log.warning("[capture] Could not confirm the login's owner with the API; checking ~/.claude.json instead")
+            guard fileEmail?.caseInsensitiveCompare(account.email) == .orderedSame else {
+                log.error("[capture] REFUSED: ~/.claude.json names \(fileEmail ?? "nobody"), not \(account.email)")
+                return false
+            }
+        }
+        log.info("[capture] Login and identity confirmed for \(account.email); saving backup...")
+        let result = keychain.saveAccountBackup(token: token, oauthAccount: oauthAccount, forAccountId: account.id.uuidString)
         log.info("[capture] Save result: \(result)")
         return result
     }

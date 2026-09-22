@@ -189,3 +189,4 @@
 "The login saved for %@ is also saved under another account. Re-authenticate %@ to fix it." = "The login saved for %1$@ is also saved under another account. Re-authenticate %2$@ to fix it.";
 "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix.";
 "The saved login for %@ has expired and could not be renewed. Re-authenticate %@ to fix it." = "The saved login for %1$@ has expired and could not be renewed. Re-authenticate %2$@ to fix it.";
+"The saved details for %@ belong to another account. Re-authenticate %@ to fix it." = "The saved details for %1$@ belong to another account. Re-authenticate %2$@ to fix it.";

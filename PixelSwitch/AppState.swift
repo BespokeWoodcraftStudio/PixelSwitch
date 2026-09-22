@@ -247,7 +247,7 @@ final class AppState: ObservableObject {
             log.info("[addAccount] Created account model, id=\(account.id)")
 
             log.info("[addAccount] Capturing token from keychain...")
-            let captured = claudeService.captureCurrentCredentials(forAccountId: account.id.uuidString)
+            let captured = await claudeService.captureCurrentCredentials(for: account)
             if !captured {
                 errorMessage = String(localized: "Could not capture auth token from keychain", bundle: L10n.bundle)
                 log.error("[addAccount] Token capture failed!")
@@ -293,7 +293,7 @@ final class AppState: ObservableObject {
             // 1. Back up current account (token + oauthAccount) before login overwrites them
             if let current = activeAccount {
                 log.info("[loginNewAccount] Step 1: Backing up current account (\(current.email))...")
-                let backed = claudeService.captureCurrentCredentials(forAccountId: current.id.uuidString)
+                let backed = await claudeService.captureCurrentCredentials(for: current)
                 log.info("[loginNewAccount] Step 1: Backup result: \(backed)")
             } else {
                 log.info("[loginNewAccount] Step 1: No active account, skipping backup")
@@ -330,7 +330,7 @@ final class AppState: ObservableObject {
             // would leave a stale backup behind an explicit success message.
             if let existing = accounts.firstIndex(where: { $0.email == email }) {
                 log.info("[loginNewAccount] Step 4: Account already exists, refreshing backup and marking it active")
-                let captured = claudeService.captureCurrentCredentials(forAccountId: accounts[existing].id.uuidString)
+                let captured = await claudeService.captureCurrentCredentials(for: accounts[existing])
                 for i in accounts.indices {
                     accounts[i].isActive = (i == existing)
                 }
@@ -361,7 +361,7 @@ final class AppState: ObservableObject {
             )
             log.info("[loginNewAccount] Step 5: Created account, id=\(account.id)")
 
-            let captured = claudeService.captureCurrentCredentials(forAccountId: account.id.uuidString)
+            let captured = await claudeService.captureCurrentCredentials(for: account)
             if !captured {
                 errorMessage = String(localized: "Could not capture credentials", bundle: L10n.bundle)
                 log.error("[loginNewAccount] Step 5: Capture failed!")
@@ -443,10 +443,11 @@ final class AppState: ObservableObject {
         // from ~/.claude.json, which running sessions rewrite). If it already
         // is the target's, there is nothing to switch; just make sure we know it.
         let liveCredential = keychain.readClaudeToken()
-        var liveOwner: Account?
+        var live: (account: Account, identity: ClaudeService.AccountIdentity)?
         if let liveCredential {
-            liveOwner = await provenOwner(ofCredential: liveCredential)
+            live = await provenOwner(ofCredential: liveCredential)
         }
+        let liveOwner = live?.account
         if liveOwner?.id == account.id || (liveOwner == nil && currentActive.id == account.id) {
             log.info("[switchTo] No switch needed: \(account.email)'s login is already live")
             if liveOwner?.id == account.id, currentActive.id != account.id { adoptActive(account) }
@@ -477,7 +478,7 @@ final class AppState: ObservableObject {
         isLoading = true
         do {
             let outcome = try await claudeService.switchAccount(
-                liveOwner: liveOwner, verifiedLiveCredential: liveCredential,
+                liveOwner: liveOwner, liveOwnerIdentity: live?.identity, verifiedLiveCredential: liveCredential,
                 to: account, targetBackup: targetBackup)
 
             for i in accounts.indices {
@@ -546,12 +547,21 @@ final class AppState: ObservableObject {
         return byUuid ?? byEmail
     }
 
-    /// The account the credential's login belongs to, per Anthropic's API; nil
-    /// if the API cannot say (expired token, network) or names no known account.
-    private func provenOwner(ofCredential credential: String) async -> Account? {
+    /// The account the credential's login belongs to, per Anthropic's API, with
+    /// the API's identity for it; nil if the API cannot say (expired token,
+    /// network) or names no known account.
+    private func provenOwner(ofCredential credential: String) async -> (account: Account, identity: ClaudeService.AccountIdentity)? {
         guard let login = CredentialOwnership.login(fromCredential: credential),
-              let identity = await claudeService.accountIdentity(forAccessToken: login.accessToken) else { return nil }
-        return account(matching: identity)
+              let identity = await claudeService.accountIdentity(forAccessToken: login.accessToken),
+              let owner = account(matching: identity) else { return nil }
+        return (owner, identity)
+    }
+
+    /// Whether saved identity details describe the owner the API named.
+    private func details(_ details: [String: AnyCodable]?, belongTo identity: ClaudeService.AccountIdentity) -> Bool {
+        CredentialOwnership.detailsBelong(uuid: details?["accountUuid"]?.value as? String,
+                                          email: details?["emailAddress"]?.value as? String,
+                                          toOwnerUuid: identity.uuid, ownerEmail: identity.email)
     }
 
     /// The target's backup, if its login provably is the target's. An expired
@@ -579,15 +589,28 @@ final class AppState: ObservableObject {
                     login = renewedLogin
                     identity = await claudeService.accountIdentity(forAccessToken: renewedLogin.accessToken)
                 }
-            default:
+            case .storeUnavailable:
+                // A blip (network, rate limit, locked Keychain): nothing was
+                // spent, so go ahead as before; Claude Code renews it on first use.
+                log.warning("[switchTo] Could not renew \(account.email)'s expired login right now; switching anyway")
+            case .belongsToAnotherAccount(let owner):
+                return .failure(SwitchProblem(message: String(localized: "The login saved for \(account.email) belongs to \(owner). Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)))
+            case .grantRejected, .noBackup, .rotationLost:
                 return .failure(SwitchProblem(message: String(localized: "The saved login for \(account.email) has expired and could not be renewed. Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)))
             }
         }
 
         if let identity {
-            if let owner = self.account(matching: identity), owner.id == account.id { return .success(backup) }
-            let ownerName = self.account(matching: identity)?.email ?? identity.email ?? "another account"
-            return .failure(SwitchProblem(message: String(localized: "The login saved for \(account.email) belongs to \(ownerName). Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)))
+            guard let owner = self.account(matching: identity), owner.id == account.id else {
+                let ownerName = self.account(matching: identity)?.email ?? identity.email ?? "another account"
+                return .failure(SwitchProblem(message: String(localized: "The login saved for \(account.email) belongs to \(ownerName). Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)))
+            }
+            // The token is the target's; its saved identity details must be too,
+            // or the switch would pair this login with another account's details.
+            guard details(backup.oauthAccount, belongTo: identity) else {
+                return .failure(SwitchProblem(message: String(localized: "The saved details for \(account.email) belong to another account. Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)))
+            }
+            return .success(backup)
         }
         let others = (savedLogins() ?? [:]).filter { $0.key != account.id.uuidString }
         if !CredentialOwnership.lineageMatches(login, in: others).isEmpty {
@@ -610,7 +633,7 @@ final class AppState: ObservableObject {
     /// instead of one whose refresh token the CLI has since rotated.
     private func reconcileLiveLogin() async {
         guard !isSwitching, !isLoggingIn, let credential = keychain.readClaudeToken() else { return }
-        guard let owner = await provenOwner(ofCredential: credential) else { return }
+        guard let (owner, ownerIdentity) = await provenOwner(ofCredential: credential) else { return }
         // The API call left the main actor free: act only if no switch or login
         // started meanwhile and the live login is still the one that was checked.
         // Everything below is synchronous, so nothing can slip in between.
@@ -626,15 +649,16 @@ final class AppState: ObservableObject {
 
         let fileIdentity = keychain.readOAuthAccount()
         let fileEmail = fileIdentity?["emailAddress"]?.value as? String
-        let identityMatches = fileEmail?.caseInsensitiveCompare(owner.email) == .orderedSame
+        let fileBelongs = details(fileIdentity, belongTo: ownerIdentity)
         let savedBackup = keychain.getAccountBackup(forAccountId: owner.id.uuidString)
-        if !identityMatches, let identity = savedBackup?.oauthAccount {
+        let backupBelongs = details(savedBackup?.oauthAccount, belongTo: ownerIdentity)
+        if !fileBelongs, backupBelongs, let identity = savedBackup?.oauthAccount {
             log.warning("[reconcile] ~/.claude.json named \(fileEmail ?? "nobody") while \(owner.email)'s login is live; restoring its identity")
             _ = keychain.writeOAuthAccount(identity)
         }
 
-        if let backup = savedBackup, backup.token != credential {
-            let identity = (identityMatches ? fileIdentity : nil) ?? backup.oauthAccount
+        if let backup = savedBackup, backup.token != credential,
+           let identity = fileBelongs ? fileIdentity : (backupBelongs ? backup.oauthAccount : nil) {
             if keychain.saveAccountBackup(token: credential, oauthAccount: identity, forAccountId: owner.id.uuidString) {
                 log.info("[reconcile] \(owner.email)'s backup updated from the live login")
             }
@@ -804,6 +828,11 @@ final class AppState: ObservableObject {
                 accountUsageSampledAt[account.id] = nil
                 accountUsageErrors[account.id] = UsageErrorState(isExpired: true, isRateLimited: false, message: String(localized: "Session expired. Re-authenticate (↻) to fix.", bundle: L10n.bundle))
                 return nil
+            case .belongsToAnotherAccount:
+                accountUsage[account.id] = nil
+                accountUsageSampledAt[account.id] = nil
+                accountUsageErrors[account.id] = UsageErrorState(isExpired: true, isRateLimited: false, message: String(localized: "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix.", bundle: L10n.bundle))
+                return nil
             case .storeUnavailable:
                 // Nothing spent, nothing lost; keep the stale sample and retry
                 // on a later cycle.
@@ -839,7 +868,7 @@ final class AppState: ObservableObject {
             // 1. Back up current active account before login overwrites it
             if let current = activeAccount, current.id != account.id {
                 log.info("[reauth] Backing up current account before login...")
-                _ = claudeService.captureCurrentCredentials(forAccountId: current.id.uuidString)
+                _ = await claudeService.captureCurrentCredentials(for: current)
             }
 
             // 2. Run login
@@ -868,7 +897,7 @@ final class AppState: ObservableObject {
             }
 
             // 4. Capture the fresh token
-            let captured = claudeService.captureCurrentCredentials(forAccountId: account.id.uuidString)
+            let captured = await claudeService.captureCurrentCredentials(for: account)
             log.info("[reauth] Token capture result: \(captured)")
 
             // 5. Update account metadata. Done even when the capture failed —
@@ -965,6 +994,9 @@ final class AppState: ObservableObject {
         /// The store cannot be read or written right now. Nothing was spent;
         /// heals by itself on a later cycle.
         case storeUnavailable
+        /// The renewed login belongs to the named other account; the backup
+        /// was removed. Only re-authentication fixes this.
+        case belongsToAnotherAccount(String)
         /// Worst case: the rotation succeeded but the result could not be
         /// persisted even after a retry. The old refresh token is spent and the
         /// new credential is gone — only re-authentication brings this account
@@ -977,7 +1009,24 @@ final class AppState: ObservableObject {
     /// Refresh a non-active account's stored credential in place via the OAuth
     /// token endpoint — no keychain swap, so no race with running Claude Code
     /// sessions.
+    /// Renewals already running, by account id. Two renewals of one saved
+    /// login from the same refresh token would race: the loser gets
+    /// invalid_grant, and a server that detects the reuse may revoke the grant.
+    private var renewalsInFlight: [String: Task<BackupRefreshOutcome, Never>] = [:]
+
+    /// Renews a saved login in place, joining a renewal already running for
+    /// the same account instead of starting a second one.
     private func refreshBackupInPlace(for account: Account) async -> BackupRefreshOutcome {
+        let accountId = account.id.uuidString
+        if let running = renewalsInFlight[accountId] { return await running.value }
+        let renewal = Task { await self.renewBackupInPlace(for: account) }
+        renewalsInFlight[accountId] = renewal
+        let outcome = await renewal.value
+        renewalsInFlight[accountId] = nil
+        return outcome
+    }
+
+    private func renewBackupInPlace(for account: Account) async -> BackupRefreshOutcome {
         let accountId = account.id.uuidString
 
         let backup: AccountBackup
@@ -1027,7 +1076,7 @@ final class AppState: ObservableObject {
                let owner = self.account(matching: identity), owner.id != account.id {
                 log.error("[refreshBackup] \(account.id)'s saved login belongs to \(owner.email); removing it")
                 keychain.removeAccountBackup(forAccountId: accountId)
-                return .grantRejected
+                return .belongsToAnotherAccount(owner.email)
             }
             if keychain.saveAccountBackup(token: refreshed, oauthAccount: backup.oauthAccount, forAccountId: accountId) {
                 return .refreshed(refreshed)
@@ -1161,6 +1210,10 @@ final class AppState: ObservableObject {
                         accountUsage[account.id] = nil
                         accountUsageSampledAt[account.id] = nil
                         accountUsageErrors[account.id] = UsageErrorState(isExpired: true, isRateLimited: false, message: String(localized: "Session expired. Re-authenticate (↻) to fix.", bundle: L10n.bundle))
+                    case .belongsToAnotherAccount:
+                        accountUsage[account.id] = nil
+                        accountUsageSampledAt[account.id] = nil
+                        accountUsageErrors[account.id] = UsageErrorState(isExpired: true, isRateLimited: false, message: String(localized: "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix.", bundle: L10n.bundle))
                     case .storeUnavailable:
                         // Nothing was spent and nothing is lost; this heals by
                         // itself on a later cycle. Keep the stale sample.
@@ -1296,7 +1349,7 @@ final class AppState: ObservableObject {
             )
             accounts.append(account)
             activeAccount = account
-            _ = claudeService.captureCurrentCredentials(forAccountId: account.id.uuidString)
+            Task { _ = await self.claudeService.captureCurrentCredentials(for: account) }
             saveAccounts()
             log.info("[updateActiveAccount] Auto-created first account, id=\(account.id)")
         } else {

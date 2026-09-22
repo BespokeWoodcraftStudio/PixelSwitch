@@ -184,6 +184,11 @@ do {
     corrupted["B"] = a
     check(CredentialOwnership.sharedLogins(corrupted) == [["A", "B"]], "ownership: a login saved under two accounts is found", "\(CredentialOwnership.sharedLogins(corrupted))")
     check(CredentialOwnership.lineageMatches(a, in: corrupted) == ["A", "B"], "ownership: an ambiguous lineage returns both accounts, so the API must decide")
+
+    check(CredentialOwnership.detailsBelong(uuid: "u-1", email: "a@x.com", toOwnerUuid: "u-1", ownerEmail: "A@X.com"), "details: the same permanent id belongs")
+    check(!CredentialOwnership.detailsBelong(uuid: "u-2", email: "a@x.com", toOwnerUuid: "u-1", ownerEmail: "a@x.com"), "details: a different permanent id does not belong, even with the same email")
+    check(CredentialOwnership.detailsBelong(uuid: nil, email: "A@x.com", toOwnerUuid: "u-1", ownerEmail: "a@X.com"), "details: without an id on one side, the email decides (any case)")
+    check(!CredentialOwnership.detailsBelong(uuid: nil, email: nil, toOwnerUuid: "u-1", ownerEmail: "a@x.com"), "details: nothing to compare is never a match")
 }
 
 // MARK: - Opt-in: real /usr/bin/security on a throwaway item
