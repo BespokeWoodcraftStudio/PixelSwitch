@@ -176,8 +176,8 @@ struct AccountSwitcherView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(colorCodeAccounts ? AccountPalette.wash(swatch) : (account.isActive ? .cardFillStrong : .clear))
-                .strokeBorder(colorCodeAccounts ? AccountPalette.border(swatch) : .cardBorder, lineWidth: account.isActive ? 2 : 1)
+                .fill(account.isActive ? .cardFillStrong : .clear)
+                .strokeBorder(.cardBorder, lineWidth: account.isActive ? 2 : 1)
                 .shadow(color: AppStyle.cardShadowColor, radius: AppStyle.cardShadowRadius, x: 0, y: AppStyle.cardShadowY)
         )
     }

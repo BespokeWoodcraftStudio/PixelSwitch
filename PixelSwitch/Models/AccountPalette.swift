@@ -29,18 +29,11 @@ enum AccountPalette {
         )
     }
 
-    /// The card's background hint. Deliberately faint: a card is something to
-    /// read, and the edge already says whose it is.
-    static func wash(_ index: Int?) -> Color {
-        guard index != nil else { return .cardFill }
-        return color(index).opacity(0.07)
-    }
-
-    /// The card's edge, enough to separate neighbouring cards.
-    static func border(_ index: Int?) -> Color {
-        guard index != nil else { return .cardBorder }
-        return color(index).opacity(0.45)
-    }
+    // No card fill and no coloured border on purpose. A first version washed the
+    // whole card, and a second kept a faint wash; both read as a coloured box.
+    // The founder's call: "you made a mistake and left the full box as colored
+    // instead of just the line". The card stays neutral; the line and the glyph
+    // carry the colour.
 
     /// Which swatch each account gets.
     ///

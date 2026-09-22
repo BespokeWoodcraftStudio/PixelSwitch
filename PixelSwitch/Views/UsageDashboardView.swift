@@ -256,10 +256,7 @@ struct UsageDashboardView: View {
             }
         }
         }
-        .cardStyle(
-            fill: colorCodeAccounts ? AccountPalette.wash(swatch) : .cardFill,
-            border: colorCodeAccounts ? AccountPalette.border(swatch) : .cardBorder
-        )
+        .cardStyle()
         .sectionPadding()
     }
 
