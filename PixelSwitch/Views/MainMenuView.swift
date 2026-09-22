@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 private let popoverLog = FileLog("Popover")
 
@@ -246,9 +247,12 @@ struct MainMenuView: View {
 
     private var headerView: some View {
         HStack(spacing: 10) {
-            Image(systemName: "brain.head.profile")
-                .font(.title2)
-                .foregroundStyle(.brand)
+            // The app's own icon, so the header shows PixelSwitch rather than
+            // a stock glyph inherited from the fork.
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 26, height: 26)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
                 if let account = appState.activeAccount {

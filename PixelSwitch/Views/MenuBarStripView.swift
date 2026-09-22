@@ -36,8 +36,16 @@ struct MenuBarStripView: View {
     var body: some View {
         HStack(spacing: 8) {
             if config.showsHeadIcon {
-                Image(systemName: iconFilled ? "brain.head.profile.fill" : "brain.head.profile")
-                    .font(.system(size: 14))
+                // The PixelSwitch mark, drawn by Tools/icon/make_icon.py and
+                // stored as a template image, so macOS colours it for a light
+                // or dark menu bar. During a double-usage promo it takes the
+                // brand colour instead, which is what the old filled brain
+                // glyph used to signal.
+                Image("MenuBarLogo")
+                    .renderingMode(.template)
+                    .resizable()
+                    .frame(width: 20, height: 10)
+                    .foregroundStyle(iconFilled ? Color.brand : Color.primary)
             }
 
             ForEach(config.modules) { module in

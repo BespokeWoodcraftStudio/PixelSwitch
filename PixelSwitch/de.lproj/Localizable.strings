@@ -22,7 +22,6 @@
 "5 minutes" = "5 Minuten";
 "10 minutes" = "10 Minuten";
 "Show account name in menu bar" = "Kontoname in der Menüleiste anzeigen";
-"Show head icon in menu bar" = "Kopf-Symbol in der Menüleiste anzeigen";
 "Show full email address" = "Vollständige E-Mail-Adresse anzeigen";
 "Launch at login" = "Beim Anmelden starten";
 
@@ -195,3 +194,13 @@
 "Fable" = "Fable";
 "Fable bar color" = "Fable-Balkenfarbe";
 "Resets %@" = "Zurücksetzen %@";
+"Show PixelSwitch logo in menu bar" = "PixelSwitch-Logo in der Menüleiste zeigen";
+"Today only" = "Nur heute";
+"All %lld days" = "Alle %lld Tage";
+"History reaches back only as far as your usage history window (%@). Older sessions are not kept, which is what keeps PixelSwitch light on memory. Settings → General changes it." = "Der Verlauf reicht nur so weit zurück wie dein Nutzungsverlauf-Fenster (%@). Ältere Sitzungen werden nicht behalten; genau das hält PixelSwitch speicherschonend. Zu ändern unter Einstellungen → Allgemein.";
+"all history" = "gesamter Verlauf";
+"24 hours" = "24 Stunden";
+"3 days" = "3 Tage";
+"7 days" = "7 Tage";
+"30 days" = "30 Tage";
+"%lld hours" = "%lld Stunden";

@@ -2,6 +2,8 @@ import SwiftUI
 
 /// Full cost breakdown tab with today's card and daily history.
 struct CostDetailView: View {
+    /// Mirrors Settings' window, so the note below the totals states the real one.
+    @AppStorage("transcriptLookbackHours") private var transcriptLookbackHours = 24
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
@@ -70,20 +72,68 @@ struct CostDetailView: View {
         .sectionPadding()
     }
 
+    /// Period totals that can only claim what is actually held.
+    ///
+    /// PixelSwitch reads a session file only while it has been touched inside
+    /// the usage history window (Settings, default 24 hours) and drops the rest,
+    /// which is what keeps its memory small. So on a fresh install, or a short
+    /// window, there is no 7- or 30-day history to total: fixed "Last 7 Days"
+    /// and "Last 30 Days" cards then showed the same number and implied history
+    /// that does not exist. Each card now appears only once its period is
+    /// genuinely covered, and otherwise one card states the real span.
     private var periodSummaryCards: some View {
         let costs = appState.costSummary.dailyCosts
         let todayStr = todayString()
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
+        let span = historySpanDays(costs: costs, today: todayStr, formatter: formatter)
 
-        let last7 = costForLastDays(7, costs: costs, today: todayStr, formatter: formatter)
-        let last30 = costForLastDays(30, costs: costs, today: todayStr, formatter: formatter)
-
-        return HStack(spacing: 10) {
-            periodCard(title: "Last 7 Days", cost: last7)
-            periodCard(title: "Last 30 Days", cost: last30)
+        return VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                if span >= 7 {
+                    periodCard(title: "Last 7 Days", cost: costForLastDays(7, costs: costs, today: todayStr, formatter: formatter))
+                }
+                if span >= 30 {
+                    periodCard(title: "Last 30 Days", cost: costForLastDays(30, costs: costs, today: todayStr, formatter: formatter))
+                } else {
+                    periodCard(title: spanTitle(span), cost: appState.costSummary.totalCost)
+                }
+            }
+            historyNote
         }
         .padding(.horizontal, 16)
+    }
+
+    /// "All 5 days" / "Today only" — the whole history, stated plainly.
+    private func spanTitle(_ span: Int) -> LocalizedStringKey {
+        span <= 1 ? "Today only" : "All \(span) days"
+    }
+
+    /// Days from the oldest day with data to today, inclusive. 0 when empty.
+    /// The arithmetic lives in `CostHistoryWindow` so it can be tested.
+    private func historySpanDays(costs: [DailyCost], today: String, formatter: DateFormatter) -> Int {
+        CostHistoryWindow.spanDays(dates: costs.map(\.date), today: today)
+    }
+
+    /// Why the history stops where it does, in the founder's own terms: the
+    /// window is a memory choice, not a bug.
+    private var historyNote: some View {
+        Text("History reaches back only as far as your usage history window (\(windowLabel)). Older sessions are not kept, which is what keeps PixelSwitch light on memory. Settings → General changes it.")
+            .font(.caption2)
+            .foregroundStyle(.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var windowLabel: String {
+        switch transcriptLookbackHours {
+        case 0: return String(localized: "all history", bundle: L10n.bundle)
+        case 24: return String(localized: "24 hours", bundle: L10n.bundle)
+        case 72: return String(localized: "3 days", bundle: L10n.bundle)
+        case 168: return String(localized: "7 days", bundle: L10n.bundle)
+        case 720: return String(localized: "30 days", bundle: L10n.bundle)
+        default: return String(localized: "\(transcriptLookbackHours) hours", bundle: L10n.bundle)
+        }
     }
 
     private func periodCard(title: LocalizedStringKey, cost: Double) -> some View {

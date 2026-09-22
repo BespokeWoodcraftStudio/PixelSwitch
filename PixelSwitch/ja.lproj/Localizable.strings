@@ -22,7 +22,6 @@
 "5 minutes" = "5 分";
 "10 minutes" = "10 分";
 "Show account name in menu bar" = "メニューバーにアカウント名を表示";
-"Show head icon in menu bar" = "メニューバーにヘッドアイコンを表示";
 "Show full email address" = "メールアドレスを完全に表示";
 "Launch at login" = "ログイン時に起動";
 
@@ -195,3 +194,13 @@
 "Fable" = "Fable";
 "Fable bar color" = "Fable バーの色";
 "Resets %@" = "%@ にリセット";
+"Show PixelSwitch logo in menu bar" = "メニューバーに PixelSwitch のロゴを表示";
+"Today only" = "今日のみ";
+"All %lld days" = "全 %lld 日";
+"History reaches back only as far as your usage history window (%@). Older sessions are not kept, which is what keeps PixelSwitch light on memory. Settings → General changes it." = "履歴は使用履歴ウィンドウ（%@）の範囲までしかさかのぼれません。それより古いセッションは保持されず、これが PixelSwitch のメモリを軽く保っています。設定 → 一般で変更できます。";
+"all history" = "すべての履歴";
+"24 hours" = "24 時間";
+"3 days" = "3 日";
+"7 days" = "7 日";
+"30 days" = "30 日";
+"%lld hours" = "%lld 時間";

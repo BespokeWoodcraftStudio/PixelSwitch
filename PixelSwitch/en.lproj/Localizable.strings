@@ -22,7 +22,6 @@
 "5 minutes" = "5 minutes";
 "10 minutes" = "10 minutes";
 "Show account name in menu bar" = "Show account name in menu bar";
-"Show head icon in menu bar" = "Show head icon in menu bar";
 "Show full email address" = "Show full email address";
 "Launch at login" = "Launch at login";
 
@@ -197,3 +196,13 @@
 "Fable" = "Fable";
 "Fable bar color" = "Fable bar color";
 "Resets %@" = "Resets %@";
+"Show PixelSwitch logo in menu bar" = "Show PixelSwitch logo in menu bar";
+"Today only" = "Today only";
+"All %lld days" = "All %lld days";
+"History reaches back only as far as your usage history window (%@). Older sessions are not kept, which is what keeps PixelSwitch light on memory. Settings → General changes it." = "History reaches back only as far as your usage history window (%@). Older sessions are not kept, which is what keeps PixelSwitch light on memory. Settings → General changes it.";
+"all history" = "all history";
+"24 hours" = "24 hours";
+"3 days" = "3 days";
+"7 days" = "7 days";
+"30 days" = "30 days";
+"%lld hours" = "%lld hours";

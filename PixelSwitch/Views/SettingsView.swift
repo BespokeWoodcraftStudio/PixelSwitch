@@ -127,7 +127,7 @@ struct SettingsView: View {
     private var menuBarTab: some View {
         Form {
             Section("Appearance") {
-                Toggle("Show head icon in menu bar", isOn: $menuBarConfig.showsHeadIcon)
+                Toggle("Show PixelSwitch logo in menu bar", isOn: $menuBarConfig.showsHeadIcon)
             }
 
             Section("Limit bars") {

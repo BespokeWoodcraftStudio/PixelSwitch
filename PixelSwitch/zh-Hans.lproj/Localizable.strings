@@ -22,7 +22,6 @@
 "5 minutes" = "5 分钟";
 "10 minutes" = "10 分钟";
 "Show account name in menu bar" = "在菜单栏显示账户名称";
-"Show head icon in menu bar" = "在菜单栏显示头像图标";
 "Show full email address" = "显示完整邮箱地址";
 "Launch at login" = "登录时启动";
 
@@ -195,3 +194,13 @@
 "Fable" = "Fable";
 "Fable bar color" = "Fable 进度条颜色";
 "Resets %@" = "%@ 重置";
+"Show PixelSwitch logo in menu bar" = "在菜单栏显示 PixelSwitch 徽标";
+"Today only" = "仅今天";
+"All %lld days" = "全部 %lld 天";
+"History reaches back only as far as your usage history window (%@). Older sessions are not kept, which is what keeps PixelSwitch light on memory. Settings → General changes it." = "历史记录只能回溯到你的用量历史窗口（%@）。更早的会话不会保留，这正是 PixelSwitch 内存占用小的原因。可在设置 → 通用中更改。";
+"all history" = "全部历史";
+"24 hours" = "24 小时";
+"3 days" = "3 天";
+"7 days" = "7 天";
+"30 days" = "30 天";
+"%lld hours" = "%lld 小时";

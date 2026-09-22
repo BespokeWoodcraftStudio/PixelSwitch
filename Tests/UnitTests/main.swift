@@ -246,6 +246,24 @@ do {
     }
 }
 
+// MARK: - How much cost history actually exists
+
+do {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+    func span(_ dates: [String], _ today: String = "2026-09-22") -> Int {
+        CostHistoryWindow.spanDays(dates: dates, today: today, calendar: cal)
+    }
+    check(span([]) == 0, "history: no data is no days")
+    check(span(["2026-09-22"]) == 1, "history: today alone is one day")
+    check(span(["2026-09-18", "2026-09-19", "2026-09-20", "2026-09-21", "2026-09-22"]) == 5,
+          "history: five days of data spans five days", "\(span(["2026-09-18", "2026-09-22"]))")
+    check(span(["2026-09-18", "2026-09-22"]) == 5, "history: a gap still counts from the oldest day")
+    check(span(["2026-08-24"]) == 30, "history: a month back spans 30 days", "\(span(["2026-08-24"]))")
+    check(span(["2026-09-25"]) == 1, "history: a date ahead of today never goes negative")
+    check(span(["not-a-date"]) == 1, "history: an unreadable date still counts as some history")
+}
+
 // MARK: - Auto-switch on session/weekly and on Fable
 
 do {

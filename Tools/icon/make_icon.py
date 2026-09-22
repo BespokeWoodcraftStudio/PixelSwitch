@@ -82,9 +82,53 @@ def draw(size):
     return img.resize((size, size), Image.LANCZOS)
 
 
+def draw_mark(width, height):
+    """The switch mark on its own, white on transparent, for the menu bar.
+
+    macOS renders a menu-bar image as a template: only the alpha matters, and
+    the system colours it for the light or dark bar. So the accent knob is
+    drawn in the same ink as the track; what carries the mark is its shape.
+    Proportions follow the app icon's 600x300 track.
+    """
+    ss = 8
+    w, h = width * ss, height * ss
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+
+    stroke = max(ss, round(h * 0.17))
+    gap = max(ss, round(h * 0.11))
+    for i in range(stroke):
+        d.rectangle([i, i, w - 1 - i, h - 1 - i], outline=INK + (255,))
+
+    side = h - 2 * stroke - 2 * gap
+    kx1 = w - stroke - gap
+    ky0 = stroke + gap
+    d.rectangle([kx1 - side, ky0, kx1 - 1, ky0 + side - 1], fill=INK + (255,))
+
+    return img.resize((width, height), Image.LANCZOS)
+
+
+MENUBAR = ROOT / "PixelSwitch/Resources/Assets.xcassets/MenuBarLogo.imageset"
+MENUBAR_CONTENTS = """{
+  "images" : [
+    { "filename" : "menubar-logo.png", "idiom" : "mac", "scale" : "1x" },
+    { "filename" : "menubar-logo@2x.png", "idiom" : "mac", "scale" : "2x" },
+    { "filename" : "menubar-logo@3x.png", "idiom" : "mac", "scale" : "3x" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 },
+  "properties" : { "template-rendering-intent" : "template" }
+}
+"""
+
 if __name__ == "__main__":
     for s in (16, 32, 64, 128, 256, 512, 1024):
         draw(s).save(ICONSET / f"icon_{s}.png")
     PREVIEW.parent.mkdir(exist_ok=True)
     draw(512).save(PREVIEW)
-    print("wrote", ICONSET, "and", PREVIEW)
+
+    # Menu-bar mark: 20x10 points, at 1x / 2x / 3x.
+    MENUBAR.mkdir(parents=True, exist_ok=True)
+    for scale, suffix in ((1, ""), (2, "@2x"), (3, "@3x")):
+        draw_mark(20 * scale, 10 * scale).save(MENUBAR / f"menubar-logo{suffix}.png")
+    (MENUBAR / "Contents.json").write_text(MENUBAR_CONTENTS)
+    print("wrote", ICONSET, PREVIEW, "and", MENUBAR)

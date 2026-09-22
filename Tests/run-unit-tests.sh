@@ -12,6 +12,7 @@ swiftc -swift-version 6 \
   PixelSwitch/Services/ClaudeCredentialMerge.swift \
   PixelSwitch/Services/CredentialOwnership.swift \
   PixelSwitch/Models/UsageData.swift \
+  PixelSwitch/Models/CostHistoryWindow.swift \
   PixelSwitch/Models/Account.swift \
   PixelSwitch/Models/String+Obfuscation.swift \
   PixelSwitch/Services/AutoSwitchEngine.swift \
