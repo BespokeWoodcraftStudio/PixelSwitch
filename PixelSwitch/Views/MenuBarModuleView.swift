@@ -7,7 +7,7 @@ struct MenuBarModuleView: View {
     let module: MenuBarModule
     let appState: AppState
     let config: MenuBarConfig
-    let showFullEmail: Bool
+    let maskEmails: Bool
     /// Tick value that recomputes reset countdowns once a minute.
     /// Passed in (and ignored by non-countdown modules) so the parent timer
     /// can drive view updates without each module owning a timer.
@@ -112,7 +112,7 @@ struct MenuBarModuleView: View {
 
     private var accountText: String {
         guard let account = appState.activeAccount else { return "—" }
-        let name = account.effectiveDisplayName(obfuscated: !showFullEmail)
+        let name = account.effectiveDisplayName(obfuscated: maskEmails)
         return name.isEmpty ? "—" : name
     }
 

@@ -436,5 +436,32 @@ if ProcessInfo.processInfo.environment["PIXELSWITCH_KEYCHAIN_TESTS"] == "1" {
     check(readBack() == nil, "real security: the throwaway item is removed")
 }
 
+// MARK: - Email display default
+//
+// The old key defaulted to masking and was written to disk as `false` on
+// installs that never touched it, so reusing it would have kept every existing
+// install masked and the change would have reached nobody. These pin the new
+// key's behaviour: full addresses unless someone deliberately asks otherwise.
+do {
+    let defaults = UserDefaults.standard
+    let key = EmailDisplay.key
+    let original = defaults.object(forKey: key)
+    defer { if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) } }
+
+    check(key != "showFullEmail", "email display: the key is not the old one, so a stale false cannot keep masking on")
+
+    defaults.removeObject(forKey: key)
+    check(EmailDisplay.isMasked == false, "email display: an install that has never touched the setting shows addresses in full")
+
+    defaults.set(true, forKey: key)
+    check(EmailDisplay.isMasked == true, "email display: turning masking on is respected")
+
+    defaults.set(false, forKey: key)
+    check(EmailDisplay.isMasked == false, "email display: turning masking off is respected")
+
+    // The masking itself must still work for anyone who wants it.
+    check("ahmed@pixelventures.ai".maskedAsEmailAddress() == "ahm*@*.ai", "email display: masking still produces the short form")
+}
+
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

@@ -24,7 +24,7 @@ private struct StatWithTooltip<Content: View>: View {
 struct UsageDashboardView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var menuBarConfig: MenuBarConfig
-    @AppStorage("showFullEmail") private var showFullEmail = false
+    @AppStorage(EmailDisplay.key) private var maskEmails = false
     /// Settings → Appearance. Off restores the plain, uncoloured cards.
     @AppStorage(AccountColorCoding.key) private var colorCodeAccounts = true
 
@@ -293,7 +293,7 @@ struct UsageDashboardView: View {
                 size: 17
             )
 
-            Text(account.displayEmail(obfuscated: !showFullEmail))
+            Text(account.displayEmail(obfuscated: maskEmails))
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
 

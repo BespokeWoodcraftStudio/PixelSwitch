@@ -23,7 +23,7 @@ struct MenuBarStripView: View {
     let appState: AppState
     let config: MenuBarConfig
     let onWidth: (CGFloat) -> Void
-    @AppStorage("showFullEmail") private var showFullEmail = false
+    @AppStorage(EmailDisplay.key) private var maskEmails = false
 
     @State private var tick = Date()
     @State private var iconFilled = false
@@ -53,7 +53,7 @@ struct MenuBarStripView: View {
                     module: module,
                     appState: appState,
                     config: config,
-                    showFullEmail: showFullEmail,
+                    maskEmails: maskEmails,
                     tick: tick
                 )
             }

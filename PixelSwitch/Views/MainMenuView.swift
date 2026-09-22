@@ -68,7 +68,7 @@ extension View {
 struct MainMenuView: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage("refreshInterval") private var refreshInterval: Double = 300
-    @AppStorage("showFullEmail") private var showFullEmail = false
+    @AppStorage(EmailDisplay.key) private var maskEmails = false
     @State private var selectedTab: Tab = .usage
 
     // Measured heights driving the popover frame.
@@ -257,13 +257,13 @@ struct MainMenuView: View {
             VStack(alignment: .leading, spacing: 3) {
                 if let account = appState.activeAccount {
                     HStack(spacing: 6) {
-                        Text(account.effectiveDisplayName(obfuscated: !showFullEmail))
+                        Text(account.effectiveDisplayName(obfuscated: maskEmails))
                             .font(.headline)
                         if let sub = account.displaySubscriptionType {
                             Badge(text: sub, color: .brand)
                         }
                     }
-                    Text(account.displayEmail(obfuscated: !showFullEmail))
+                    Text(account.displayEmail(obfuscated: maskEmails))
                         .font(.caption)
                         .foregroundStyle(.textSecondary)
                 } else {

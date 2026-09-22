@@ -1,20 +1,18 @@
-## PixelSwitch 1.0.10
+## PixelSwitch 1.0.11
 
-### Fixed
+### Changed
 
-- **You can read the limit rows now.** "Session", "Weekly" and "Fable" were drawn in each limit's own colour, on a row tinted with that same colour, so the words disappeared into their own background: measured at **1.9:1** for Session, where 4.5:1 is the readable minimum. Every label and figure in a row is now plain text, measured at **12.9:1 or better** in both light and dark appearance. The colour moved to the chip, the row tint and the bar, which are shapes rather than type.
-- A used-percentage still keeps its colour while a limit is nearly gone, because red on a green, blue or purple tint is the opposite of camouflage, and that is the one warning worth shouting.
+- **Email addresses are shown in full.** Cards used to read `cla*@*.com`, which meant two accounts on the same domain were told apart by guessing. You now see the whole address everywhere it appears: the panel header, the Usage cards, the Accounts list, the menu bar modules and the widgets.
+- **Masking is now something you turn on**, in Settings → Account display → "Hide part of each email address". It is genuinely useful right before you share your screen or send a screenshot, so it stays one switch away rather than being removed.
 
-### New
+This flips the old default, and it flips it for existing installs too. The old setting was stored as "off" on machines that had never touched it, so reusing it would have left everyone masked and changed nothing; the setting has a new name, and the new default reaches every install. If you preferred the masked view, turn it back on in Settings and it stays on.
 
-- **The account you are signed in to is ringed in bright orange, all the way round its card** — on the Usage tab and in the Accounts list. The small green "Active" badge is still there, but a badge has to be hunted for and a ring does not.
+#### Included from 1.0.10 to 1.0.2
 
-#### Included from 1.0.9 to 1.0.2
-
-- The PixelSwitch mark beside every account; a colour per account down the edge of its card; a switch for Fable auto-switching; cost totals that only claim the history actually kept; Session, Weekly and Fable each with their own colour and symbol; auto-switch covering the weekly Fable allowance; MCP logins that survive a switch; a switch that cannot mix up two accounts.
+- Limit rows in plain, readable text, with the colour carried by the chip, the row tint and the bar; the account you are signed in to ringed in bright orange; the PixelSwitch mark beside every account; a colour per account down the edge of its card; a switch for Fable auto-switching; cost totals that only claim the history actually kept; Session, Weekly and Fable each with their own colour and symbol; auto-switch covering the weekly Fable allowance; MCP logins that survive a switch; a switch that cannot mix up two accounts.
 
 ### Good to know
 
 - This build is not signed with an Apple Developer ID yet. The first time you open it, clear the download flag with `xattr -dr com.apple.quarantine /Applications/PixelSwitch.app`, or use System Settings → Privacy & Security → Open Anyway.
 
-**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.0.9...v1.0.10
+**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.0.10...v1.0.11

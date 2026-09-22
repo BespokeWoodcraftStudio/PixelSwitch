@@ -7,7 +7,7 @@ struct SettingsView: View {
     @EnvironmentObject private var updateChecker: UpdateChecker
     @EnvironmentObject private var menuBarConfig: MenuBarConfig
     @AppStorage("refreshInterval") private var refreshInterval: Double = 300
-    @AppStorage("showFullEmail") private var showFullEmail = false
+    @AppStorage(EmailDisplay.key) private var maskEmails = false
     @AppStorage(AccountColorCoding.key) private var colorCodeAccounts = true
     @AppStorage("showInDock") private var showInDock = false
     @AppStorage("appLanguage") private var appLanguage = "auto"
@@ -96,7 +96,10 @@ struct SettingsView: View {
             }
 
             Section("Account display") {
-                Toggle("Show full email address", isOn: $showFullEmail)
+                Toggle("Hide part of each email address", isOn: $maskEmails)
+                Text("Off by default, so you can see exactly which account is which. Turn it on to mask addresses (cla*@*.com) before sharing your screen or sending a screenshot.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Toggle("Give each account its own color", isOn: $colorCodeAccounts)
                 Text("Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards.")
                     .font(.caption)

@@ -5,7 +5,7 @@ struct AccountSwitcherView: View {
     /// Settings → Appearance. Off restores the plain, uncoloured rows.
     @AppStorage(AccountColorCoding.key) private var colorCodeAccounts = true
     @EnvironmentObject private var appState: AppState
-    @AppStorage("showFullEmail") private var showFullEmail = false
+    @AppStorage(EmailDisplay.key) private var maskEmails = false
     @State private var showingAddConfirm = false
     @State private var editingAccountId: UUID?
     @State private var editingLabel = ""
@@ -107,7 +107,7 @@ struct AccountSwitcherView: View {
                     }
                 } else {
                     HStack(spacing: 6) {
-                        Text(account.effectiveDisplayName(obfuscated: !showFullEmail))
+                        Text(account.effectiveDisplayName(obfuscated: maskEmails))
                             .font(.subheadline.weight(.medium))
 
                         Button {
@@ -127,7 +127,7 @@ struct AccountSwitcherView: View {
                     }
                 }
 
-                Text(account.displayEmail(obfuscated: !showFullEmail))
+                Text(account.displayEmail(obfuscated: maskEmails))
                     .font(.caption)
                     .foregroundStyle(.textSecondary)
 

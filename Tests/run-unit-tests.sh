@@ -17,6 +17,7 @@ swiftc -swift-version 6 \
   PixelSwitch/Models/AccountPalette.swift \
   PixelSwitch/Models/Account.swift \
   PixelSwitch/Models/String+Obfuscation.swift \
+  PixelSwitch/Models/EmailDisplay.swift \
   PixelSwitch/Services/AutoSwitchEngine.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
