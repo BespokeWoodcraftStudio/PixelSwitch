@@ -9,7 +9,21 @@ import Foundation
 /// so two accounts hovering at the line never ping-pong. All guardrails that need
 /// state (cooldown, re-entrancy, verification) live in `AppState`; this stays a
 /// pure function.
+///
+/// Two limits are watched, in order: the session/weekly pair (`.windows`), then
+/// the weekly Fable allowance (`.fable`), which runs out on its own schedule.
 enum AutoSwitchEngine {
+
+    /// A limit auto-switch watches.
+    enum Limit: String, Sendable {
+        /// The 5-hour session and 7-day weekly windows (the higher of the two).
+        case windows
+        /// The weekly Fable allowance, from the usage response's `limits` list.
+        case fable
+    }
+
+    /// The model whose weekly allowance `.fable` watches, as the API names it.
+    static let fableModelName = "Fable"
 
     /// The binding utilization for an account = max of the windows we watch.
     /// We watch the 5-hour (session) and 7-day (weekly-all) windows — the two
@@ -37,14 +51,83 @@ enum AutoSwitchEngine {
     ) -> Double? {
         guard let usage else { return nil }
         return [usage.fiveHour, usage.sevenDay]
-            .compactMap { window -> Double? in
-                guard let window, let util = window.utilization else { return nil }
-                guard let resets = window.resetsAtDate else {
-                    return requireKnownWindow ? nil : util
-                }
-                return resets < now ? nil : util
-            }
+            .compactMap { reading($0, asOf: now, requireKnownWindow: requireKnownWindow) }
             .max()
+    }
+
+    /// The utilization for `limit`, under the same expiry rules as
+    /// `bindingUtilization`. Nil when there is no usable reading, which for
+    /// `.fable` includes an account with no separate Fable allowance.
+    static func utilization(
+        _ usage: UsageAPIResponse?,
+        limit: Limit,
+        asOf now: Date = Date(),
+        requireKnownWindow: Bool = false
+    ) -> Double? {
+        switch limit {
+        case .windows:
+            return bindingUtilization(usage, asOf: now, requireKnownWindow: requireKnownWindow)
+        case .fable:
+            guard let window = usage?.modelWeeklyLimit(named: fableModelName)?.window else { return nil }
+            return reading(window, asOf: now, requireKnownWindow: requireKnownWindow)
+        }
+    }
+
+    /// A candidate's utilization on `limit` when it may be switched to for that
+    /// limit, else nil. A switch made for Fable must also leave room on the
+    /// session and weekly windows, or the next refresh would move the user
+    /// straight off the account it just chose. Used both to rank candidates and
+    /// to verify the chosen one before switching, so the two cannot disagree.
+    static func eligibleUtilization(
+        _ usage: UsageAPIResponse?,
+        limit: Limit,
+        ceiling: Double,
+        asOf now: Date = Date()
+    ) -> Double? {
+        guard let util = utilization(usage, limit: limit, asOf: now), util <= ceiling else { return nil }
+        if limit == .fable {
+            guard let windows = bindingUtilization(usage, asOf: now), windows <= ceiling else { return nil }
+        }
+        return util
+    }
+
+    /// One window's utilization, or nil if it has none or its window has reset.
+    private static func reading(_ window: UsageWindow?, asOf now: Date, requireKnownWindow: Bool) -> Double? {
+        guard let window, let util = window.utilization else { return nil }
+        guard let resets = window.resetsAtDate else {
+            return requireKnownWindow ? nil : util
+        }
+        return resets < now ? nil : util
+    }
+
+    /// Which limit to act on and where to go, or nil to stay put. Session and
+    /// weekly are checked first; Fable only when they have not triggered a
+    /// switch, since a Fable target must have session and weekly room anyway.
+    static func plan(
+        active: Account,
+        candidates: [Account],
+        usageByAccount: [UUID: UsageAPIResponse],
+        isSwitchable: (Account) -> Bool,
+        activeSampledThisCycle: Bool,
+        threshold: Double,
+        hysteresisPct: Double,
+        asOf now: Date = Date()
+    ) -> (limit: Limit, targets: [Account])? {
+        for limit in [Limit.windows, .fable] {
+            let targets = rankedTargets(
+                active: active,
+                candidates: candidates,
+                usageByAccount: usageByAccount,
+                isSwitchable: isSwitchable,
+                activeSampledThisCycle: activeSampledThisCycle,
+                threshold: threshold,
+                hysteresisPct: hysteresisPct,
+                limit: limit,
+                asOf: now
+            )
+            if !targets.isEmpty { return (limit, targets) }
+        }
+        return nil
     }
 
     /// Rank the accounts worth switching to, best first (most headroom).
@@ -69,6 +152,7 @@ enum AutoSwitchEngine {
     ///   - threshold: switch when the active binding utilization is >= this (e.g. 90).
     ///   - hysteresisPct: a candidate must sit at least this far below the threshold
     ///     to be eligible (e.g. 10 -> candidate must be <= threshold - 10).
+    ///   - limit: the limit that triggers and ranks (see `eligibleUtilization`).
     ///   - now: injected clock, for window-expiry checks and testability.
     /// - Returns: eligible accounts ordered best-first; empty means stay put.
     static func rankedTargets(
@@ -79,6 +163,7 @@ enum AutoSwitchEngine {
         activeSampledThisCycle: Bool,
         threshold: Double,
         hysteresisPct: Double,
+        limit: Limit = .windows,
         asOf now: Date = Date()
     ) -> [Account] {
         // 1) Only act once the active account has reached the threshold on a
@@ -87,7 +172,7 @@ enum AutoSwitchEngine {
         //    RETAINED reading whose expiry we cannot establish — but a reading
         //    this very cycle fetched is current whether or not the endpoint
         //    sent a parseable resets_at.
-        guard let activeUtil = bindingUtilization(usageByAccount[active.id], asOf: now, requireKnownWindow: !activeSampledThisCycle),
+        guard let activeUtil = utilization(usageByAccount[active.id], limit: limit, asOf: now, requireKnownWindow: !activeSampledThisCycle),
               activeUtil >= threshold else {
             return []
         }
@@ -102,8 +187,8 @@ enum AutoSwitchEngine {
         return candidates
             .compactMap { candidate -> (Account, Double)? in
                 guard candidate.id != active.id, isSwitchable(candidate),
-                      let util = bindingUtilization(usageByAccount[candidate.id], asOf: now),
-                      util <= ceiling else { return nil }
+                      let util = eligibleUtilization(usageByAccount[candidate.id], limit: limit, ceiling: ceiling, asOf: now)
+                else { return nil }
                 return (candidate, util)
             }
             // 3) Most headroom first (lowest known utilization).

@@ -2,7 +2,8 @@
 
 ### New
 
-- **How much Fable is left, for every account.** Each account's card on the Usage tab now has a "Weekly (Fable)" bar under Weekly, showing how much of that account's weekly Fable allowance is left and when it resets. The numbers come from the same usage request PixelSwitch already makes, so nothing extra is sent. You can also add a "FABLE" bar to the menu bar in Settings, for the active account. Accounts without a separate Fable allowance show no Fable bar, and auto-switch still looks only at Session and Weekly.
+- **Auto-switch now covers Fable.** Fable has its own weekly allowance, and it can run out long before your weekly limit does. When the active account's Fable use reaches your auto-switch threshold, PixelSwitch now switches to the account with the most Fable left. It only picks an account that is also clear of its session and weekly limits, so it never lands on one it would have to leave again at once. If no account has Fable to spare, it stays put. Session and weekly are still checked first, exactly as before.
+- **How much Fable is left, for every account.** Each account's card on the Usage tab now has a "Weekly (Fable)" bar under Weekly, showing how much of that account's weekly Fable allowance is left and when it resets. The numbers come from the same usage request PixelSwitch already makes, so nothing extra is sent. You can also add a "FABLE" bar to the menu bar in Settings, for the active account. Accounts without a separate Fable allowance show no Fable bar and are never chosen for a Fable switch.
 
 ### Fixed
 

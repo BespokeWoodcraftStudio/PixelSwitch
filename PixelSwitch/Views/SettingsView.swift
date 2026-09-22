@@ -86,7 +86,7 @@ struct SettingsView: View {
                         }
                         Slider(value: $autoSwitchThreshold, in: 50...99, step: 1)
                     }
-                    Text("When the active account's 5-hour or weekly usage reaches this level, PixelSwitch switches to the account with the most quota left. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.")
+                    Text("When the active account's 5-hour, weekly or Fable usage reaches this level, PixelSwitch switches to the account with the most room left on that limit. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

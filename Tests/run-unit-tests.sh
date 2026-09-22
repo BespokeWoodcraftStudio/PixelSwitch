@@ -1,5 +1,5 @@
 #!/bin/bash
-# Compiles the credential-writing helpers and the usage model with Tests/UnitTests/main.swift and runs them.
+# Compiles the credential-writing helpers, the usage model and the auto-switch engine with Tests/UnitTests/main.swift and runs them.
 # Needs only the Swift compiler (Command Line Tools are enough; no Xcode).
 # PIXELSWITCH_KEYCHAIN_TESTS=1 adds a round trip against /usr/bin/security on a throwaway item.
 set -euo pipefail
@@ -12,6 +12,9 @@ swiftc -swift-version 6 \
   PixelSwitch/Services/ClaudeCredentialMerge.swift \
   PixelSwitch/Services/CredentialOwnership.swift \
   PixelSwitch/Models/UsageData.swift \
+  PixelSwitch/Models/Account.swift \
+  PixelSwitch/Models/String+Obfuscation.swift \
+  PixelSwitch/Services/AutoSwitchEngine.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
 "$OUT/pixelswitch-unit-tests"

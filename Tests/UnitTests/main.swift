@@ -238,6 +238,72 @@ do {
     }
 }
 
+// MARK: - Auto-switch on session/weekly and on Fable
+
+do {
+    let now = ISO8601DateFormatter().date(from: "2026-09-22T17:00:00Z")!
+    let future = "2026-09-28T18:00:00.000000+00:00"
+    let past = "2026-09-20T18:00:00.000000+00:00"
+    func usage(session: Double, weekly: Double, fable: Double?, fableResets: String = future) -> UsageAPIResponse {
+        var json = #"{"five_hour":{"utilization":\#(session),"resets_at":"2026-09-22T19:00:00.000000+00:00"},"seven_day":{"utilization":\#(weekly),"resets_at":"\#(future)"}"#
+        if let fable {
+            json += #","limits":[{"kind":"weekly_scoped","group":"weekly","percent":\#(fable),"resets_at":"\#(fableResets)","scope":{"model":{"id":null,"display_name":"Fable"}}}]"#
+        }
+        return try! JSONDecoder().decode(UsageAPIResponse.self, from: Data((json + "}").utf8))
+    }
+    let active = Account(email: "a@x.com", displayName: "A", isActive: true)
+    let b = Account(email: "b@x.com", displayName: "B")
+    let c = Account(email: "c@x.com", displayName: "C")
+    let d = Account(email: "d@x.com", displayName: "D")
+    let e = Account(email: "e@x.com", displayName: "E")
+    func plan(_ byAccount: [UUID: UsageAPIResponse], candidates: [Account]? = nil, switchable: @escaping (Account) -> Bool = { _ in true }, sampled: Bool = true) -> (limit: AutoSwitchEngine.Limit, targets: [Account])? {
+        AutoSwitchEngine.plan(active: active, candidates: candidates ?? [b, c, d, e], usageByAccount: byAccount,
+                              isSwitchable: switchable, activeSampledThisCycle: sampled,
+                              threshold: 98, hysteresisPct: 10, asOf: now)
+    }
+    func names(_ p: (limit: AutoSwitchEngine.Limit, targets: [Account])?) -> String {
+        guard let p else { return "stay" }
+        return "\(p.limit.rawValue): " + p.targets.map(\.displayName).joined(separator: ",")
+    }
+
+    // Session/weekly behaves as before: most session/weekly room first, Fable not required.
+    let windows = plan([active.id: usage(session: 99, weekly: 50, fable: 99),
+                        b.id: usage(session: 50, weekly: 40, fable: 99),
+                        c.id: usage(session: 20, weekly: 10, fable: nil),
+                        d.id: usage(session: 90, weekly: 10, fable: 0)])
+    check(names(windows) == "windows: C,B", "auto-switch: session at 99% switches on session/weekly, most room first", names(windows))
+
+    // Fable at the threshold switches to the account with the most Fable left.
+    let fable = plan([active.id: usage(session: 10, weekly: 50, fable: 99),
+                      b.id: usage(session: 5, weekly: 30, fable: 60),
+                      c.id: usage(session: 5, weekly: 95, fable: 5),   // weekly too high: excluded
+                      d.id: usage(session: 5, weekly: 10, fable: nil), // no Fable allowance: excluded
+                      e.id: usage(session: 5, weekly: 10, fable: 20)])
+    check(names(fable) == "fable: E,B", "auto-switch: Fable at 99% switches to the most Fable left, with session and weekly room", names(fable))
+
+    let below = plan([active.id: usage(session: 10, weekly: 50, fable: 97), e.id: usage(session: 5, weekly: 10, fable: 20)])
+    check(names(below) == "stay", "auto-switch: Fable at 97% (under a 98% threshold) stays put", names(below))
+
+    let nowhere = plan([active.id: usage(session: 10, weekly: 50, fable: 100),
+                        b.id: usage(session: 5, weekly: 10, fable: 95),
+                        d.id: usage(session: 5, weekly: 10, fable: nil)])
+    check(names(nowhere) == "stay", "auto-switch: Fable out everywhere, so no pointless switch", names(nowhere))
+
+    let expired = plan([active.id: usage(session: 10, weekly: 50, fable: 100, fableResets: past), e.id: usage(session: 5, weekly: 10, fable: 20)])
+    check(names(expired) == "stay", "auto-switch: a Fable reading from a week that has reset never triggers", names(expired))
+
+    let noAllowance = plan([active.id: usage(session: 10, weekly: 50, fable: nil), e.id: usage(session: 5, weekly: 10, fable: 20)])
+    check(names(noAllowance) == "stay", "auto-switch: an active account with no Fable allowance never switches for Fable", names(noAllowance))
+
+    let lockedOut = plan([active.id: usage(session: 10, weekly: 50, fable: 99), e.id: usage(session: 5, weekly: 10, fable: 20)],
+                         switchable: { $0.id != e.id })
+    check(names(lockedOut) == "stay", "auto-switch: an account that cannot be switched to is never chosen for Fable", names(lockedOut))
+
+    let edge = AutoSwitchEngine.eligibleUtilization(usage(session: 5, weekly: 89, fable: 10), limit: .fable, ceiling: 88, asOf: now)
+    let ok = AutoSwitchEngine.eligibleUtilization(usage(session: 5, weekly: 88, fable: 88), limit: .fable, ceiling: 88, asOf: now)
+    check(edge == nil && ok == 88, "auto-switch: a Fable target needs both Fable and weekly at or under the ceiling")
+}
+
 // MARK: - Opt-in: real /usr/bin/security on a throwaway item
 
 if ProcessInfo.processInfo.environment["PIXELSWITCH_KEYCHAIN_TESTS"] == "1" {

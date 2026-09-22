@@ -708,8 +708,9 @@ final class AppState: ObservableObject {
         return true
     }
 
-    /// Evaluate whether the active account has reached the threshold and, if so,
-    /// switch to the same-provider account with the most quota left.
+    /// Evaluate whether the active account has reached the threshold on a watched
+    /// limit (session/weekly, then Fable) and, if so, switch to the same-provider
+    /// account with the most room left on that limit.
     /// Called after every completed refresh. Safe to call repeatedly.
     ///
     /// Candidates are ranked from whatever samples we hold, then the chosen one
@@ -731,7 +732,7 @@ final class AppState: ObservableObject {
         // Only consider same-provider accounts (a Claude switch never touches Codex/Gemini).
         let candidates = accounts.filter { $0.provider == active.provider && $0.id != active.id }
         let activeSampledThisCycle = (accountUsageSampledAt[active.id] ?? .distantPast) >= lastCycleStart
-        let ranked = AutoSwitchEngine.rankedTargets(
+        guard let plan = AutoSwitchEngine.plan(
             active: active,
             candidates: candidates,
             usageByAccount: accountUsage,
@@ -739,15 +740,16 @@ final class AppState: ObservableObject {
             activeSampledThisCycle: activeSampledThisCycle,
             threshold: autoSwitchThreshold,
             hysteresisPct: autoSwitchHysteresis
-        )
-        guard !ranked.isEmpty else { return }
+        ) else { return }
+        let limit = plan.limit
+        let ranked = plan.targets
 
         isEvaluatingAutoSwitch = true
         defer { isEvaluatingAutoSwitch = false }
 
-        let activeUtil = AutoSwitchEngine.bindingUtilization(accountUsage[active.id]) ?? -1
+        let activeUtil = AutoSwitchEngine.utilization(accountUsage[active.id], limit: limit) ?? -1
         let ceiling = autoSwitchThreshold - autoSwitchHysteresis
-        log.info("[autoSwitch] Active \(active.id) at \(String(format: "%.0f", activeUtil))% (threshold \(String(format: "%.0f", self.autoSwitchThreshold))%); \(ranked.count) candidate(s)")
+        log.info("[autoSwitch] Active \(active.id) at \(String(format: "%.0f", activeUtil))% on \(limit.rawValue) (threshold \(String(format: "%.0f", self.autoSwitchThreshold))%); \(ranked.count) candidate(s)")
 
         // At most ONE fresh verification request per evaluation. Later ranked
         // candidates only qualify via samples this cycle already took.
@@ -769,9 +771,10 @@ final class AppState: ObservableObject {
                 continue
             }
 
-            guard let verifiedUtil = AutoSwitchEngine.bindingUtilization(usage),
-                  verifiedUtil <= ceiling else {
-                log.info("[autoSwitch] Candidate \(target.id) failed verification (\(AutoSwitchEngine.bindingUtilization(usage).map { String(format: "%.0f%%", $0) } ?? "no reading")); trying next")
+            guard let verifiedUtil = AutoSwitchEngine.eligibleUtilization(usage, limit: limit, ceiling: ceiling) else {
+                let onLimit = AutoSwitchEngine.utilization(usage, limit: limit).map { String(format: "%.0f%%", $0) } ?? "no reading"
+                let onWindows = AutoSwitchEngine.bindingUtilization(usage).map { String(format: "%.0f%%", $0) } ?? "no reading"
+                log.info("[autoSwitch] Candidate \(target.id) failed verification (\(limit.rawValue) \(onLimit), windows \(onWindows)); trying next")
                 continue
             }
 
@@ -784,7 +787,7 @@ final class AppState: ObservableObject {
                 return
             }
 
-            log.info("[autoSwitch] Switching to \(target.id), verified at \(String(format: "%.0f", verifiedUtil))%")
+            log.info("[autoSwitch] Switching to \(target.id) for \(limit.rawValue), verified at \(String(format: "%.0f", verifiedUtil))%")
             lastAutoSwitchAt = Date()
             // switchTo() calls refresh() -> evaluateAutoSwitch() again, but the
             // re-entrancy flag + the freshly-set cooldown make that a no-op.
