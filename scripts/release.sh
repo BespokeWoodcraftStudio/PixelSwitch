@@ -129,8 +129,15 @@ git push origin "$TAG"
 # This repository is a GitHub fork, and GitHub does not start workflows from
 # pushes on it (observed 2026-09-21: neither the main push nor the v1.0 tag
 # push triggered a run). Start the release build on the tag explicitly.
-gh workflow run build.yml --ref "$TAG"
+#
+# `-R` is not optional. Without it the gh CLI resolves a fork to its PARENT, so
+# the dispatch went to XueshiQiao/CCSwitcher and came back "HTTP 403: Must have
+# admin rights to Repository" while the tag sat there with no build (v1.0.10,
+# 2026-09-22). Read from the origin remote rather than hardcoded, so a rename
+# cannot make this silently wrong again.
+REPO=$(git remote get-url origin | sed -E 's#.*github\.com[:/]##; s#\.git$##')
+gh workflow run build.yml -R "$REPO" --ref "$TAG"
 
 echo ""
 echo "Released ${TAG} (build ${NEW_BUILD})"
-echo "GitHub Actions will build and publish the release. Watch it with: gh run list -L 1"
+echo "GitHub Actions will build and publish the release. Watch it with: gh run list -R ${REPO} -L 1"
