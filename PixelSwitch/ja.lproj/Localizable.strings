@@ -181,3 +181,8 @@
 "Updated %@ ago" = "%@前に更新";
 "Could not save the refreshed sign-in; will retry automatically." = "更新されたログイン情報を保存できませんでした。自動的に再試行します。";
 "Credential storage is temporarily unavailable. Try again shortly." = "認証情報ストレージは一時的に利用できません。しばらくしてからもう一度お試しください。";
+
+/* Login ownership (1.0.3) */
+"The login saved for %@ belongs to %@. Re-authenticate %@ to fix it." = "%1$@ に保存されたログインは %2$@ のものです。%3$@ を再認証して修正してください。";
+"The login saved for %@ is also saved under another account. Re-authenticate %@ to fix it." = "%1$@ に保存されたログインは別のアカウントにも保存されています。%2$@ を再認証して修正してください。";
+"Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "保存されたログインは別のアカウントのものだったため削除しました。再認証（↻）して修正してください。";

@@ -183,3 +183,8 @@
 "Updated %@ ago" = "Updated %@ ago";
 "Could not save the refreshed sign-in; will retry automatically." = "Could not save the refreshed sign-in; will retry automatically.";
 "Credential storage is temporarily unavailable. Try again shortly." = "Credential storage is temporarily unavailable. Try again shortly.";
+
+/* Login ownership (1.0.3) */
+"The login saved for %@ belongs to %@. Re-authenticate %@ to fix it." = "The login saved for %1$@ belongs to %2$@. Re-authenticate %3$@ to fix it.";
+"The login saved for %@ is also saved under another account. Re-authenticate %@ to fix it." = "The login saved for %1$@ is also saved under another account. Re-authenticate %2$@ to fix it.";
+"Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix.";

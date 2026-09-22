@@ -10,6 +10,7 @@ swiftc -swift-version 6 \
   PixelSwitch/Services/ClaudeTokenWriter.swift \
   PixelSwitch/Services/ClaudeCredentialsFile.swift \
   PixelSwitch/Services/ClaudeCredentialMerge.swift \
+  PixelSwitch/Services/CredentialOwnership.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
 "$OUT/pixelswitch-unit-tests"

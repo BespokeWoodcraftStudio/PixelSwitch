@@ -154,6 +154,37 @@ do {
     else { check(false, "merge: a target without claudeAiOauth is written verbatim, never merged") }
 }
 
+// MARK: - CredentialOwnership
+
+do {
+    func cred(_ access: String, _ refresh: String?) -> String {
+        let r = refresh.map { #","refreshToken":"\#($0)""# } ?? ""
+        return #"{"claudeAiOauth":{"accessToken":"\#(access)"\#(r),"expiresAt":1790000000000},"mcpOAuth":{"x":{"serverName":"x"}}}"#
+    }
+    let a = CredentialOwnership.login(fromCredential: cred("at-A", "rt-A"))!
+    check(a == .init(accessToken: "at-A", refreshToken: "rt-A"), "ownership: reads the Claude login from a credential")
+    check(CredentialOwnership.login(fromCredential: #"{"mcpOAuth":{}}"#) == nil, "ownership: a credential without a Claude login has no owner")
+
+    let refreshedA = CredentialOwnership.Login(accessToken: "at-A2", refreshToken: "rt-A")
+    check(CredentialOwnership.sameGrant(a, refreshedA), "ownership: a new access token on the same refresh token is the same grant")
+    check(!CredentialOwnership.sameGrant(a, .init(accessToken: "at-A3", refreshToken: "rt-A3")), "ownership: a rotated refresh token no longer matches (unknown, not proof)")
+
+    let saved: [String: CredentialOwnership.Login] = [
+        "A": a,
+        "B": .init(accessToken: "at-B", refreshToken: "rt-B"),
+        "C": .init(accessToken: "at-C", refreshToken: nil),
+    ]
+    check(CredentialOwnership.lineageMatches(refreshedA, in: saved) == ["A"], "ownership: lineage finds the one account a refreshed login came from")
+    check(CredentialOwnership.lineageMatches(.init(accessToken: "at-X", refreshToken: "rt-X"), in: saved).isEmpty, "ownership: an unknown login matches nobody")
+    check(CredentialOwnership.sharedLogins(saved).isEmpty, "ownership: distinct saved logins share nothing")
+
+    // Tonight's corruption: A's login saved under B as well.
+    var corrupted = saved
+    corrupted["B"] = a
+    check(CredentialOwnership.sharedLogins(corrupted) == [["A", "B"]], "ownership: a login saved under two accounts is found", "\(CredentialOwnership.sharedLogins(corrupted))")
+    check(CredentialOwnership.lineageMatches(a, in: corrupted) == ["A", "B"], "ownership: an ambiguous lineage returns both accounts, so the API must decide")
+}
+
 // MARK: - Opt-in: real /usr/bin/security on a throwaway item
 
 if ProcessInfo.processInfo.environment["PIXELSWITCH_KEYCHAIN_TESTS"] == "1" {

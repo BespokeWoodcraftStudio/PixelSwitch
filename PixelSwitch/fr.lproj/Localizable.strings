@@ -181,3 +181,8 @@
 "Updated %@ ago" = "Mis à jour il y a %@";
 "Could not save the refreshed sign-in; will retry automatically." = "Impossible d'enregistrer les identifiants actualisés ; nouvelle tentative automatique.";
 "Credential storage is temporarily unavailable. Try again shortly." = "Le stockage des identifiants est temporairement indisponible. Réessayez dans un instant.";
+
+/* Login ownership (1.0.3) */
+"The login saved for %@ belongs to %@. Re-authenticate %@ to fix it." = "La connexion enregistrée pour %1$@ appartient à %2$@. Réauthentifiez %3$@ pour corriger cela.";
+"The login saved for %@ is also saved under another account. Re-authenticate %@ to fix it." = "La connexion enregistrée pour %1$@ est aussi enregistrée sous un autre compte. Réauthentifiez %2$@ pour corriger cela.";
+"Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "Sa connexion enregistrée appartenait à un autre compte et a été supprimée. Réauthentifiez (↻) pour corriger cela.";

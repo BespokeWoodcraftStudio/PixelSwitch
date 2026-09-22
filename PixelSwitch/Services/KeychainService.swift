@@ -256,6 +256,20 @@ final class KeychainService: Sendable {
         return nil
     }
 
+    /// Every account's backup in one read, or nil if the store is unreadable
+    /// right now (so callers never mistake "unreadable" for "no backups").
+    func allAccountBackups() -> [String: AccountBackup]? {
+        storeLock.lock()
+        defer { storeLock.unlock() }
+        switch loadBackupStore() {
+        case .loaded(let store): return store
+        case .empty: return [:]
+        case .failed(let reason):
+            log.error("[allBackups] Store unreadable (\(reason))")
+            return nil
+        }
+    }
+
     @discardableResult
     func removeAccountBackup(forAccountId accountId: String) -> Bool {
         log.info("[removeBackup] Removing for accountId=\(accountId)")

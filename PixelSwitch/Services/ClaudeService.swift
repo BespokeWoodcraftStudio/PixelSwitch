@@ -197,7 +197,7 @@ final class ClaudeService: @unchecked Sendable {
 
     func getAuthStatus() async throws -> AuthStatus {
         log.info("[getAuthStatus] Fetching auth status...")
-        let output = try await runClaude(args: ["auth", "status"])
+        let output = try await runClaude(args: ["auth", "status"], timeout: 30)
         guard let data = output.data(using: .utf8) else {
             log.error("[getAuthStatus] Invalid output (not UTF-8)")
             throw ClaudeServiceError.invalidOutput
@@ -209,7 +209,7 @@ final class ClaudeService: @unchecked Sendable {
 
     func isClaudeAvailable() async -> Bool {
         do {
-            let version = try await runClaude(args: ["--version"])
+            let version = try await runClaude(args: ["--version"], timeout: 30)
             log.info("[isClaudeAvailable] YES, version: \(version.trimmingCharacters(in: .whitespacesAndNewlines))")
             return true
         } catch {
@@ -269,6 +269,34 @@ final class ClaudeService: @unchecked Sendable {
         } catch {
             log.error("[getUsageLimits] Decode Error: \(error.localizedDescription)")
             throw UsageError.decode(error.localizedDescription)
+        }
+    }
+
+    // MARK: - Whose login is this?
+
+    /// The email of the account an access token belongs to, from the API
+    /// (`/api/oauth/profile`), or nil if the token is expired or the call fails.
+    /// This is the ground truth for ownership; see `CredentialOwnership`.
+    func accountEmail(forAccessToken accessToken: String) async -> String? {
+        guard let url = URL(string: "https://api.anthropic.com/api/oauth/profile") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200,
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let account = object["account"] as? [String: Any],
+                  let email = account["email"] as? String ?? account["email_address"] as? String else {
+                log.warning("[accountEmail] Profile lookup failed (HTTP \(status))")
+                return nil
+            }
+            return email
+        } catch {
+            log.warning("[accountEmail] Profile lookup failed: \(error.localizedDescription)")
+            return nil
         }
     }
 
@@ -392,24 +420,33 @@ final class ClaudeService: @unchecked Sendable {
     /// missing backup from a briefly unreadable store) and handed down so no
     /// second, ambiguity-collapsing lookup happens here.
     @discardableResult
-    func switchAccount(from currentAccount: Account, to targetAccount: Account, targetBackup: AccountBackup) async throws -> SwitchOutcome {
+    /// `liveOwner` is the account the live login was proven to belong to (by
+    /// the token, not by `~/.claude.json`; see `CredentialOwnership`), or nil if
+    /// that could not be proven, in which case nothing is backed up: saving an
+    /// unproven login under an account is how one account's backup came to hold
+    /// another's token.
+    func switchAccount(liveOwner: Account?, to targetAccount: Account, targetBackup: AccountBackup) async throws -> SwitchOutcome {
         let keychain = KeychainService.shared
 
-        log.info("[switchAccount] Switching from \(currentAccount.id) to \(targetAccount.id)")
+        log.info("[switchAccount] Switching to \(targetAccount.id); live login belongs to \(liveOwner?.id.uuidString ?? "an unproven account")")
 
-        // 1. Back up current account (token + oauthAccount)
-        log.info("[switchAccount] Step 1: Backing up current account...")
-        if let currentToken = keychain.readClaudeToken(),
-           let currentOAuth = keychain.readOAuthAccount() {
-            let email = (currentOAuth["emailAddress"]?.value as? String) ?? "?"
-            if email == currentAccount.email {
-                let saved = keychain.saveAccountBackup(token: currentToken, oauthAccount: currentOAuth, forAccountId: currentAccount.id.uuidString)
-                log.info("[switchAccount] Step 1: Backup saved: \(saved)")
+        // 1. Back up the live login under the account it belongs to.
+        log.info("[switchAccount] Step 1: Backing up the live login...")
+        if let owner = liveOwner, let liveToken = keychain.readClaudeToken() {
+            // Take the identity from ~/.claude.json only if it names the same
+            // account; running sessions can leave another account's there.
+            let fileIdentity = keychain.readOAuthAccount()
+            let fileEmail = fileIdentity?["emailAddress"]?.value as? String
+            let identity = (fileEmail == owner.email ? fileIdentity : nil)
+                ?? keychain.getAccountBackup(forAccountId: owner.id.uuidString)?.oauthAccount
+            if let identity {
+                let saved = keychain.saveAccountBackup(token: liveToken, oauthAccount: identity, forAccountId: owner.id.uuidString)
+                log.info("[switchAccount] Step 1: Backup saved for its owner: \(saved)")
             } else {
-                log.warning("[switchAccount] Step 1: oauthAccount email (\(email)) != source (\(currentAccount.email)), skipping backup")
+                log.warning("[switchAccount] Step 1: No identity on record for the owner; skipping backup")
             }
         } else {
-            log.warning("[switchAccount] Step 1: Could not read current token or oauthAccount")
+            log.warning("[switchAccount] Step 1: Live login's owner not proven (or no live login); skipping backup so no account's backup is overwritten with another's login")
         }
 
         // 2. Target backup was resolved and validated by the caller.
@@ -442,9 +479,20 @@ final class ClaudeService: @unchecked Sendable {
         // billing the old account for hours.
         keychain.touchClaudeCredentialsFile()
 
-        // 4. Verify
+        // 4. Verify. The credentials are already written, so a CLI that does not
+        // answer must not strand the switch half-done: check the store directly.
         log.info("[switchAccount] Step 4: Verifying with `claude auth status`...")
-        let status = try await getAuthStatus()
+        let status: AuthStatus
+        do {
+            status = try await getAuthStatus()
+        } catch ClaudeServiceError.timedOut {
+            log.warning("[switchAccount] Step 4: `claude auth status` timed out; verifying against the credential store instead")
+            guard credentialsOnDiskMatch(backup: targetBackup, email: targetAccount.email) else {
+                throw ClaudeServiceError.switchVerificationFailed
+            }
+            log.info("[switchAccount] Step 4: Switch verified against the credential store (CLI did not answer)")
+            return SwitchOutcome(shadowedBy: nil)
+        }
         guard status.loggedIn else {
             log.error("[switchAccount] Step 4: Not logged in after switch!")
             throw ClaudeServiceError.switchVerificationFailed
@@ -649,7 +697,9 @@ final class ClaudeService: @unchecked Sendable {
 
     // MARK: - CLI Runner
 
-    private func runClaude(args: [String]) async throws -> String {
+    /// `timeout` ends the process and throws `.timedOut` if it runs longer; nil
+    /// waits forever (interactive logins take as long as the user does).
+    private func runClaude(args: [String], timeout: TimeInterval? = nil) async throws -> String {
         let claudePath = self.claudePath
         log.debug("[runClaude] Running: \(claudePath) \(args.joined(separator: " "))")
         return try await withCheckedThrowingContinuation { continuation in
@@ -687,12 +737,24 @@ final class ClaudeService: @unchecked Sendable {
 
                 do {
                     try process.run()
-                    process.waitUntilExit()
-
+                    let timedOut = TimeoutFlag()
+                    if let timeout {
+                        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                            if process.isRunning {
+                                timedOut.set()
+                                process.terminate()
+                            }
+                        }
+                    }
+                    // Read before waiting: a full pipe would otherwise block the child forever.
                     let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    process.waitUntilExit()
                     let output = String(data: data, encoding: .utf8) ?? ""
 
-                    if process.terminationStatus == 0 {
+                    if timedOut.isSet {
+                        log.error("[runClaude] Timed out after \(Int(timeout ?? 0)) s: claude \(args.joined(separator: " "))")
+                        continuation.resume(throwing: ClaudeServiceError.timedOut("claude \(args.joined(separator: " "))"))
+                    } else if process.terminationStatus == 0 {
                         log.debug("[runClaude] Success (exit 0), output length: \(output.count)")
                         continuation.resume(returning: output)
                     } else {
@@ -719,6 +781,8 @@ enum ClaudeServiceError: LocalizedError {
     case oauthAccountWriteFailed
     case switchVerificationFailed
     case switchWrongAccount(expected: String, actual: String)
+    case timedOut(String)
+    case targetLoginBelongsElsewhere(target: String, owner: String)
 
     var errorDescription: String? {
         switch self {
@@ -738,6 +802,18 @@ enum ClaudeServiceError: LocalizedError {
             return "Account switch verification failed"
         case .switchWrongAccount(let expected, let actual):
             return "Switch failed: expected \(expected) but got \(actual). Try removing and re-adding the account."
+        case .timedOut(let what):
+            return "Claude CLI did not answer in time (\(what))"
+        case .targetLoginBelongsElsewhere(let target, let owner):
+            return "The login saved for \(target) belongs to \(owner). Re-authenticate \(target) to fix it."
         }
     }
+}
+
+/// Set from the timeout timer, read after the process exits.
+private final class TimeoutFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.lock(); value = true; lock.unlock() }
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
 }

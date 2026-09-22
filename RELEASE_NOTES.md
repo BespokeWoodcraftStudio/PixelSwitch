@@ -3,6 +3,10 @@
 ### Fixed
 
 - **Your MCP server logins survive an account switch.** Claude Code keeps the logins for MCP servers (Stripe, Supabase, Linear and the rest) in the same Keychain item as your Claude account login. Until now a switch put back the whole item as it was the last time that account was active, so MCP logins made or renewed since then were replaced by older copies, and those servers asked you to sign in again. Measured on one Mac: a switch took the stored MCP logins from 48 entries to 8. PixelSwitch now takes only the Claude account login from the account you switch to, and keeps this Mac's MCP logins exactly as they are.
+- **A switch can no longer mix up two accounts.** PixelSwitch used to decide whose login was live from `~/.claude.json`, but running Claude Code sessions rewrite that file from memory. So it could name one account while the Keychain held another's login, and a switch then saved one account's login under the other; switching to that account later used the wrong login while claiming the right one. PixelSwitch now works out whose login is live from the login itself (and, when needed, by asking Anthropic's servers), backs up a login only under the account it belongs to, and refuses a switch whose saved login belongs to someone else.
+- **Repairs a mix-up it finds.** If the same login is saved under two accounts, PixelSwitch keeps it only under the account it belongs to and asks you to re-authenticate the other. It also never renews a saved login that belongs to a different account, which could have signed that account's sessions out.
+- **Stays in step with Claude Code.** On every refresh PixelSwitch follows the account whose login is actually live, corrects `~/.claude.json` if a session left the wrong account there, and keeps that account's saved login current, so switching back never restores an out-of-date one.
+- **No more half-finished switches.** If `claude auth status` stops answering, PixelSwitch gives up on it after 30 seconds and checks the stored login directly, instead of stalling with the switch half done.
 
 #### Included from v1.0.1
 
