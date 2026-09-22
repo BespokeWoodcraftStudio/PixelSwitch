@@ -179,7 +179,10 @@ struct AccountSwitcherView: View {
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(account.isActive ? .cardFillStrong : .clear)
-                .strokeBorder(.cardBorder, lineWidth: account.isActive ? 2 : 1)
+                // Same orange ring as the Usage tab, so "this is the one you
+                // are signed in to" looks identical wherever you are looking.
+                .strokeBorder(account.isActive ? Color.activeAccountRing : .cardBorder,
+                              lineWidth: account.isActive ? 2 : 1)
                 .shadow(color: AppStyle.cardShadowColor, radius: AppStyle.cardShadowRadius, x: 0, y: AppStyle.cardShadowY)
         )
     }

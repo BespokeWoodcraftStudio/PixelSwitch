@@ -256,7 +256,13 @@ struct UsageDashboardView: View {
             }
         }
         }
-        .cardStyle()
+        // The account you are signed in to right now is ringed in orange, all
+        // the way round. The small green "Active" badge is still there, but a
+        // badge has to be hunted for; a ring is seen without reading anything.
+        .cardStyle(
+            border: account.isActive ? .activeAccountRing : .cardBorder,
+            borderWidth: account.isActive ? 2 : 1
+        )
         .sectionPadding()
     }
 
@@ -356,7 +362,8 @@ struct UsageDashboardView: View {
             resetText: resetText,
             resetIsAbsolute: resetIsAbsolute,
             identityColor: menuBarConfig.limitIdentityColor(for: kind),
-            fillColor: menuBarConfig.limitBarColor(for: kind, utilization: utilization, context: .dashboard)
+            fillColor: menuBarConfig.limitBarColor(for: kind, utilization: utilization, context: .dashboard),
+            isLow: menuBarConfig.limitIsLow(utilization: utilization)
         )
     }
 }

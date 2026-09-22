@@ -30,6 +30,9 @@ enum AppStyle {
 struct CardStyleModifier: ViewModifier {
     var fill: Color = .cardFill
     var border: Color = .cardBorder
+    /// `strokeBorder` insets by half of this, so a thicker ring grows inwards
+    /// and a card never gets wider than its neighbours.
+    var borderWidth: CGFloat = 1
     var hasShadow: Bool = true
 
     func body(content: Content) -> some View {
@@ -38,7 +41,7 @@ struct CardStyleModifier: ViewModifier {
             .background(
                 RoundedRectangle(cornerRadius: AppStyle.cardCornerRadius)
                     .fill(fill)
-                    .strokeBorder(border, lineWidth: 1)
+                    .strokeBorder(border, lineWidth: borderWidth)
                     .shadow(
                         color: hasShadow ? AppStyle.cardShadowColor : .clear,
                         radius: AppStyle.cardShadowRadius,
@@ -51,8 +54,8 @@ struct CardStyleModifier: ViewModifier {
 
 extension View {
     /// Standard card style with fill, border, shadow, and content padding.
-    func cardStyle(fill: Color = .cardFill, border: Color = .cardBorder, hasShadow: Bool = true) -> some View {
-        modifier(CardStyleModifier(fill: fill, border: border, hasShadow: hasShadow))
+    func cardStyle(fill: Color = .cardFill, border: Color = .cardBorder, borderWidth: CGFloat = 1, hasShadow: Bool = true) -> some View {
+        modifier(CardStyleModifier(fill: fill, border: border, borderWidth: borderWidth, hasShadow: hasShadow))
     }
 
     /// Standard horizontal padding for sections within the popover.

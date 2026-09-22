@@ -57,6 +57,17 @@ extension Color {
     static let cardFillStrong = adaptive(light: Color.white.opacity(0.25), dark: Color.black.opacity(0.28))
     /// Standard card border.
     static let cardBorder = adaptive(light: Color.white.opacity(0.40), dark: Color.white.opacity(0.20))
+    /// The ring drawn right round the account that is signed in right now.
+    ///
+    /// Its own token rather than `.brand`: the brand coral sits next to the
+    /// "Max" badge and would read as decoration. This is a bright orange that
+    /// appears nowhere else in a card, so the live account is found by glance
+    /// instead of by hunting for the small "Active" badge. Deeper in light
+    /// appearance and brighter in dark, so it carries on both.
+    static let activeAccountRing = adaptive(
+        light: Color(red: 0xF5 / 255.0, green: 0x6A / 255.0, blue: 0x00 / 255.0),  // #F56A00
+        dark: Color(red: 0xFF / 255.0, green: 0x94 / 255.0, blue: 0x2E / 255.0)    // #FF942E
+    )
 
     // MARK: - Tab Bar
 
@@ -85,6 +96,7 @@ extension ShapeStyle where Self == Color {
     static var cardFill: Color { .cardFill }
     static var cardFillStrong: Color { .cardFillStrong }
     static var cardBorder: Color { .cardBorder }
+    static var activeAccountRing: Color { .activeAccountRing }
     static var tabFill: Color { .tabFill }
     static var tabBorder: Color { .tabBorder }
     static var textPrimary: Color { .textPrimary }

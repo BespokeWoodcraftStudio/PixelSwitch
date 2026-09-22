@@ -3,11 +3,19 @@ import SwiftUI
 /// One limit's row on an account's Usage card.
 ///
 /// Which limit a row is and how full it is are shown by different things, on
-/// purpose. The chip, its symbol, the label and the row's tint are the limit's
-/// identity and never change with usage; the bar fill and the percentage keep
-/// their own meaning and turn red as a limit runs out. Before this, a card's
-/// three bars were coloured only by how full they were, so Weekly and Fable
-/// were both blue, and both red once they were nearly out.
+/// purpose. The chip, its symbol and the row's tint are the limit's identity
+/// and never change with usage; the bar fill turns red as a limit runs out.
+/// Before this, a card's three bars were coloured only by how full they were,
+/// so Weekly and Fable were both blue, and both red once they were nearly out.
+///
+/// **The words are never the colour of what they sit on.** The label used to be
+/// drawn in the limit's own colour, on a row tinted with that same colour, and
+/// the founder's verdict was blunt: "the text is the same color as the
+/// background... I want you to make the text black." So every figure and label
+/// here is plain text, and the colour lives in the chip, the tint and the bar,
+/// which are shapes rather than type. The one exception is the used-percentage
+/// when a limit is nearly gone: red on a green, blue or purple tint is the
+/// opposite of camouflage, and losing that alarm would cost more than it saved.
 struct UsageLimitRow: View {
     let kind: LimitBarKind
     /// "Session", "Weekly", "Fable".
@@ -23,6 +31,10 @@ struct UsageLimitRow: View {
     let identityColor: Color
     /// The bar's fill colour, which does follow how full the limit is.
     let fillColor: Color
+    /// True once the limit is inside the warning threshold, i.e. `fillColor` is
+    /// the alarm colour rather than the limit's own. Only then does a figure
+    /// keep its colour; the rest of the time it is plain text.
+    var isLow: Bool = false
 
     private var clamped: Double { min(max(utilization, 0), 100) }
     private var percentLeft: Int { Int((100 - clamped).rounded()) }
@@ -35,7 +47,7 @@ struct UsageLimitRow: View {
                 HStack(spacing: 6) {
                     Text(title)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(identityColor)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                         .layoutPriority(1)
 
@@ -70,7 +82,7 @@ struct UsageLimitRow: View {
 
                     Text("\(Int(clamped))%")
                         .font(.caption.weight(.medium).monospacedDigit())
-                        .foregroundStyle(fillColor)
+                        .foregroundStyle(isLow ? fillColor : Color.primary)
                         .frame(width: 34, alignment: .trailing)
                 }
             }

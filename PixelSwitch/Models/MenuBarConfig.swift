@@ -197,6 +197,20 @@ final class MenuBarConfig: ObservableObject {
         return limitIdentityColor(for: kind)
     }
 
+    /// True when the bar is showing its alarm colour rather than the limit's own.
+    ///
+    /// `UsageLimitRow` asks this before it lets a figure keep a colour. An alarm
+    /// colour never matches the row's tint, so it stays legible; a healthy one
+    /// IS the tint, which is exactly how a figure ended up invisible on its own
+    /// background. The two branches mirror `limitBarColor` above: the stock
+    /// palette leaves green at 60% used, a custom palette at its own threshold.
+    func limitIsLow(utilization: Double?) -> Bool {
+        guard let utilization else { return false }
+        let used = min(max(utilization, 0), 100)
+        guard customizesLimitBarColors else { return used >= 60 }
+        return (100.0 - used) <= min(max(lowRemainingWarningThreshold, 0), 100)
+    }
+
     /// The colour that says WHICH limit a row is, independent of how full it is.
     /// The bar fill still turns red when a limit is nearly out; this never does,
     /// so two limits that are both nearly out stay tellable apart.

@@ -57,7 +57,8 @@ private struct Card: View {
         UsageLimitRow(kind: kind, title: title, utilization: used, resetText: reset,
                       resetIsAbsolute: reset.contains(":"),
                       identityColor: config.limitIdentityColor(for: kind),
-                      fillColor: config.limitBarColor(for: kind, utilization: used, context: .dashboard))
+                      fillColor: config.limitBarColor(for: kind, utilization: used, context: .dashboard),
+                      isLow: config.limitIsLow(utilization: used))
     }
 
     var body: some View {
@@ -95,7 +96,10 @@ private struct Card: View {
                 row(.fable, "Fable", account.fable, account.weekReset)
             }
         }
-        .cardStyle()
+        .cardStyle(
+            border: account.active ? .activeAccountRing : .cardBorder,
+            borderWidth: account.active ? 2 : 1
+        )
     }
 }
 
