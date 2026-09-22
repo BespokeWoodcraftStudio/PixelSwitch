@@ -11,6 +11,8 @@
 //   swiftc -swift-version 6 -target arm64-apple-macos14.0 -parse-as-library \
 //     -o /tmp/pixelshots \
 //     PixelSwitch/Views/Components/UsageLimitRow.swift \
+//     PixelSwitch/Views/Components/AccountGlyph.swift \
+//     PixelSwitch/Models/Account.swift PixelSwitch/Models/String+Obfuscation.swift \
 //     PixelSwitch/Models/MenuBarConfig.swift PixelSwitch/Models/MenuBarModule.swift \
 //     PixelSwitch/Models/AppStyle.swift PixelSwitch/Models/BrandColor.swift \
 //     PixelSwitch/Models/AccountPalette.swift PixelSwitch/Services/L10n.swift \
@@ -18,7 +20,7 @@
 import SwiftUI
 import AppKit
 
-private struct Account {
+private struct SampleAccount {
     let email: String
     let swatch: Int
     let plan: String
@@ -30,20 +32,26 @@ private struct Account {
     let weekReset: String
 }
 
-private let sample: [Account] = [
-    .init(email: "ahmed@pixelventures.ai", swatch: 0, plan: "Max", active: false,
+// Invented accounts on example.com, the domain reserved for documentation
+// (RFC 2606). Never put a real address in a picture that ships to a public
+// repository: the first version of these screenshots did, and it had to be
+// replaced.
+private let sample: [SampleAccount] = [
+    .init(email: "work@example.com", swatch: 0, plan: "Max", active: false,
           session: 98, weekly: 62, fable: 87, sessionReset: "21 min", weekReset: "Mon 11:00 AM"),
-    .init(email: "claude@pixelventures.ai", swatch: 3, plan: "Max", active: true,
+    .init(email: "personal@example.com", swatch: 3, plan: "Max", active: true,
           session: 15, weekly: 6, fable: 8, sessionReset: "2 hr 57 min", weekReset: "Mon 9:00 AM"),
-    .init(email: "studio@pixelventures.ai", swatch: 5, plan: "Max", active: false,
+    .init(email: "studio@example.com", swatch: 5, plan: "Max", active: false,
           session: 4, weekly: 94, fable: 60, sessionReset: "4 hr 02 min", weekReset: "Fri 9:00 AM"),
-    .init(email: "workshop@pixelventures.ai", swatch: 8, plan: "Pro", active: false,
+    .init(email: "side-project@example.com", swatch: 8, plan: "Pro", active: false,
           session: 40, weekly: 30, fable: 20, sessionReset: "1 hr 10 min", weekReset: "Wed 8:00 AM"),
 ]
 
 private struct Card: View {
-    let account: Account
+    let account: SampleAccount
     let config: MenuBarConfig
+
+    let logo: Image
 
     private func row(_ kind: LimitBarKind, _ title: LocalizedStringKey, _ used: Double, _ reset: String) -> UsageLimitRow {
         UsageLimitRow(kind: kind, title: title, utilization: used, resetText: reset,
@@ -61,9 +69,10 @@ private struct Card: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    Image(systemName: "brain.head.profile")
-                        .font(.subheadline)
-                        .foregroundStyle(AccountPalette.color(account.swatch))
+                    AccountGlyph(provider: .claudeCode,
+                                 tint: AccountPalette.color(account.swatch),
+                                 size: 17,
+                                 logo: logo)
                     Text(account.email)
                         .font(.subheadline.weight(.medium))
                         .lineLimit(1)
@@ -115,11 +124,51 @@ private func write<V: View>(_ view: V, width: CGFloat, scheme: ColorScheme, to p
     }
 }
 
+/// What auto-switch does, drawn with the same cards the app draws: the account
+/// that has run out of Fable, and the one PixelSwitch moves to.
+@MainActor
+private func autoSwitch(config: MenuBarConfig, logo: Image, scheme: ColorScheme) -> some View {
+    let exhausted = SampleAccount(email: "work@example.com", swatch: 0, plan: "Max", active: true,
+                            session: 12, weekly: 64, fable: 100,
+                            sessionReset: "3 hr 40 min", weekReset: "Mon 11:00 AM")
+    let chosen = SampleAccount(email: "studio@example.com", swatch: 5, plan: "Max", active: false,
+                         session: 8, weekly: 41, fable: 23,
+                         sessionReset: "4 hr 02 min", weekReset: "Fri 9:00 AM")
+
+    return VStack(alignment: .leading, spacing: 10) {
+        Text("Fable ran out on the account you were using")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+        Card(account: exhausted, config: config, logo: logo)
+
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.down")
+                .font(.caption.weight(.bold))
+            Text("PixelSwitch switches to the account with the most Fable left, and room on its other limits")
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.vertical, 2)
+
+        Card(account: chosen, config: config, logo: logo)
+    }
+}
+
 @main
 enum Screenshots {
     static func main() {
         let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "assets/screenshots"
         try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
+
+        // The mark, loaded from the asset catalog's file: this tool runs outside
+        // the app bundle, where Image("MenuBarLogo") would not resolve.
+        let logoPath = "PixelSwitch/Resources/Assets.xcassets/MenuBarLogo.imageset/menubar-logo@3x.png"
+        guard let logoImage = NSImage(contentsOfFile: logoPath) else {
+            print("could not load \(logoPath); run this from the repository root")
+            return
+        }
+        let logo = Image(nsImage: logoImage)
 
         MainActor.assumeIsolated {
             let config = MenuBarConfig.shared
@@ -129,11 +178,14 @@ enum Screenshots {
             for scheme in [ColorScheme.light, .dark] {
                 let name = scheme == .dark ? "dark" : "light"
 
-                write(VStack(spacing: 14) { ForEach(0..<sample.count, id: \.self) { Card(account: sample[$0], config: config) } },
+                write(VStack(spacing: 14) { ForEach(0..<sample.count, id: \.self) { Card(account: sample[$0], config: config, logo: logo) } },
                       width: 380, scheme: scheme, to: "\(out)/accounts-\(name).png")
 
-                write(Card(account: sample[0], config: config),
+                write(Card(account: sample[0], config: config, logo: logo),
                       width: 380, scheme: scheme, to: "\(out)/limits-\(name).png")
+
+                write(autoSwitch(config: config, logo: logo, scheme: scheme),
+                      width: 420, scheme: scheme, to: "\(out)/auto-switch-\(name).png")
             }
         }
     }

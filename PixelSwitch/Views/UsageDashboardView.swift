@@ -281,9 +281,11 @@ struct UsageDashboardView: View {
     @ViewBuilder
     private func accountHeader(_ account: Account, swatch: Int?) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: account.provider.iconName)
-                .font(.subheadline)
-                .foregroundStyle(colorCodeAccounts ? AccountPalette.color(swatch) : (account.isActive ? Color.brand : Color.secondary))
+            AccountGlyph(
+                provider: account.provider,
+                tint: colorCodeAccounts ? AccountPalette.color(swatch) : (account.isActive ? Color.brand : Color.secondary),
+                size: 17
+            )
 
             Text(account.displayEmail(obfuscated: !showFullEmail))
                 .font(.subheadline.weight(.medium))

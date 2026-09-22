@@ -72,11 +72,13 @@ struct AccountSwitcherView: View {
                     .accessibilityHidden(true)
             }
 
-            // Provider icon, in the account's colour
-            Image(systemName: account.provider.iconName)
-                .font(.title2)
-                .foregroundStyle(colorCodeAccounts ? AccountPalette.color(swatch) : (account.isActive ? Color.brand : Color.secondary))
-                .frame(width: 32, height: 32)
+            // The PixelSwitch mark, in the account's colour
+            AccountGlyph(
+                provider: account.provider,
+                tint: colorCodeAccounts ? AccountPalette.color(swatch) : (account.isActive ? Color.brand : Color.secondary),
+                size: 26
+            )
+            .frame(width: 32, height: 32)
 
             // Account info
             VStack(alignment: .leading, spacing: 2) {

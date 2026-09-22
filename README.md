@@ -71,7 +71,7 @@ PixelSwitch is built on [CCSwitcher](https://github.com/XueshiQiao/CCSwitcher) b
   </picture>
 </p>
 
-One card per account. The colour down the left edge is the account's own, so you know whose numbers these are before you read the address. Inside, each limit keeps an identity that never changes: a **green clock** for the 5-hour session, a **blue calendar** for the weekly limit, a **purple sparkle** for the weekly Fable allowance. The bar is the other half of the story: it fills and turns red as that limit runs out, which is why two limits that are both nearly gone still read apart at a glance.
+One card per account, each with the PixelSwitch mark and a colour of its own down the left edge, so you know whose numbers these are before you read the address. Inside, each limit keeps an identity that never changes: a **green clock** for the 5-hour session, a **blue calendar** for the weekly limit, a **purple sparkle** for the weekly Fable allowance. The bar is the other half of the story: it fills and turns red as that limit runs out, which is why two limits that are both nearly gone still read apart at a glance.
 
 This account is nearly out of its session and has 13% of its Fable left. With auto-switch on, PixelSwitch would move to an account that still has room before that stopped anyone.
 
@@ -114,6 +114,13 @@ The native CLI has no clean "switch account" command — `claude auth logout && 
 **Whose login is this?** `~/.claude.json` names an account, but a running Claude Code session rewrites that file from memory, so it can name one account while the keychain holds another's login. PixelSwitch therefore proves ownership from the login itself: it asks Anthropic's `/api/oauth/profile` who the token belongs to and matches the answer against each stored account. It backs up a login only under the account that owns it, refuses a switch whose stored login belongs to someone else, removes a login saved under the wrong account, and never renews one that is live or stored elsewhere. If `claude auth status` stops answering, it gives up after 30 seconds and checks the store directly rather than leaving a switch half done.
 
 ### 2. Auto-Switch, Including the Fable Allowance
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/auto-switch-dark.png">
+    <img src="assets/screenshots/auto-switch-light.png" alt="The active account has used all of its Fable allowance; PixelSwitch switches to another account that still has 77% of its Fable left and room on its other limits" width="480">
+  </picture>
+</p>
 
 Claude accounts have three limits worth watching: the 5-hour session window, the 7-day weekly window, and a weekly per-model allowance for Fable that the usage API reports separately. Fable usually runs out first, and when it does, the account is still perfectly usable for everything else — which is exactly why a switcher has to treat it as its own limit rather than folding it into the weekly figure.
 
