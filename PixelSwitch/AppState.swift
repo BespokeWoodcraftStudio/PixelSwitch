@@ -46,8 +46,12 @@ final class AppState: ObservableObject {
     private let activityParser = ActivityParser.shared
     private let keychain = KeychainService.shared
 
-    // Key kept from CCSwitcher so LegacyMigration can carry saved accounts across.
-    private let accountsKey = "com.ccswitcher.accounts"
+    /// Where the account list is stored. PixelSwitch's own key.
+    private let accountsKey = "ai.pixelventures.pixelswitch.accounts"
+    /// The key the forked-from app used, and the one `LegacyMigration` copies
+    /// across. Read as a fallback and never written, so an older build and a
+    /// fresh migration both still find their accounts.
+    private let legacyAccountsKey = "com.ccswitcher.accounts"
     private var refreshTimer: Timer?
 
     // MARK: - Usage polling state
@@ -1317,14 +1321,23 @@ final class AppState: ObservableObject {
     // MARK: - Persistence
 
     private func loadAccounts() {
-        guard let data = UserDefaults.standard.data(forKey: accountsKey),
+        // Current key first, then the one inherited from the forked-from app.
+        // The fallback is a READ only: the old key is left alone, so rolling
+        // back to an older build finds the same accounts.
+        let data = UserDefaults.standard.data(forKey: accountsKey)
+            ?? UserDefaults.standard.data(forKey: legacyAccountsKey)
+        guard let data,
               let decoded = try? JSONDecoder().decode([Account].self, from: data) else {
             log.info("[loadAccounts] No saved accounts found")
             return
         }
+        let cameFromLegacyKey = UserDefaults.standard.data(forKey: accountsKey) == nil
         accounts = decoded
         activeAccount = accounts.first(where: \.isActive)
-        log.info("[loadAccounts] Loaded \(decoded.count) accounts")
+        log.info("[loadAccounts] Loaded \(decoded.count) accounts\(cameFromLegacyKey ? " from the legacy key" : "")")
+        // Write them under the current key straight away, so the fallback is
+        // needed exactly once rather than on every launch.
+        if cameFromLegacyKey { saveAccounts() }
     }
 
     private func saveAccounts(refreshWidget: Bool = false) {

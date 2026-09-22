@@ -60,6 +60,8 @@ final class KeychainService: Sendable {
     private let claudeService = "Claude Code-credentials"
     private let claudeAccount: String
     private let backupsFilePath: String
+    /// Read-only: the same file under the folder the forked-from app used.
+    private let legacyBackupsFilePath: String
     private let claudeJsonPath: String
 
     /// Serializes every access to the backup store. All backups live in ONE
@@ -73,12 +75,25 @@ final class KeychainService: Sendable {
         self.claudeAccount = NSUserName()
 
         let home = NSHomeDirectory()
-        let dir = home + "/.ccswitcher"  // legacy CCSwitcher path, kept for continuity
+        let dir = home + "/.pixelswitch"
         self.backupsFilePath = dir + "/backups.json"
+        // The folder the forked-from app used. PixelSwitch no longer creates it;
+        // it is still READ, so anyone whose credentials predate the keychain
+        // store keeps them.
+        let legacyDir = home + "/.ccswitcher"
+        self.legacyBackupsFilePath = legacyDir + "/backups.json"
         self.claudeJsonPath = home + "/.claude.json"
 
         // Ensure directory exists
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        // The old folder was created on every single launch, so it sits in the
+        // home directory of everyone who ever ran this app, almost always
+        // empty. Tidy it away, but ONLY when it holds nothing: an empty
+        // directory we made is ours to remove, anything inside it is not.
+        if let left = try? FileManager.default.contentsOfDirectory(atPath: legacyDir), left.isEmpty {
+            try? FileManager.default.removeItem(atPath: legacyDir)
+        }
 
         // Migrate old tokens.json → backups.json if needed
         let oldPath = dir + "/tokens.json"
@@ -298,9 +313,20 @@ final class KeychainService: Sendable {
 
     // MARK: - App Keychain operations (Backups)
 
-    // Kept from CCSwitcher on purpose: renaming this service would orphan every
-    // saved account for anyone moving over from CCSwitcher (see LegacyMigration).
-    private let appBackupService = "me.xueshi.ccswitcher.backups"
+    /// PixelSwitch's own keychain item, holding every saved account.
+    ///
+    /// This used to carry the name inherited from the app PixelSwitch was
+    /// forked from, which meant macOS showed that other app's identifier in the
+    /// permission dialog every time it asked to use YOUR accounts. The name is
+    /// now PixelSwitch's own.
+    private let appBackupService = "ai.pixelventures.pixelswitch.backups"
+
+    /// The item the old name points at. Read on first launch after the rename
+    /// and copied across; **never written to and never deleted.** Leaving it
+    /// intact is what makes the rename reversible: an older build, or a
+    /// rollback, still finds every account exactly where it left them.
+    private let legacyBackupService = "me.xueshi.ccswitcher.backups"
+
     private let appBackupAccount = "all-accounts"
 
     /// Result of reading the single keychain item that holds every backup.
@@ -315,11 +341,15 @@ final class KeychainService: Sendable {
         case failed(String)
     }
 
-    /// Must be called with `storeLock` held.
-    private func loadBackupStore() -> BackupStoreLoad {
+    /// Reads ONE keychain item and reports which of the three things happened.
+    /// Keeping this separate is what lets `loadBackupStore` tell "there is
+    /// nothing under this name" apart from "something is there and I could not
+    /// read it", which are the same OSStatus away from each other and have
+    /// opposite consequences.
+    private func readBackupItem(service: String) -> BackupStoreLoad {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: appBackupService,
+            kSecAttrService as String: service,
             kSecAttrAccount as String: appBackupAccount,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
@@ -331,22 +361,80 @@ final class KeychainService: Sendable {
         switch status {
         case errSecSuccess:
             guard let data = item as? Data else {
-                return .failed("keychain returned no data")
+                return .failed("keychain returned no data for \(service)")
             }
             guard let dict = try? JSONDecoder().decode([String: AccountBackup].self, from: data) else {
                 // Data exists but we can't parse it. It is NOT gone — refuse to
                 // treat it as empty so nothing ever writes over it.
-                log.error("[loadBackupStore] Item exists (\(data.count) bytes) but did not decode")
-                return .failed("undecodable store data")
+                log.error("[readBackupItem] \(service) exists (\(data.count) bytes) but did not decode")
+                return .failed("undecodable store data in \(service)")
             }
-            log.debug("[loadBackupStore] Loaded \(dict.count) entries from Keychain")
             return .loaded(dict)
 
         case errSecItemNotFound:
-            // Migration from local file (pre-keychain versions)
-            if FileManager.default.fileExists(atPath: backupsFilePath) {
-                guard let data = FileManager.default.contents(atPath: backupsFilePath),
-                      let dict = try? JSONDecoder().decode([String: AccountBackup].self, from: data) else {
+            return .empty
+
+        default:
+            // Read failure (e.g. user denied the keychain prompt, keychain
+            // locked). The item's contents are unknown — not absent.
+            log.error("[readBackupItem] \(service) read failed, OSStatus: \(status)")
+            return .failed("OSStatus \(status) on \(service)")
+        }
+    }
+
+    /// Must be called with `storeLock` held.
+    ///
+    /// Looks in three places, newest home first, and stops at the first one that
+    /// answers: PixelSwitch's own keychain item, then the item written under the
+    /// name inherited from the forked-from app, then the pre-keychain file.
+    /// A failure at ANY step returns `.failed` rather than continuing, because
+    /// continuing would end with an empty store being written over real
+    /// credentials.
+    private func loadBackupStore() -> BackupStoreLoad {
+        switch readBackupItem(service: appBackupService) {
+        case .loaded(let dict):
+            log.debug("[loadBackupStore] Loaded \(dict.count) entries from Keychain")
+            return .loaded(dict)
+        case .failed(let reason):
+            return .failed(reason)
+        case .empty:
+            break   // nothing under the current name yet; look for an older home
+        }
+
+        // The item under the old service name. This runs once, on the first
+        // launch after the rename, and the old item is left exactly as it was
+        // so that rolling back to an older build loses nothing.
+        switch readBackupItem(service: legacyBackupService) {
+        case .loaded(let dict):
+            log.info("[loadBackupStore] Found \(dict.count) entries under the legacy service name; copying to \(appBackupService)")
+            guard saveBackupStore(dict) else {
+                // Do not report success and do not report empty: the credentials
+                // are real and still readable at the old name, and the next save
+                // must not start from an empty store.
+                log.error("[loadBackupStore] Copy to the new keychain item failed; leaving the legacy item as the source of truth")
+                return .failed("could not copy the legacy keychain item")
+            }
+            log.info("[loadBackupStore] Copy complete. The legacy item is deliberately left in place.")
+            return .loaded(dict)
+        case .failed(let reason):
+            // The old item MAY hold every credential the user has. Treating an
+            // unreadable item as absent here is precisely how a store gets
+            // silently replaced with an empty one.
+            log.error("[loadBackupStore] Legacy keychain item could not be read: \(reason)")
+            return .failed("legacy keychain item unreadable: \(reason)")
+        case .empty:
+            break
+        }
+
+        // Migration from a local file (pre-keychain versions), under either the
+        // current folder or the one the forked-from app used.
+        let filePath = FileManager.default.fileExists(atPath: backupsFilePath)
+            ? backupsFilePath
+            : legacyBackupsFilePath
+
+        if FileManager.default.fileExists(atPath: filePath) {
+            guard let data = FileManager.default.contents(atPath: filePath),
+                  let dict = try? JSONDecoder().decode([String: AccountBackup].self, from: data) else {
                     // The legacy file EXISTS but can't be read or parsed. It may
                     // hold every credential the user has; falling through to
                     // `.empty` here would let the next save create a keychain
@@ -354,35 +442,33 @@ final class KeychainService: Sendable {
                     // permanently stranding its contents. Preserve it under a
                     // timestamped name (recoverable by hand) and only then treat
                     // the store as empty; if even that fails, refuse writes.
-                    let aside = backupsFilePath + ".unreadable-\(Int(Date().timeIntervalSince1970))"
-                    do {
-                        try FileManager.default.moveItem(atPath: backupsFilePath, toPath: aside)
-                        log.error("[loadBackupStore] Legacy backups.json unreadable; preserved at \(aside)")
-                        return .empty
-                    } catch {
-                        log.error("[loadBackupStore] Legacy backups.json unreadable and could not be preserved: \(error.localizedDescription)")
-                        return .failed("legacy backups.json unreadable")
-                    }
+                // Every path below must be `filePath`, the file actually found,
+                // NOT the property: when the file turned up in the old folder,
+                // acting on the new path would move nothing and delete nothing
+                // while reporting that it had.
+                let aside = filePath + ".unreadable-\(Int(Date().timeIntervalSince1970))"
+                do {
+                    try FileManager.default.moveItem(atPath: filePath, toPath: aside)
+                    log.error("[loadBackupStore] backups.json at \(filePath) unreadable; preserved at \(aside)")
+                    return .empty
+                } catch {
+                    log.error("[loadBackupStore] backups.json at \(filePath) unreadable and could not be preserved: \(error.localizedDescription)")
+                    return .failed("backups.json unreadable")
                 }
-                log.info("[loadBackupStore] Migrating from local backups.json to Keychain...")
-                guard saveBackupStore(dict) else {
-                    // Do not delete the file until the keychain copy is real.
-                    log.error("[loadBackupStore] Migration save failed; keeping backups.json")
-                    return .failed("migration save failed")
-                }
-                try? FileManager.default.removeItem(atPath: backupsFilePath)
-                log.info("[loadBackupStore] Migration complete, local backups.json removed")
-                return .loaded(dict)
             }
-            log.debug("[loadBackupStore] No existing backups")
-            return .empty
-
-        default:
-            // Read failure (e.g. user denied the keychain prompt, keychain
-            // locked). The item's contents are unknown — not absent.
-            log.error("[loadBackupStore] Read failed, OSStatus: \(status)")
-            return .failed("OSStatus \(status)")
+            log.info("[loadBackupStore] Migrating \(dict.count) entries from \(filePath) to the Keychain...")
+            guard saveBackupStore(dict) else {
+                // Do not delete the file until the keychain copy is real.
+                log.error("[loadBackupStore] Migration save failed; keeping \(filePath)")
+                return .failed("migration save failed")
+            }
+            try? FileManager.default.removeItem(atPath: filePath)
+            log.info("[loadBackupStore] Migration complete, \(filePath) removed")
+            return .loaded(dict)
         }
+
+        log.debug("[loadBackupStore] No existing backups")
+        return .empty
     }
 
     /// Must be called with `storeLock` held.

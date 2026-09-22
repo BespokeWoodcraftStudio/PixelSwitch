@@ -224,8 +224,13 @@ struct SettingsView: View {
                     Text(verbatim: "© 2026 Pixel Ventures")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                    // A copyright notice, not a tagline. Most of the code in
+                    // this app was written by other people and no licence has
+                    // been granted over it, so naming them is not optional and
+                    // this line stays until that changes. "Based on" understated
+                    // it; this says what is actually true.
                     Link(destination: URL(string: "https://github.com/XueshiQiao/CCSwitcher")!) {
-                        Text("Based on CCSwitcher by Xueshi Qiao")
+                        Text(verbatim: "Includes code © Xueshi Qiao and contributors")
                     }
                     .font(.caption2)
                     .foregroundStyle(.tertiary)

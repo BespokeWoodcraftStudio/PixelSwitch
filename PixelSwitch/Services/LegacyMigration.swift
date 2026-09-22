@@ -8,13 +8,18 @@ private let log = FileLog("Migration")
 /// someone moving from CCSwitcher would open PixelSwitch to an empty account
 /// list.
 ///
-/// Credentials need no copying: the per-account backups live in one keychain
-/// item whose service name (`me.xueshi.ccswitcher.backups`) PixelSwitch keeps
-/// on purpose (see `KeychainService`). macOS asks once whether PixelSwitch may
-/// read it.
+/// Credentials need no copying here: `KeychainService` reads the old item and
+/// copies it into PixelSwitch's own on first launch, leaving the old one in
+/// place. macOS asks once whether PixelSwitch may read it.
+///
+/// The identifier below is the one thing in PixelSwitch that still has to name
+/// the app it was forked from, because it is the address the settings are read
+/// FROM. It cannot be renamed without silently breaking the import for anyone
+/// moving over. Dropping the import entirely is the only way to remove it, and
+/// that is a product decision, not a cleanup.
 enum LegacyMigration {
     private static let legacyDomain = "me.xueshi.ccswitcher"
-    private static let doneKey = "migratedFromCCSwitcher"
+    private static let doneKey = "didImportLegacySettings"
 
     /// Keys that belong to the old app's windows, updater or SwiftUI state
     /// rather than to the user's settings. Sparkle's `SU*` keys in particular
@@ -26,7 +31,8 @@ enum LegacyMigration {
 
     /// Safe to call more than once; only the first call in the life of the
     /// install does anything. A setting already present in PixelSwitch is
-    /// never overwritten.
+    /// never overwritten, which is also why renaming `doneKey` was safe: the
+    /// re-run it causes finds every key already set and copies nothing.
     static func runOnce() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: doneKey) else { return }

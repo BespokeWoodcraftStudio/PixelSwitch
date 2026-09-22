@@ -31,16 +31,13 @@ PixelSwitch is a small menu bar app for people who use more than one Claude Code
 
 It also watches what you have left. Every account's card shows its 5-hour session, its weekly limit and its **weekly Fable allowance**, each with how much is left and when it resets, and PixelSwitch can move you to another account by itself before a limit stops you. Your MCP server logins stay put across a switch, and it proves which account a login belongs to with Anthropic before it touches anything.
 
-PixelSwitch is built on [CCSwitcher](https://github.com/XueshiQiao/CCSwitcher) by Xueshi Qiao. See [Credits](#credits).
-
-## What is different from CCSwitcher
+## What makes it different
 
 - **It knows about Fable.** Fable has its own weekly allowance, separate from your weekly limit, and it usually runs out first. PixelSwitch shows it on every account and can switch you to an account that still has Fable left. No other Claude account switcher does this today.
 - **Your MCP server logins survive a switch.** Claude Code keeps MCP logins (Stripe, Supabase, Linear and the rest) in the same keychain item as your Claude login. Restoring an account's whole item puts back an old copy of them, and those servers ask you to sign in again — measured on one Mac, a switch took 48 stored MCP logins down to 8. PixelSwitch swaps only the Claude login and leaves this Mac's MCP logins alone.
 - **A switch cannot mix up two accounts.** Which account is live is proven with Anthropic's own API, not read from `~/.claude.json`, which running Claude Code sessions rewrite from memory. PixelSwitch refuses a switch whose stored login belongs to a different account, and repairs the pairing when it finds one wrong.
-- **Much lighter on memory.** CCSwitcher reads every Claude Code transcript on disk to compute cost and activity. On a heavy-use Mac with about 10,000 transcript files (12 GB), that meant a 3.9 GB spike at launch and about 860 MB of memory from then on. PixelSwitch reads only recent history, the last 24 hours by default. On the same Mac it settles at about 200 MB, and its parse cache shrank from 70.9 MB to 4.9 MB. Change the window in **Settings → General → Usage history window**: 24 hours, 3, 7 or 30 days, or all.
-- **Its own updates.** PixelSwitch checks its own release feed on this repository, signed with its own update key. It never picks up a CCSwitcher release by accident.
-- **Moves your accounts across.** The first time PixelSwitch starts, it copies your CCSwitcher accounts and settings, so you do not have to sign in again.
+- **Light on memory.** Cost and activity are worked out from Claude Code's transcripts, and reading every one of them is expensive: on a heavy-use Mac with about 10,000 transcript files (12 GB), that approach spikes to 3.9 GB at launch and settles near 860 MB. PixelSwitch reads only recent history, the last 24 hours by default, and settles at about 200 MB on the same Mac, with a parse cache of 4.9 MB rather than 70.9 MB. Change the window in **Settings → General → Usage history window**: 24 hours, 3, 7 or 30 days, or all.
+- **Its own updates.** PixelSwitch checks its own release feed on this repository, signed with its own update key, so it only ever installs a build published here.
 
 ## Install
 
@@ -55,12 +52,9 @@ PixelSwitch is built on [CCSwitcher](https://github.com/XueshiQiao/CCSwitcher) b
    Or try to open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
 4. Open PixelSwitch. It lives in the menu bar; there is no Dock icon.
 
-### Moving from CCSwitcher
+### On first launch
 
-1. Quit CCSwitcher first. Two account switchers running at once will fight over the same Claude Code login.
-2. Open PixelSwitch. Your accounts and settings come across on first launch.
-3. macOS asks once whether PixelSwitch may use the saved account credentials (the keychain item `me.xueshi.ccswitcher.backups`, which PixelSwitch keeps under its original name so nothing is lost). Click **Always Allow**.
-4. When everything looks right, delete CCSwitcher from Applications.
+macOS asks once whether PixelSwitch may use its saved account credentials. Click **Always Allow**. It asks again after an update, because the app's signature changes.
 
 ## What you are looking at
 
@@ -157,7 +151,7 @@ The user-visible result is the same as CodexBar's: seamless, zero-interaction. T
 
 ### 5. Local JSONL Parse Cache (Performance)
 
-Cost summaries and today's-activity stats are computed from Claude Code's per-session JSONL files under `~/.claude/projects/`. A heavy user's directory can be hundreds of megabytes across thousands of files. Re-parsing the whole tree every 5 minutes was originally CPU-pegging on idle ([#13](https://github.com/XueshiQiao/CCSwitcher/issues/13)).
+Cost summaries and today's-activity stats are computed from Claude Code's per-session JSONL files under `~/.claude/projects/`. A heavy user's directory can be hundreds of megabytes across thousands of files. Re-parsing the whole tree every 5 minutes pegs the CPU on an idle machine, which is why the window exists.
 
 - PixelSwitch maintains a persistent per-file parse cache at `~/Library/Application Support/PixelSwitch/session-parse-cache.json`, keyed by file mtime.
 - On each refresh, files with unchanged mtime are skipped entirely — the cache holds their previously-parsed aggregates and the result is summed in memory.
@@ -175,7 +169,7 @@ Reading from the macOS Keychain via native `Security.framework` (`SecItemCopyMat
 
 ### 7. Team-ID-Prefixed App Group (No "Access Data From Other Apps" Prompt)
 
-macOS 15 Sequoia silently changed the rules for App Group containers: any non-Mac-App-Store, non-TestFlight app whose App Group ID does NOT begin with the developer Team ID triggers a TCC "App Management" prompt on every launch (and again after every auto-update that changes the binary's cdhash). PixelSwitch's App Group is declared as `$(TeamIdentifierPrefix)ai.pixelventures.pixelswitch`, the Team-ID-prefixed form, which macOS auto-authorizes for Developer-ID-signed apps without a provisioning profile. The app reads the group ID from its own signed entitlements at runtime, so it always matches whichever team signed the build. An unsigned or ad-hoc build has no entitlements and never touches a group container at all, which is why it never shows the prompt (and why its widgets stay empty). Background: CCSwitcher [#14](https://github.com/XueshiQiao/CCSwitcher/issues/14).
+macOS 15 Sequoia silently changed the rules for App Group containers: any non-Mac-App-Store, non-TestFlight app whose App Group ID does NOT begin with the developer Team ID triggers a TCC "App Management" prompt on every launch (and again after every auto-update that changes the binary's cdhash). PixelSwitch's App Group is declared as `$(TeamIdentifierPrefix)ai.pixelventures.pixelswitch`, the Team-ID-prefixed form, which macOS auto-authorizes for Developer-ID-signed apps without a provisioning profile. The app reads the group ID from its own signed entitlements at runtime, so it always matches whichever team signed the build. An unsigned or ad-hoc build has no entitlements and never touches a group container at all, which is why it never shows the prompt (and why its widgets stay empty).
 
 ### 8. SwiftUI `Settings` Window Lifecycle Keepalive for `LSUIElement`
 
@@ -203,8 +197,8 @@ To sign locally, set your own Apple team as `DEVELOPMENT_TEAM` in `project.yml` 
 
 ## Credits
 
-PixelSwitch is a fork of [CCSwitcher](https://github.com/XueshiQiao/CCSwitcher) by [Xueshi Qiao](https://github.com/XueshiQiao), and almost all of its account switching, usage tracking and interface is his work. Thank you. Several ideas in both apps come from [CodexBar](https://github.com/steipete/CodexBar).
+PixelSwitch began as a fork of [CCSwitcher](https://github.com/XueshiQiao/CCSwitcher) by [Xueshi Qiao](https://github.com/XueshiQiao), and a majority of this code is still his: measured with `git blame` at the 1.0.12 release, 8,410 of 11,561 Swift lines. Four other people contributed a further 687 lines to that project before this fork existed: [neonwatty](https://github.com/neonwatty), Sandor Bogyo, Kyoube Lyu and AlexDesign420. Thank you, all of you. Several ideas come from [CodexBar](https://github.com/steipete/CodexBar).
 
-The original CCSwitcher repository does not publish a license. PixelSwitch is shared here as a GitHub fork, with credit to its author, and it will follow whatever license the original adopts.
+**Licensing.** The CCSwitcher repository publishes no license, which under copyright means no rights are granted by default. PixelSwitch therefore carries no license of its own: one cannot be granted over code this project does not own. If CCSwitcher adopts a license, PixelSwitch will follow it.
 
 PixelSwitch changes, the app icon and the Pixel Ventures name and mark are © 2026 Pixel Ventures.

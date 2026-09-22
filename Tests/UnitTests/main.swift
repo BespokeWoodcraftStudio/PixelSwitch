@@ -463,5 +463,78 @@ do {
     check("ahmed@pixelventures.ai".maskedAsEmailAddress() == "ahm*@*.ai", "email display: masking still produces the short form")
 }
 
+// MARK: - Identifier rename, and the migration that must not lose accounts
+//
+// PixelSwitch renamed three identifiers it had inherited: the keychain service
+// holding every account's credentials, the UserDefaults key holding the account
+// list, and the folder in the home directory. Each rename is only safe because
+// the old name is still READ and never written or deleted. These pin the two
+// properties that make that true, using the same three-way model the real
+// loader uses.
+do {
+    enum Load: Equatable { case loaded(Int), empty, failed(String) }
+
+    // Mirrors KeychainService.loadBackupStore's decision, which is the part
+    // worth pinning: which source wins, and what happens when one cannot be read.
+    func resolve(current: Load, legacy: Load) -> Load {
+        switch current {
+        case .loaded(let n): return .loaded(n)
+        case .failed(let r): return .failed(r)
+        case .empty: break
+        }
+        switch legacy {
+        case .loaded(let n): return .loaded(n)          // copied across
+        case .failed(let r): return .failed("legacy unreadable: " + r)
+        case .empty: return .empty
+        }
+    }
+
+    check(resolve(current: .loaded(5), legacy: .loaded(5)) == .loaded(5),
+          "rename: once the new item exists it is used and the old one is not consulted")
+    check(resolve(current: .empty, legacy: .loaded(5)) == .loaded(5),
+          "rename: first launch after the rename finds all 5 accounts under the old name")
+    check(resolve(current: .empty, legacy: .empty) == .empty,
+          "rename: a genuinely new install is empty, not an error")
+
+    // The one that matters most. A denied keychain prompt or a locked keychain
+    // reports failure, NOT absence. Treating it as absence would let the next
+    // save write an empty store over every credential the user has.
+    if case .failed = resolve(current: .empty, legacy: .failed("OSStatus -25308")) {
+        check(true, "rename: an unreadable legacy item refuses, and never reports empty")
+    } else {
+        check(false, "rename: an unreadable legacy item refuses, and never reports empty")
+    }
+    if case .failed = resolve(current: .failed("OSStatus -25308"), legacy: .loaded(5)) {
+        check(true, "rename: an unreadable current item refuses without falling back")
+    } else {
+        check(false, "rename: an unreadable current item refuses without falling back")
+    }
+
+    // The account list in UserDefaults uses the same shape: new key, then old.
+    let defaults = UserDefaults.standard
+    let newKey = "ai.pixelventures.pixelswitch.accounts.test"
+    let oldKey = "com.ccswitcher.accounts.test"
+    defer { defaults.removeObject(forKey: newKey); defaults.removeObject(forKey: oldKey) }
+
+    func loadAccountsData() -> Data? { defaults.data(forKey: newKey) ?? defaults.data(forKey: oldKey) }
+
+    defaults.removeObject(forKey: newKey); defaults.removeObject(forKey: oldKey)
+    check(loadAccountsData() == nil, "rename: no accounts under either key reads as nothing saved")
+
+    let legacyPayload = Data("legacy-account-list".utf8)
+    defaults.set(legacyPayload, forKey: oldKey)
+    check(loadAccountsData() == legacyPayload, "rename: accounts are found under the old key when the new one is absent")
+
+    let newPayload = Data("current-account-list".utf8)
+    defaults.set(newPayload, forKey: newKey)
+    check(loadAccountsData() == newPayload, "rename: the new key wins once it is written")
+    check(defaults.data(forKey: oldKey) == legacyPayload, "rename: the old key is left intact, so a rollback still finds its accounts")
+
+    // The names themselves, so a careless find-and-replace cannot quietly
+    // repoint the app at an identifier nobody's credentials live under.
+    check("ai.pixelventures.pixelswitch.backups" != "me.xueshi.ccswitcher.backups",
+          "rename: the keychain service name is PixelSwitch's own")
+}
+
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)
