@@ -295,6 +295,18 @@ struct UsageDashboardView: View {
                 kind: .weekly
             )
         }
+        // Per-model weekly allowances (Fable), each with what is left of it.
+        ForEach(Array(usage.modelWeeklyLimits.enumerated()), id: \.offset) { _, limit in
+            if let name = limit.modelName, let used = limit.percent, let left = limit.percentLeft {
+                usageRow(
+                    label: "Weekly (\(name))",
+                    detail: Text("\(Int(left.rounded()))% left"),
+                    resetText: limit.window.resetTimeString,
+                    utilization: used,
+                    kind: .weekly
+                )
+            }
+        }
     }
 
     @ViewBuilder
@@ -320,7 +332,7 @@ struct UsageDashboardView: View {
 
     // MARK: - Usage Row
 
-    private func usageRow(label: LocalizedStringKey, resetText: String?, utilization: Double, kind: LimitBarKind) -> some View {
+    private func usageRow(label: LocalizedStringKey, detail: Text? = nil, resetText: String?, utilization: Double, kind: LimitBarKind) -> some View {
         let fillColor = menuBarConfig.limitBarColor(for: kind, utilization: utilization, context: .dashboard)
 
         return VStack(spacing: 5) {
@@ -328,6 +340,11 @@ struct UsageDashboardView: View {
                 Text(label)
                     .font(.caption)
                     .foregroundStyle(.textSecondary)
+                if let detail {
+                    detail
+                        .font(.caption.weight(.medium).monospacedDigit())
+                        .foregroundStyle(fillColor)
+                }
                 Spacer()
                 if let resetText {
                     Text("Resets in \(resetText)")

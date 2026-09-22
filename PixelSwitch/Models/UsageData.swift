@@ -11,6 +11,9 @@ struct UsageAPIResponse: Codable {
     let sevenDayCowork: UsageWindow?
     let iguanaNecktie: UsageWindow?
     let extraUsage: ExtraUsage?
+    /// The newer `limits` list. Per-model weekly allowances (Fable) appear only
+    /// here; `seven_day_opus` and `seven_day_sonnet` come back null.
+    let limits: [UsageLimit]?
 
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
@@ -21,6 +24,124 @@ struct UsageAPIResponse: Codable {
         case sevenDayCowork = "seven_day_cowork"
         case iguanaNecktie = "iguana_necktie"
         case extraUsage = "extra_usage"
+        case limits
+    }
+}
+
+extension UsageAPIResponse {
+    /// Decodes the windows exactly as the synthesized decoder did, and `limits`
+    /// leniently: an entry of an unexpected shape is skipped and a `limits`
+    /// that is not a list reads as none, so a change there can never cost
+    /// the session and weekly numbers.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        fiveHour = try c.decodeIfPresent(UsageWindow.self, forKey: .fiveHour)
+        sevenDay = try c.decodeIfPresent(UsageWindow.self, forKey: .sevenDay)
+        sevenDayOauthApps = try c.decodeIfPresent(UsageWindow.self, forKey: .sevenDayOauthApps)
+        sevenDayOpus = try c.decodeIfPresent(UsageWindow.self, forKey: .sevenDayOpus)
+        sevenDaySonnet = try c.decodeIfPresent(UsageWindow.self, forKey: .sevenDaySonnet)
+        sevenDayCowork = try c.decodeIfPresent(UsageWindow.self, forKey: .sevenDayCowork)
+        iguanaNecktie = try c.decodeIfPresent(UsageWindow.self, forKey: .iguanaNecktie)
+        extraUsage = try c.decodeIfPresent(ExtraUsage.self, forKey: .extraUsage)
+        limits = (try? c.decodeIfPresent(LenientList<UsageLimit>.self, forKey: .limits))?.elements
+    }
+
+    /// Per-model weekly allowances (today only Fable), in the API's order.
+    var modelWeeklyLimits: [UsageLimit] {
+        (limits ?? []).filter { $0.isModelWeekly }
+    }
+
+    /// The weekly allowance for one model, matched by its display name.
+    func modelWeeklyLimit(named name: String) -> UsageLimit? {
+        modelWeeklyLimits.first { $0.modelName?.caseInsensitiveCompare(name) == .orderedSame }
+    }
+}
+
+/// One entry of the usage response's `limits` list, for example:
+/// `{"kind":"weekly_scoped","group":"weekly","percent":74,"severity":"normal",
+///   "resets_at":"2026-09-28T18:00:00.177837+00:00",
+///   "scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":true}`
+struct UsageLimit: Codable, Equatable {
+    let kind: String?
+    let group: String?
+    /// Percent of the allowance used, 0 to 100.
+    let percent: Double?
+    let severity: String?
+    let resetsAt: String?
+    let scope: Scope?
+    let isActive: Bool?
+
+    struct Scope: Codable, Equatable {
+        let model: Model?
+    }
+
+    struct Model: Codable, Equatable {
+        let id: String?
+        let displayName: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case displayName = "display_name"
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, group, percent, severity, scope
+        case resetsAt = "resets_at"
+        case isActive = "is_active"
+    }
+
+    /// The model this limit is for ("Fable"), when it is a per-model allowance.
+    var modelName: String? {
+        guard let name = scope?.model?.displayName?.trimmingCharacters(in: .whitespaces),
+              !name.isEmpty else { return nil }
+        return name
+    }
+
+    /// A weekly allowance for one model, with a reading to show.
+    var isModelWeekly: Bool {
+        (kind == "weekly_scoped" || group == "weekly") && modelName != nil && percent != nil
+    }
+
+    /// Percent of the allowance still unused, 0 to 100.
+    var percentLeft: Double? {
+        percent.map { min(max(100 - $0, 0), 100) }
+    }
+
+    /// The same reading as a `UsageWindow`, to reuse its reset formatting.
+    var window: UsageWindow {
+        UsageWindow(utilization: percent, resetsAt: resetsAt)
+    }
+}
+
+/// Decodes a JSON list, keeping the entries that fit `Element` and skipping
+/// the rest. Anything that is not a list decodes as empty. Never throws.
+struct LenientList<Element: Decodable>: Decodable {
+    let elements: [Element]
+
+    init(from decoder: Decoder) throws {
+        guard var list = try? decoder.unkeyedContainer() else {
+            elements = []
+            return
+        }
+        var kept: [Element] = []
+        while !list.isAtEnd {
+            if (try? list.decodeNil()) == true { continue }
+            let index = list.currentIndex
+            if let element = try? list.decode(Element.self) {
+                kept.append(element)
+                continue
+            }
+            _ = try? list.decode(Skip.self)
+            // A decoder that cannot step past an entry would spin here forever.
+            if list.currentIndex == index { break }
+        }
+        elements = kept
+    }
+
+    /// Accepts any value, to step past an entry that did not fit.
+    private struct Skip: Decodable {
+        init(from decoder: Decoder) throws {}
     }
 }
 

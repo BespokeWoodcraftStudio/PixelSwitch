@@ -191,6 +191,53 @@ do {
     check(!CredentialOwnership.detailsBelong(uuid: nil, email: nil, toOwnerUuid: "u-1", ownerEmail: "a@x.com"), "details: nothing to compare is never a match")
 }
 
+// MARK: - Usage limits (the per-model weekly allowance, i.e. Fable)
+
+do {
+    func decode(_ json: String) -> UsageAPIResponse? {
+        try? JSONDecoder().decode(UsageAPIResponse.self, from: Data(json.utf8))
+    }
+    let windows = #""five_hour":{"utilization":53.0,"resets_at":"2026-09-22T19:00:00.177659+00:00"},"seven_day":{"utilization":51.0,"resets_at":"2026-09-28T18:00:00.177679+00:00"}"#
+    let fable = #"{"kind":"weekly_scoped","group":"weekly","percent":74,"severity":"normal","resets_at":"2026-09-28T18:00:00.177837+00:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null},"is_active":true}"#
+    let session = #"{"kind":"session","group":"session","percent":53,"severity":"normal","resets_at":"2026-09-22T19:00:00.177659+00:00","scope":null,"is_active":false}"#
+    let weeklyAll = #"{"kind":"weekly_all","group":"weekly","percent":51,"severity":"normal","resets_at":"2026-09-28T18:00:00.177679+00:00","scope":null,"is_active":false}"#
+
+    // The shape the API returned on 2026-09-22, trimmed to the fields that matter.
+    let real = decode(#"{"#
+        + windows
+        + #","seven_day_opus":null,"seven_day_sonnet":null,"extra_usage":{"is_enabled":false,"monthly_limit":null,"used_credits":null,"utilization":null,"currency":null},"limits":["#
+        + [session, weeklyAll, fable].joined(separator: ",") + "]}")
+    check(real?.fiveHour?.utilization == 53 && real?.sevenDay?.utilization == 51, "usage: session and weekly still read from the top-level windows")
+    check(real?.modelWeeklyLimits.count == 1, "usage: only the per-model entry counts as a model allowance", "\(real?.modelWeeklyLimits.count ?? -1)")
+    let fableLimit = real?.modelWeeklyLimit(named: "Fable")
+    check(fableLimit?.percent == 74 && fableLimit?.percentLeft == 26, "usage: Fable reads 74% used, 26% left")
+    check(real?.modelWeeklyLimit(named: "fable") != nil, "usage: the model name matches in any case")
+    check(fableLimit?.window.resetsAtDate != nil, "usage: the Fable reset time parses")
+
+    let noLimits = decode("{" + windows + "}")
+    check(noLimits?.sevenDay?.utilization == 51 && noLimits?.modelWeeklyLimits.isEmpty == true, "usage: a response without limits still decodes, with no Fable row")
+
+    for (name, value) in [("an object", #"{"x":1}"#), ("a string", #""soon""#), ("null", "null")] {
+        let odd = decode("{" + windows + #","limits":"# + value + "}")
+        check(odd?.fiveHour?.utilization == 53 && odd?.modelWeeklyLimits.isEmpty == true, "usage: limits as \(name) never costs the session and weekly numbers")
+    }
+
+    let messy = decode("{" + windows + #","limits":[null,42,"x",{"percent":"high","scope":{"model":{"display_name":"Fable"}}},"# + fable + #",{"kind":"weekly_scoped","percent":10,"scope":{"model":{"display_name":"  "}}}]}"#)
+    check(messy?.modelWeeklyLimits.map(\.percent) == [74], "usage: odd entries are skipped and the good one kept", "\(messy?.modelWeeklyLimits.map(\.percent) ?? [])")
+
+    check(decode(#"{"five_hour":"broken"}"#) == nil, "usage: a malformed top-level window still fails, as before")
+
+    let over = UsageLimit(kind: "weekly_scoped", group: "weekly", percent: 130, severity: nil, resetsAt: nil, scope: nil, isActive: nil)
+    let fresh = UsageLimit(kind: "weekly_scoped", group: "weekly", percent: 0, severity: nil, resetsAt: nil, scope: nil, isActive: nil)
+    check(over.percentLeft == 0 && fresh.percentLeft == 100, "usage: what is left stays between 0 and 100")
+
+    if let real, let data = try? JSONEncoder().encode(real) {
+        check(decode(String(decoding: data, as: UTF8.self))?.modelWeeklyLimits == real.modelWeeklyLimits, "usage: the Fable limit survives an encode and decode")
+    } else {
+        check(false, "usage: the Fable limit survives an encode and decode", "could not encode")
+    }
+}
+
 // MARK: - Opt-in: real /usr/bin/security on a throwaway item
 
 if ProcessInfo.processInfo.environment["PIXELSWITCH_KEYCHAIN_TESTS"] == "1" {

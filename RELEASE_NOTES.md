@@ -1,5 +1,9 @@
 ## PixelSwitch 1.0.2
 
+### New
+
+- **How much Fable is left, for every account.** Each account's card on the Usage tab now has a "Weekly (Fable)" bar under Weekly, showing how much of that account's weekly Fable allowance is left and when it resets. The numbers come from the same usage request PixelSwitch already makes, so nothing extra is sent. You can also add a "FABLE" bar to the menu bar in Settings, for the active account. Accounts without a separate Fable allowance show no Fable bar, and auto-switch still looks only at Session and Weekly.
+
 ### Fixed
 
 - **Your MCP server logins survive an account switch.** Claude Code keeps the logins for MCP servers (Stripe, Supabase, Linear and the rest) in the same Keychain item as your Claude account login. Until now a switch put back the whole item as it was the last time that account was active, so MCP logins made or renewed since then were replaced by older copies, and those servers asked you to sign in again. Measured on one Mac: a switch took the stored MCP logins from 48 entries to 8. PixelSwitch now takes only the Claude account login from the account you switch to, and keeps this Mac's MCP logins exactly as they are.

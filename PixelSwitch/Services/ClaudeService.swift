@@ -264,7 +264,7 @@ final class ClaudeService: @unchecked Sendable {
         
         do {
             let usage = try JSONDecoder().decode(UsageAPIResponse.self, from: responseData)
-            log.info("[getUsageLimits] session=\(usage.fiveHour?.utilization ?? -1)%, weekly=\(usage.sevenDay?.utilization ?? -1)%")
+            log.info("[getUsageLimits] session=\(usage.fiveHour?.utilization ?? -1)%, weekly=\(usage.sevenDay?.utilization ?? -1)%, fable=\(usage.modelWeeklyLimit(named: "Fable")?.percent ?? -1)%")
             return usage
         } catch {
             log.error("[getUsageLimits] Decode Error: \(error.localizedDescription)")

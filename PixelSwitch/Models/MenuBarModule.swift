@@ -11,6 +11,7 @@ enum MenuBarModule: String, Codable, CaseIterable, Identifiable {
     case sessionBarPlain
     case weeklyBar
     case weeklyBarPlain
+    case fableBar
     case dailyCost
     case sessionReset
     case weeklyReset
@@ -25,6 +26,7 @@ enum MenuBarModule: String, Codable, CaseIterable, Identifiable {
         case .sessionBarPlain: return "5H"
         case .weeklyBar:       return "7D"
         case .weeklyBarPlain:  return "7D"
+        case .fableBar:        return "FABLE"
         case .dailyCost:       return "TODAY"
         case .sessionReset:    return "5H↻"
         case .weeklyReset:     return "7D↻"
@@ -39,6 +41,7 @@ enum MenuBarModule: String, Codable, CaseIterable, Identifiable {
         case .sessionBarPlain: return String(localized: "Session usage (5h)", bundle: L10n.bundle)
         case .weeklyBar:       return String(localized: "Weekly — usage vs time (7d)", bundle: L10n.bundle)
         case .weeklyBarPlain:  return String(localized: "Weekly usage (7d)", bundle: L10n.bundle)
+        case .fableBar:        return String(localized: "Fable weekly — usage vs time (7d)", bundle: L10n.bundle)
         case .dailyCost:       return String(localized: "Daily cost", bundle: L10n.bundle)
         case .sessionReset:    return String(localized: "Session reset countdown", bundle: L10n.bundle)
         case .weeklyReset:     return String(localized: "Weekly reset countdown", bundle: L10n.bundle)

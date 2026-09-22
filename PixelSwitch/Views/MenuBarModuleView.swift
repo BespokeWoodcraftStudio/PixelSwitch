@@ -81,6 +81,13 @@ struct MenuBarModuleView: View {
                 fillColor: config.limitBarColor(for: .weekly, utilization: weeklyUtilization, context: .menuBar)
             )
 
+        case .fableBar:
+            UtilizationBar(
+                utilization: fableUtilization,
+                markerPercent: fableTimeElapsed,
+                fillColor: config.limitBarColor(for: .weekly, utilization: fableUtilization, context: .menuBar)
+            )
+
         case .dailyCost:
             Text(dailyCostText)
                 .font(.system(size: 10, weight: .medium).monospacedDigit())
@@ -117,6 +124,19 @@ struct MenuBarModuleView: View {
     private var weeklyUtilization: Double? {
         guard let id = appState.activeAccount?.id else { return nil }
         return appState.accountUsage[id]?.sevenDay?.utilization
+    }
+
+    /// The active account's Fable weekly allowance, from the usage `limits` list.
+    private var fableLimit: UsageLimit? {
+        guard let id = appState.activeAccount?.id else { return nil }
+        return appState.accountUsage[id]?.modelWeeklyLimit(named: "Fable")
+    }
+
+    private var fableUtilization: Double? { fableLimit?.percent }
+
+    private var fableTimeElapsed: Double? {
+        _ = tick
+        return fableLimit?.window.elapsedPercent(windowSeconds: RateLimitWindow.sevenDaySeconds)
     }
 
     private var sessionTimeElapsed: Double? {

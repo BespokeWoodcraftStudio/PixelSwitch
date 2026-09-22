@@ -188,3 +188,8 @@
 "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "其保存的登录属于另一个账户，已被移除。请重新验证（↻）以修复。";
 "The saved login for %@ has expired and could not be renewed. Re-authenticate %@ to fix it." = "为 %1$@ 保存的登录已过期且无法续期。请重新验证 %2$@ 以修复。";
 "The saved details for %@ belong to another account. Re-authenticate %@ to fix it." = "为 %1$@ 保存的账户信息属于另一个账户。请重新验证 %2$@ 以修复。";
+
+/* Per-model weekly allowance (Fable) */
+"Weekly (%@)" = "每周（%@）";
+"%lld%% left" = "剩余 %lld%%";
+"Fable weekly — usage vs time (7d)" = "Fable 每周 — 用量 vs 时间（7天）";

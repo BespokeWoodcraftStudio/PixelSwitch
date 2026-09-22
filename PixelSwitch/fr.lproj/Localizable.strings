@@ -188,3 +188,8 @@
 "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "Sa connexion enregistrée appartenait à un autre compte et a été supprimée. Réauthentifiez (↻) pour corriger cela.";
 "The saved login for %@ has expired and could not be renewed. Re-authenticate %@ to fix it." = "La connexion enregistrée pour %1$@ a expiré et n’a pas pu être renouvelée. Réauthentifiez %2$@ pour corriger cela.";
 "The saved details for %@ belong to another account. Re-authenticate %@ to fix it." = "Les informations enregistrées pour %1$@ appartiennent à un autre compte. Réauthentifiez %2$@ pour corriger cela.";
+
+/* Per-model weekly allowance (Fable) */
+"Weekly (%@)" = "Hebdomadaire (%@)";
+"%lld%% left" = "%lld %% restants";
+"Fable weekly — usage vs time (7d)" = "Fable hebdomadaire — usage vs temps (7 j)";
