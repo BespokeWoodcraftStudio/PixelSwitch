@@ -1,0 +1,50 @@
+#!/bin/bash
+# Refuse any push that is not going to PixelSwitch's own repository.
+#
+# This repository began as a fork of XueshiQiao/CCSwitcher, and for a while it
+# carried an `upstream` remote whose PUSH url pointed straight at that repo. The
+# founder's instruction on 2026-09-22 was to cut the two apart: "cut my copy of
+# the repo off from the other one. This way, you don't accidentally push stuff
+# to the other repo, the guy that I got the original product from."
+#
+# The `upstream` remote is gone, but a remote is one command away from coming
+# back, and `gh` resolves a fork to its PARENT unless it is told otherwise (that
+# is how the v1.0.10 build was dispatched to CCSwitcher). So this hook is the
+# backstop: git will not push anywhere but here, whatever the remotes say.
+#
+# Enabled with `git config core.hooksPath .githooks`, which is set locally and
+# is repeated in the repository's README for a fresh clone.
+
+set -u
+
+ALLOWED_REPO="BespokeWoodcraftStudio/PixelSwitch"
+remote_url="${2:-}"
+
+# Normalise https://github.com/Owner/Name.git and git@github.com:Owner/Name.git
+# to Owner/Name, so either form is judged the same way.
+normalised=$(printf '%s' "$remote_url" | sed -E 's#^git@github\.com:#github.com/#; s#^[a-z]+://##; s#^github\.com/##; s#\.git$##; s#/$##')
+
+if [ -z "$remote_url" ]; then
+    exit 0   # nothing to judge; let git get on with it
+fi
+
+if [ "$normalised" != "$ALLOWED_REPO" ]; then
+    cat >&2 <<EOF
+
+  PUSH REFUSED.
+
+  Target : $remote_url
+  Allowed: https://github.com/$ALLOWED_REPO
+
+  This repository pushes to its own remote and nowhere else. It was forked from
+  XueshiQiao/CCSwitcher, and pushing there would put this work in someone else's
+  repository.
+
+  If this is genuinely a new home for PixelSwitch, change ALLOWED_REPO in
+  .githooks/pre-push rather than skipping the hook, so the guard moves with it.
+
+EOF
+    exit 1
+fi
+
+exit 0

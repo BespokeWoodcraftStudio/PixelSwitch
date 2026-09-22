@@ -193,7 +193,11 @@ The project is generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen);
 brew install xcodegen
 xcodegen generate
 open PixelSwitch.xcodeproj
+
+git config core.hooksPath .githooks   # once per clone: see below
 ```
+
+That last line turns on `.githooks/pre-push`, which refuses to push anywhere except this repository. PixelSwitch began as a fork, so a remote pointing at the original is one command away from existing again, and a push to it would put this work in someone else's repository. Git does not enable a repository's hooks by itself, so a fresh clone has to opt in.
 
 To sign locally, set your own Apple team as `DEVELOPMENT_TEAM` in `project.yml` (both targets). Without Xcode, push to `main` and the [build workflow](.github/workflows/build.yml) produces a universal DMG as a build artifact; pushing a `v*` tag publishes a release with the DMG and the Sparkle `appcast.xml`. The app icon and the menu-bar mark are both drawn by `Tools/icon/make_icon.py`, so there is one source for the logo. `Tests/run-unit-tests.sh` runs the unit tests with nothing but the Swift compiler (no Xcode needed); CI runs them before every build.
 
