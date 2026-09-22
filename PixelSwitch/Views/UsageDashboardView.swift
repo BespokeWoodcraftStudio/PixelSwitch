@@ -280,31 +280,21 @@ struct UsageDashboardView: View {
     @ViewBuilder
     private func usageBars(_ usage: UsageAPIResponse) -> some View {
         if let session = usage.fiveHour {
-            usageRow(
-                label: "Session",
-                resetText: session.resetTimeString,
-                utilization: session.utilization ?? 0,
-                kind: .session
-            )
+            usageRow(title: "Session", resetText: session.resetTimeString,
+                     resetIsAbsolute: session.resetIsAbsolute,
+                     utilization: session.utilization ?? 0, kind: .session)
         }
         if let weekly = usage.sevenDay {
-            usageRow(
-                label: "Weekly",
-                resetText: weekly.resetTimeString,
-                utilization: weekly.utilization ?? 0,
-                kind: .weekly
-            )
+            usageRow(title: "Weekly", resetText: weekly.resetTimeString,
+                     resetIsAbsolute: weekly.resetIsAbsolute,
+                     utilization: weekly.utilization ?? 0, kind: .weekly)
         }
-        // Per-model weekly allowances (Fable), each with what is left of it.
+        // Per-model weekly allowances (Fable), with their own colour and symbol.
         ForEach(Array(usage.modelWeeklyLimits.enumerated()), id: \.offset) { _, limit in
-            if let name = limit.modelName, let used = limit.percent, let left = limit.percentLeft {
-                usageRow(
-                    label: "Weekly (\(name))",
-                    detail: Text("\(Int(left.rounded()))% left"),
-                    resetText: limit.window.resetTimeString,
-                    utilization: used,
-                    kind: .weekly
-                )
+            if let name = limit.modelName, let used = limit.percent {
+                usageRow(title: LocalizedStringKey(name), resetText: limit.window.resetTimeString,
+                         resetIsAbsolute: limit.window.resetIsAbsolute,
+                         utilization: used, kind: .fable)
             }
         }
     }
@@ -332,46 +322,15 @@ struct UsageDashboardView: View {
 
     // MARK: - Usage Row
 
-    private func usageRow(label: LocalizedStringKey, detail: Text? = nil, resetText: String?, utilization: Double, kind: LimitBarKind) -> some View {
-        let fillColor = menuBarConfig.limitBarColor(for: kind, utilization: utilization, context: .dashboard)
-
-        return VStack(spacing: 5) {
-            HStack {
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.textSecondary)
-                if let detail {
-                    detail
-                        .font(.caption.weight(.medium).monospacedDigit())
-                        .foregroundStyle(fillColor)
-                }
-                Spacer()
-                if let resetText {
-                    Text("Resets in \(resetText)")
-                        .font(.caption)
-                        .foregroundStyle(.textSecondary)
-                }
-            }
-
-            HStack(spacing: 8) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(.progressTrack)
-                            .frame(height: 7)
-
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(fillColor)
-                            .frame(width: max(0, geo.size.width * min(utilization / 100.0, 1.0)), height: 7)
-                    }
-                }
-                .frame(height: 7)
-
-                Text("\(Int(utilization))%")
-                    .font(.caption.weight(.medium).monospacedDigit())
-                    .foregroundStyle(fillColor)
-                    .frame(width: 34, alignment: .trailing)
-            }
-        }
+    private func usageRow(title: LocalizedStringKey, resetText: String?, resetIsAbsolute: Bool = false, utilization: Double, kind: LimitBarKind) -> some View {
+        UsageLimitRow(
+            kind: kind,
+            title: title,
+            utilization: utilization,
+            resetText: resetText,
+            resetIsAbsolute: resetIsAbsolute,
+            identityColor: menuBarConfig.limitIdentityColor(for: kind),
+            fillColor: menuBarConfig.limitBarColor(for: kind, utilization: utilization, context: .dashboard)
+        )
     }
 }

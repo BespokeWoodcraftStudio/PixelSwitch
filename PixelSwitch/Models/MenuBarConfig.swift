@@ -4,6 +4,19 @@ import SwiftUI
 enum LimitBarKind {
     case session
     case weekly
+    /// A per-model weekly allowance (today only Fable). It needs its own colour:
+    /// it used to borrow the weekly one, so two of the three bars on a card were
+    /// always the same colour.
+    case fable
+
+    /// The symbol on the row's identity chip.
+    var symbolName: String {
+        switch self {
+        case .session: return "clock.fill"
+        case .weekly:  return "calendar"
+        case .fable:   return "sparkles"
+        }
+    }
 }
 
 /// Where a limit bar is drawn. Only matters while the user keeps the stock
@@ -30,6 +43,7 @@ final class MenuBarConfig: ObservableObject {
     static let shared = MenuBarConfig()
     static let defaultSessionLimitBarColorHex = "#34C759"
     static let defaultWeeklyLimitBarColorHex = "#0A84FF"
+    static let defaultFableLimitBarColorHex = "#AF52DE"
     static let defaultLowRemainingLimitBarColorHex = "#FF3B30"
     static let defaultLowRemainingThreshold = 30.0
 
@@ -55,6 +69,10 @@ final class MenuBarConfig: ObservableObject {
         didSet { persistWeeklyLimitBarColor() }
     }
 
+    @Published var fableLimitBarColorHex: String {
+        didSet { persistFableLimitBarColor() }
+    }
+
     @Published var lowRemainingLimitBarColorHex: String {
         didSet { persistLowRemainingLimitBarColor() }
     }
@@ -68,6 +86,7 @@ final class MenuBarConfig: ObservableObject {
     private let customizesLimitBarColorsKey = "customizesLimitBarColors"
     private let sessionLimitBarColorKey = "sessionLimitBarColor"
     private let weeklyLimitBarColorKey = "weeklyLimitBarColor"
+    private let fableLimitBarColorKey = "fableLimitBarColor"
     private let lowRemainingLimitBarColorKey = "lowRemainingLimitBarColor"
     private let lowRemainingWarningThresholdKey = "lowRemainingWarningThreshold"
 
@@ -86,6 +105,8 @@ final class MenuBarConfig: ObservableObject {
         self.customizesLimitBarColors = UserDefaults.standard.bool(forKey: customizesLimitBarColorsKey)
         self.sessionLimitBarColorHex = UserDefaults.standard.string(forKey: sessionLimitBarColorKey)
             ?? Self.defaultSessionLimitBarColorHex
+        self.fableLimitBarColorHex = UserDefaults.standard.string(forKey: fableLimitBarColorKey)
+            ?? Self.defaultFableLimitBarColorHex
         self.weeklyLimitBarColorHex = UserDefaults.standard.string(forKey: weeklyLimitBarColorKey)
             ?? Self.defaultWeeklyLimitBarColorHex
         self.lowRemainingLimitBarColorHex = UserDefaults.standard.string(forKey: lowRemainingLimitBarColorKey)
@@ -117,6 +138,10 @@ final class MenuBarConfig: ObservableObject {
         UserDefaults.standard.set(weeklyLimitBarColorHex, forKey: weeklyLimitBarColorKey)
     }
 
+    private func persistFableLimitBarColor() {
+        UserDefaults.standard.set(fableLimitBarColorHex, forKey: fableLimitBarColorKey)
+    }
+
     private func persistLowRemainingLimitBarColor() {
         UserDefaults.standard.set(lowRemainingLimitBarColorHex, forKey: lowRemainingLimitBarColorKey)
     }
@@ -137,6 +162,10 @@ final class MenuBarConfig: ObservableObject {
 
     var sessionLimitBarColor: Color {
         Self.color(from: sessionLimitBarColorHex, fallback: Self.defaultSessionLimitBarColorHex)
+    }
+
+    var fableLimitBarColor: Color {
+        Self.color(from: fableLimitBarColorHex, fallback: Self.defaultFableLimitBarColorHex)
     }
 
     var weeklyLimitBarColor: Color {
@@ -165,11 +194,20 @@ final class MenuBarConfig: ObservableObject {
             }
         }
 
+        return limitIdentityColor(for: kind)
+    }
+
+    /// The colour that says WHICH limit a row is, independent of how full it is.
+    /// The bar fill still turns red when a limit is nearly out; this never does,
+    /// so two limits that are both nearly out stay tellable apart.
+    func limitIdentityColor(for kind: LimitBarKind) -> Color {
         switch kind {
         case .session:
-            return sessionLimitBarColor
+            return customizesLimitBarColors ? sessionLimitBarColor : Self.color(from: Self.defaultSessionLimitBarColorHex, fallback: Self.defaultSessionLimitBarColorHex)
         case .weekly:
-            return weeklyLimitBarColor
+            return customizesLimitBarColors ? weeklyLimitBarColor : Self.color(from: Self.defaultWeeklyLimitBarColorHex, fallback: Self.defaultWeeklyLimitBarColorHex)
+        case .fable:
+            return customizesLimitBarColors ? fableLimitBarColor : Self.color(from: Self.defaultFableLimitBarColorHex, fallback: Self.defaultFableLimitBarColorHex)
         }
     }
 

@@ -138,6 +138,7 @@ struct SettingsView: View {
                 if menuBarConfig.customizesLimitBarColors {
                     ColorPicker("Session bar color", selection: sessionLimitBarColor, supportsOpacity: false)
                     ColorPicker("Weekly bar color", selection: weeklyLimitBarColor, supportsOpacity: false)
+                    ColorPicker("Fable bar color", selection: fableLimitBarColor, supportsOpacity: false)
                     ColorPicker("Low remaining color", selection: lowRemainingLimitBarColor, supportsOpacity: false)
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -290,6 +291,13 @@ struct SettingsView: View {
         colorBinding(
             keyPath: \.weeklyLimitBarColorHex,
             fallback: MenuBarConfig.defaultWeeklyLimitBarColorHex
+        )
+    }
+
+    private var fableLimitBarColor: Binding<Color> {
+        colorBinding(
+            keyPath: \.fableLimitBarColorHex,
+            fallback: MenuBarConfig.defaultFableLimitBarColorHex
         )
     }
 

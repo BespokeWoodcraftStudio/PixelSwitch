@@ -190,6 +190,8 @@
 "The saved details for %@ belong to another account. Re-authenticate %@ to fix it." = "Die gespeicherten Kontodaten für %1$@ gehören zu einem anderen Konto. Authentifiziere %2$@ erneut, um das zu beheben.";
 
 /* Per-model weekly allowance (Fable) */
-"Weekly (%@)" = "Wöchentlich (%@)";
 "%lld%% left" = "%lld%% übrig";
 "Fable weekly — usage vs time (7d)" = "Fable Woche — Nutzung vs. Zeit (7 Tage)";
+"Fable" = "Fable";
+"Fable bar color" = "Fable-Balkenfarbe";
+"Resets %@" = "Zurücksetzen %@";

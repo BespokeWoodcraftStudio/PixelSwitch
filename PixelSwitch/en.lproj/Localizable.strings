@@ -192,6 +192,8 @@
 "The saved details for %@ belong to another account. Re-authenticate %@ to fix it." = "The saved details for %1$@ belong to another account. Re-authenticate %2$@ to fix it.";
 
 /* Per-model weekly allowance (Fable) */
-"Weekly (%@)" = "Weekly (%@)";
 "%lld%% left" = "%lld%% left";
 "Fable weekly — usage vs time (7d)" = "Fable weekly — usage vs time (7d)";
+"Fable" = "Fable";
+"Fable bar color" = "Fable bar color";
+"Resets %@" = "Resets %@";

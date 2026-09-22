@@ -85,7 +85,7 @@ struct MenuBarModuleView: View {
             UtilizationBar(
                 utilization: fableUtilization,
                 markerPercent: fableTimeElapsed,
-                fillColor: config.limitBarColor(for: .weekly, utilization: fableUtilization, context: .menuBar)
+                fillColor: config.limitBarColor(for: .fable, utilization: fableUtilization, context: .menuBar)
             )
 
         case .dailyCost:

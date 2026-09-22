@@ -227,6 +227,14 @@ do {
 
     check(decode(#"{"five_hour":"broken"}"#) == nil, "usage: a malformed top-level window still fails, as before")
 
+    // How a reset time reads: a countdown says "Resets in ...", a weekday says "Resets ...".
+    let soon = UsageWindow(utilization: 10, resetsAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(3 * 3600)))
+    let faraway = UsageWindow(utilization: 10, resetsAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(5 * 86_400)))
+    let gone = UsageWindow(utilization: 10, resetsAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)))
+    check(soon.resetIsAbsolute == false && faraway.resetIsAbsolute == true && gone.resetIsAbsolute == false,
+          "usage: only a reset more than a day away reads as a weekday and time",
+          "\(soon.resetIsAbsolute) \(faraway.resetIsAbsolute) \(gone.resetIsAbsolute)")
+
     let over = UsageLimit(kind: "weekly_scoped", group: "weekly", percent: 130, severity: nil, resetsAt: nil, scope: nil, isActive: nil)
     let fresh = UsageLimit(kind: "weekly_scoped", group: "weekly", percent: 0, severity: nil, resetsAt: nil, scope: nil, isActive: nil)
     check(over.percentLeft == 0 && fresh.percentLeft == 100, "usage: what is left stays between 0 and 100")

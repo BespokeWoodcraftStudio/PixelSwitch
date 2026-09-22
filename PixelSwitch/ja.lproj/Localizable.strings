@@ -190,6 +190,8 @@
 "The saved details for %@ belong to another account. Re-authenticate %@ to fix it." = "%1$@ に保存されたアカウント情報は別のアカウントのものです。%2$@ を再認証して修正してください。";
 
 /* Per-model weekly allowance (Fable) */
-"Weekly (%@)" = "週間（%@）";
 "%lld%% left" = "残り %lld%%";
 "Fable weekly — usage vs time (7d)" = "Fable 週間 — 使用量 vs 時間（7日）";
+"Fable" = "Fable";
+"Fable bar color" = "Fable バーの色";
+"Resets %@" = "%@ にリセット";

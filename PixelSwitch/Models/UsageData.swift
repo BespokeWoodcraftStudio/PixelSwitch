@@ -182,6 +182,17 @@ struct UsageWindow: Codable {
         }
     }
 
+    /// True when `resetTimeString` is a weekday and clock time rather than a
+    /// countdown, so a label can read "Resets Mon 11:00 AM" instead of the
+    /// ungrammatical "Resets in Mon 11:00 AM". Mirrors `resetTimeString`'s
+    /// own 24-hour cutover.
+    var resetIsAbsolute: Bool {
+        guard let date = resetsAtDate else { return false }
+        let remaining = date.timeIntervalSinceNow
+        guard remaining > 0 else { return false }
+        return Int(remaining) / 3600 > 24
+    }
+
     /// Compact countdown rendering for narrow menu-bar modules.
     /// Always returns a fixed-shape string ("now", "5m", "2h 14m", "4d 6h").
     /// Never falls back to a date format — the menu bar can't afford the width.
