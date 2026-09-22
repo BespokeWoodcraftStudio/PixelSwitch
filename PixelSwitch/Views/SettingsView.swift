@@ -13,6 +13,7 @@ struct SettingsView: View {
     @AppStorage("appLanguage") private var appLanguage = "auto"
     @AppStorage("autoSwitchEnabled") private var autoSwitchEnabled = false
     @AppStorage("autoSwitchThreshold") private var autoSwitchThreshold = 90.0
+    @AppStorage(AutoSwitchFableSetting.key) private var autoSwitchOnFable = true
     @AppStorage("transcriptLookbackHours") private var transcriptLookbackHours = 24
     @State private var launchAtLogin = false
 
@@ -87,7 +88,8 @@ struct SettingsView: View {
                         }
                         Slider(value: $autoSwitchThreshold, in: 50...99, step: 1)
                     }
-                    Text("When the active account's 5-hour, weekly or Fable usage reaches this level, PixelSwitch switches to the account with the most room left on that limit. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.")
+                    Toggle("Also switch when Fable runs out", isOn: $autoSwitchOnFable)
+                    Text("When the active account's 5-hour, weekly or Fable usage reaches this level, PixelSwitch switches to the account with the most room left on that limit. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

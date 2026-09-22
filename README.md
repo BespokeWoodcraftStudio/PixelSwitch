@@ -16,12 +16,28 @@
   <img src="https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white" alt="Swift 6.0">
 </p>
 
-PixelSwitch is a small menu bar app for people who use more than one Claude Code account. The built-in `claude auth login` flow is destructive: every switch wipes the previous account's credentials and sends you back through the browser. PixelSwitch keeps a backup of each account, swaps the keychain entry and `~/.claude.json` in one step when you switch, and keeps every account ready for a one-click switch back. It also shows each account's usage limits, today's cost and activity, and refreshes tokens in the background.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/accounts-dark.png">
+    <img src="assets/screenshots/accounts-light.png" alt="PixelSwitch showing four Claude accounts, each with its session, weekly and Fable limits and how much is left" width="430">
+  </picture>
+</p>
+
+<p align="center">
+  <sub>Every account, every limit, and what is left of each. Rendered from the app's own views with sample accounts.</sub>
+</p>
+
+PixelSwitch is a small menu bar app for people who use more than one Claude Code account. The built-in `claude auth login` flow is destructive: every switch wipes the previous account's credentials and sends you back through the browser. PixelSwitch keeps a backup of each account, swaps the keychain entry and `~/.claude.json` in one step when you switch, and keeps every account ready for a one-click switch back.
+
+It also watches what you have left. Every account's card shows its 5-hour session, its weekly limit and its **weekly Fable allowance**, each with how much is left and when it resets, and PixelSwitch can move you to another account by itself before a limit stops you. Your MCP server logins stay put across a switch, and it proves which account a login belongs to with Anthropic before it touches anything.
 
 PixelSwitch is built on [CCSwitcher](https://github.com/XueshiQiao/CCSwitcher) by Xueshi Qiao. See [Credits](#credits).
 
 ## What is different from CCSwitcher
 
+- **It knows about Fable.** Fable has its own weekly allowance, separate from your weekly limit, and it usually runs out first. PixelSwitch shows it on every account and can switch you to an account that still has Fable left. No other Claude account switcher does this today.
+- **Your MCP server logins survive a switch.** Claude Code keeps MCP logins (Stripe, Supabase, Linear and the rest) in the same keychain item as your Claude login. Restoring an account's whole item puts back an old copy of them, and those servers ask you to sign in again — measured on one Mac, a switch took 48 stored MCP logins down to 8. PixelSwitch swaps only the Claude login and leaves this Mac's MCP logins alone.
+- **A switch cannot mix up two accounts.** Which account is live is proven with Anthropic's own API, not read from `~/.claude.json`, which running Claude Code sessions rewrite from memory. PixelSwitch refuses a switch whose stored login belongs to a different account, and repairs the pairing when it finds one wrong.
 - **Much lighter on memory.** CCSwitcher reads every Claude Code transcript on disk to compute cost and activity. On a heavy-use Mac with about 10,000 transcript files (12 GB), that meant a 3.9 GB spike at launch and about 860 MB of memory from then on. PixelSwitch reads only recent history, the last 24 hours by default. On the same Mac it settles at about 200 MB, and its parse cache shrank from 70.9 MB to 4.9 MB. Change the window in **Settings → General → Usage history window**: 24 hours, 3, 7 or 30 days, or all.
 - **Its own updates.** PixelSwitch checks its own release feed on this repository, signed with its own update key. It never picks up a CCSwitcher release by accident.
 - **Moves your accounts across.** The first time PixelSwitch starts, it copies your CCSwitcher accounts and settings, so you do not have to sign in again.
@@ -46,12 +62,28 @@ PixelSwitch is built on [CCSwitcher](https://github.com/XueshiQiao/CCSwitcher) b
 3. macOS asks once whether PixelSwitch may use the saved account credentials (the keychain item `me.xueshi.ccswitcher.backups`, which PixelSwitch keeps under its original name so nothing is lost). Click **Always Allow**.
 4. When everything looks right, delete CCSwitcher from Applications.
 
+## What you are looking at
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/limits-dark.png">
+    <img src="assets/screenshots/limits-light.png" alt="One account card: a green clock for the session limit, a blue calendar for the weekly limit, a purple sparkle for the Fable allowance, each with how much is left and when it resets" width="520">
+  </picture>
+</p>
+
+One card per account. The colour down the left edge is the account's own, so you know whose numbers these are before you read the address. Inside, each limit keeps an identity that never changes: a **green clock** for the 5-hour session, a **blue calendar** for the weekly limit, a **purple sparkle** for the weekly Fable allowance. The bar is the other half of the story: it fills and turns red as that limit runs out, which is why two limits that are both nearly gone still read apart at a glance.
+
+This account is nearly out of its session and has 13% of its Fable left. With auto-switch on, PixelSwitch would move to an account that still has room before that stopped anyone.
+
 ## Features
 
 - **Non-Interruptive Account Switching**: The native `claude auth logout` clears the current account's credentials, and switching back requires another full OAuth. PixelSwitch keeps a separate backup of each account (keychain token + `~/.claude.json` `oauthAccount` block), atomically swaps both on switch — every added account's credentials stay intact, one-click swap-back, no workflow interruption. Sessions that are already running follow the switch on their next request (see [In-flight sessions](#1-non-interruptive-account-switching)).
 - **Multi-Account Management**: Add and switch between different Claude Code accounts with a single click from the macOS menu bar.
-- **Usage Dashboard**: Real-time monitoring of your Claude API usage limits (5-hour session and weekly) directly in the menu bar dropdown, plus today's API-equivalent cost and activity stats (turns, active minutes, lines written, model breakdown).
-- **Configurable Menu Bar Modules**: Build your own iStats-style menu bar readout. Choose any combination of account name, 5-hour session usage, weekly usage, today's cost, and session/weekly reset countdowns — each rendered as a compact two-line module (label over value, with monochrome progress bars for utilization). Drag to reorder and toggle modules in Settings, with a live preview.
+- **Usage Dashboard**: Every account's limits in the menu bar dropdown — 5-hour session, weekly, and the weekly **Fable** allowance — each showing how much is left and when it resets, plus today's API-equivalent cost and activity stats (turns, active minutes, lines written, model breakdown). Each limit has its own colour and symbol that never change with usage (green clock, blue calendar, purple sparkle), while the bar itself fills and turns red as the limit runs out, so two limits that are both nearly gone still read apart at a glance.
+- **Auto-switch before a limit stops you**: when the active account reaches your threshold on its session, weekly or Fable limit, PixelSwitch switches to the account with the most room left on that limit — and only to one that is also clear of its other limits, so it never has to move you twice. If no account has room, it stays put. Fable switching has its own on/off switch, so you can keep session and weekly switching while leaving Fable as a reading. A 5-minute cooldown and a 10-point hysteresis margin stop any ping-ponging, and the chosen account is re-checked with a fresh reading before the switch happens.
+- **A colour per account**: each account has its own colour, shown as a bar down the edge of its card and on its icon, so you know whose numbers you are reading before you read the address. Ten colours, repeating only past ten accounts, and each account keeps its colour between launches. Turn it off in **Settings → Account display**.
+- **Honest cost history**: the Costs tab totals only the history PixelSwitch actually keeps, which is bounded by your usage history window. A "Last 7 days" or "Last 30 days" total appears only when that much history exists; otherwise one card states the real span.
+- **Configurable Menu Bar Modules**: Build your own iStats-style menu bar readout. Choose any combination of the PixelSwitch logo, account name, 5-hour session usage, weekly usage, Fable usage, today's cost, and session/weekly reset countdowns — each rendered as a compact two-line module (label over value, with monochrome progress bars for utilization). Drag to reorder and toggle modules in Settings, with a live preview.
 - **Desktop Widgets**: Native macOS desktop widgets in small, medium, and large sizes showing account usage, costs, and activity stats, plus a circular ring variant. Widgets need a build signed with an Apple Developer ID; the public release is not signed yet, so its widgets do not load (see [Install](#install)).
 - **In-App Updates**: Powered by [Sparkle 2.x](https://sparkle-project.org/), reading PixelSwitch's own release feed. Every release is signed with the PixelSwitch update key, so the app only accepts updates published here.
 - **Dark Mode**: Full light and dark mode support with adaptive colors that follow your system appearance.
@@ -79,7 +111,19 @@ The native CLI has no clean "switch account" command — `claude auth logout && 
 
 **In-flight sessions**: a running Claude Code session keeps its token in memory. Before each API request it checks the modification date of its plaintext fallback file, `~/.claude/.credentials.json`: if the file is absent, it re-reads the Keychain (with a 30-second cache); if the file exists and its date has not changed, it keeps the old token for hours, until the access token expires. That file usually does not exist, but a Mac where a Keychain write ever failed can have a stale copy, and on such a Mac running sessions kept billing the old account for 11+ hours after a switch. So after every switch PixelSwitch bumps that file's modification date (it never creates, rewrites or deletes the file), which is the CLI's own signal to re-read the Keychain. Running sessions move to the new account on their next request. If you need an in-flight session to finish on its original account, end it before switching.
 
-### 2. Terminal-Free Login Flow (Native `Process` + `Pipe`)
+**Whose login is this?** `~/.claude.json` names an account, but a running Claude Code session rewrites that file from memory, so it can name one account while the keychain holds another's login. PixelSwitch therefore proves ownership from the login itself: it asks Anthropic's `/api/oauth/profile` who the token belongs to and matches the answer against each stored account. It backs up a login only under the account that owns it, refuses a switch whose stored login belongs to someone else, removes a login saved under the wrong account, and never renews one that is live or stored elsewhere. If `claude auth status` stops answering, it gives up after 30 seconds and checks the store directly rather than leaving a switch half done.
+
+### 2. Auto-Switch, Including the Fable Allowance
+
+Claude accounts have three limits worth watching: the 5-hour session window, the 7-day weekly window, and a weekly per-model allowance for Fable that the usage API reports separately. Fable usually runs out first, and when it does, the account is still perfectly usable for everything else — which is exactly why a switcher has to treat it as its own limit rather than folding it into the weekly figure.
+
+- The session and weekly windows are checked first; Fable is checked when they have not triggered.
+- A candidate must sit at least the hysteresis margin below your threshold **on the limit that fired and on the session and weekly windows**, so a Fable switch never lands on an account that is about to hit its weekly limit.
+- An account with no reading for the limit that fired is never chosen: on a round-robin poll, "no sample yet" is not the same as "plenty left".
+- The same rule that ranks candidates is the one that verifies the chosen account against a fresh reading, so ranking and verification cannot drift apart.
+- Fable switching can be turned off on its own in **Settings → Auto-switch**, leaving session and weekly switching untouched.
+
+### 3. Terminal-Free Login Flow (Native `Process` + `Pipe`)
 
 Unlike tools that build complex pseudoterminals (PTYs) to handle CLI login states, PixelSwitch uses a minimalist approach to add new accounts:
 
@@ -87,7 +131,7 @@ Unlike tools that build complex pseudoterminals (PTYs) to handle CLI login state
 - When `claude auth login` is executed silently in the background, the Claude CLI detects the non-interactive environment and automatically launches the system's default browser to handle the OAuth loop.
 - Once the user authorizes in the browser, the background CLI process terminates with exit code 0. PixelSwitch then captures the newly-generated keychain credentials and `oauthAccount` block — the user never opens a terminal.
 
-### 3. Delegated Token Refresh (A Different Path Than CodexBar)
+### 4. Delegated Token Refresh (A Different Path Than CodexBar)
 
 Claude's OAuth access tokens have a short lifespan (~8 hours) and the refresh endpoint is protected by the Claude CLI's internal client signatures and Cloudflare. Third-party apps that want silent auto-refresh have two paths, and PixelSwitch and [CodexBar](https://github.com/steipete/CodexBar) take **fundamentally different** approaches here:
 
@@ -101,7 +145,7 @@ We deliberately chose the latter, trading a tiny per-refresh subprocess overhead
 
 The user-visible result is the same as CodexBar's: seamless, zero-interaction. The difference is **who's on the hook for keeping up with Anthropic's private OAuth surface** — CodexBar takes that on themselves (faster, riskier); PixelSwitch delegates to the official CLI (small subprocess cost, safer).
 
-### 4. Local JSONL Parse Cache (Performance)
+### 5. Local JSONL Parse Cache (Performance)
 
 Cost summaries and today's-activity stats are computed from Claude Code's per-session JSONL files under `~/.claude/projects/`. A heavy user's directory can be hundreds of megabytes across thousands of files. Re-parsing the whole tree every 5 minutes was originally CPU-pegging on idle ([#13](https://github.com/XueshiQiao/CCSwitcher/issues/13)).
 
@@ -109,7 +153,7 @@ Cost summaries and today's-activity stats are computed from Claude Code's per-se
 - On each refresh, files with unchanged mtime are skipped entirely — the cache holds their previously-parsed aggregates and the result is summed in memory.
 - Only the actively-modified files (typically just your current Claude Code session) get re-parsed. Steady-state refreshes drop from ~5 seconds of saturated CPU to under 100ms.
 
-### 5. Security-CLI Keychain Reader
+### 6. Security-CLI Keychain Reader
 
 Reading from the macOS Keychain via native `Security.framework` (`SecItemCopyMatching`) from a background menu bar app sometimes surfaces a blocking system UI prompt — "PixelSwitch wants to access your keychain". To bypass this, PixelSwitch adopts CodexBar's strategy:
 
@@ -119,11 +163,11 @@ Reading from the macOS Keychain via native `Security.framework` (`SecItemCopyMat
 
 **About PixelSwitch's own backup keychain entries**: the per-account backup store (`me.xueshi.ccswitcher.backups`) is a keychain entry PixelSwitch creates and owns, so there's no cross-vendor prompt to dodge. We read/write it via the native `Security.framework` (`SecItemCopyMatching` / `SecItemAdd`) — no subprocess, no prompt. In short: **the `/usr/bin/security` subprocess approach is reserved specifically for the cross-vendor read of Claude Code's keychain entry; everything else uses the most direct native API.**
 
-### 6. Team-ID-Prefixed App Group (No "Access Data From Other Apps" Prompt)
+### 7. Team-ID-Prefixed App Group (No "Access Data From Other Apps" Prompt)
 
 macOS 15 Sequoia silently changed the rules for App Group containers: any non-Mac-App-Store, non-TestFlight app whose App Group ID does NOT begin with the developer Team ID triggers a TCC "App Management" prompt on every launch (and again after every auto-update that changes the binary's cdhash). PixelSwitch's App Group is declared as `$(TeamIdentifierPrefix)ai.pixelventures.pixelswitch`, the Team-ID-prefixed form, which macOS auto-authorizes for Developer-ID-signed apps without a provisioning profile. The app reads the group ID from its own signed entitlements at runtime, so it always matches whichever team signed the build. An unsigned or ad-hoc build has no entitlements and never touches a group container at all, which is why it never shows the prompt (and why its widgets stay empty). Background: CCSwitcher [#14](https://github.com/XueshiQiao/CCSwitcher/issues/14).
 
-### 7. SwiftUI `Settings` Window Lifecycle Keepalive for `LSUIElement`
+### 8. SwiftUI `Settings` Window Lifecycle Keepalive for `LSUIElement`
 
 Because PixelSwitch is a pure menu bar app (`LSUIElement = true`), SwiftUI refuses to present the native `Settings { … }` window — a known macOS quirk where SwiftUI assumes the app has no active scene to attach Settings to. PixelSwitch implements CodexBar's **lifecycle keepalive** workaround:
 
@@ -141,7 +185,7 @@ xcodegen generate
 open PixelSwitch.xcodeproj
 ```
 
-To sign locally, set your own Apple team as `DEVELOPMENT_TEAM` in `project.yml` (both targets). Without Xcode, push to `main` and the [build workflow](.github/workflows/build.yml) produces a universal DMG as a build artifact; pushing a `v*` tag publishes a release with the DMG and the Sparkle `appcast.xml`. The app icon is drawn by `Tools/icon/make_icon.py`.
+To sign locally, set your own Apple team as `DEVELOPMENT_TEAM` in `project.yml` (both targets). Without Xcode, push to `main` and the [build workflow](.github/workflows/build.yml) produces a universal DMG as a build artifact; pushing a `v*` tag publishes a release with the DMG and the Sparkle `appcast.xml`. The app icon and the menu-bar mark are both drawn by `Tools/icon/make_icon.py`, so there is one source for the logo. `Tests/run-unit-tests.sh` runs the unit tests with nothing but the Swift compiler (no Xcode needed); CI runs them before every build.
 
 ## Credits
 

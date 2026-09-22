@@ -312,10 +312,10 @@ do {
     let c = Account(email: "c@x.com", displayName: "C")
     let d = Account(email: "d@x.com", displayName: "D")
     let e = Account(email: "e@x.com", displayName: "E")
-    func plan(_ byAccount: [UUID: UsageAPIResponse], candidates: [Account]? = nil, switchable: @escaping (Account) -> Bool = { _ in true }, sampled: Bool = true) -> (limit: AutoSwitchEngine.Limit, targets: [Account])? {
+    func plan(_ byAccount: [UUID: UsageAPIResponse], candidates: [Account]? = nil, switchable: @escaping (Account) -> Bool = { _ in true }, sampled: Bool = true, watchFable: Bool = true) -> (limit: AutoSwitchEngine.Limit, targets: [Account])? {
         AutoSwitchEngine.plan(active: active, candidates: candidates ?? [b, c, d, e], usageByAccount: byAccount,
                               isSwitchable: switchable, activeSampledThisCycle: sampled,
-                              threshold: 98, hysteresisPct: 10, asOf: now)
+                              threshold: 98, hysteresisPct: 10, watchFable: watchFable, asOf: now)
     }
     func names(_ p: (limit: AutoSwitchEngine.Limit, targets: [Account])?) -> String {
         guard let p else { return "stay" }
@@ -371,6 +371,13 @@ do {
     _ = plan([active.id: usage(session: 10, weekly: 50, fable: 99), b.id: usage(session: 5, weekly: 10, fable: 95), c.id: usage(session: 5, weekly: 10, fable: 97)],
              switchable: { _ in keychainReads += 1; return true })
     check(keychainReads == 0, "auto-switch: accounts that fail on usage are never checked in the Keychain", "\(keychainReads)")
+
+    // The Fable switch can be turned off without touching session and weekly.
+    let fableOff = [active.id: usage(session: 10, weekly: 50, fable: 100), e.id: usage(session: 5, weekly: 10, fable: 20)]
+    check(names(plan(fableOff, watchFable: true)) == "fable: E", "auto-switch: with the Fable switch on, Fable moves you")
+    check(names(plan(fableOff, watchFable: false)) == "stay", "auto-switch: with the Fable switch off, Fable never moves you")
+    let windowsWithFableOff = [active.id: usage(session: 99, weekly: 50, fable: 100), e.id: usage(session: 5, weekly: 10, fable: 20)]
+    check(names(plan(windowsWithFableOff, watchFable: false)) == "windows: E", "auto-switch: the Fable switch never affects session and weekly switching")
 
     let edge = AutoSwitchEngine.eligibleUtilization(usage(session: 5, weekly: 89, fable: 10), limit: .fable, ceiling: 88, asOf: now)
     let ok = AutoSwitchEngine.eligibleUtilization(usage(session: 5, weekly: 88, fable: 88), limit: .fable, ceiling: 88, asOf: now)

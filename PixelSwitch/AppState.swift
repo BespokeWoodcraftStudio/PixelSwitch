@@ -88,6 +88,13 @@ final class AppState: ObservableObject {
     }
 
     /// Utilization percentage at which we switch. Defaults to 90 when unset.
+    /// Settings → Auto-switch. On (the default) means the weekly Fable
+    /// allowance can move the user too; off leaves session and weekly untouched
+    /// and Fable purely informational.
+    private var autoSwitchOnFable: Bool {
+        UserDefaults.standard.object(forKey: AutoSwitchFableSetting.key) as? Bool ?? true
+    }
+
     private var autoSwitchThreshold: Double {
         let stored = UserDefaults.standard.double(forKey: "autoSwitchThreshold")
         return stored == 0 ? 90 : stored
@@ -739,7 +746,8 @@ final class AppState: ObservableObject {
             isSwitchable: { [unowned self] in self.isSwitchable($0) },
             activeSampledThisCycle: activeSampledThisCycle,
             threshold: autoSwitchThreshold,
-            hysteresisPct: autoSwitchHysteresis
+            hysteresisPct: autoSwitchHysteresis,
+            watchFable: autoSwitchOnFable
         ) else { return }
         let limit = plan.limit
         let ranked = plan.targets

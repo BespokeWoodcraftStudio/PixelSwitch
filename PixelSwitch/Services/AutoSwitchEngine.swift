@@ -103,6 +103,9 @@ enum AutoSwitchEngine {
     /// Which limit to act on and where to go, or nil to stay put. Session and
     /// weekly are checked first; Fable only when they have not triggered a
     /// switch, since a Fable target must have session and weekly room anyway.
+    ///
+    /// `watchFable` is the user's setting: off means Fable is shown but never
+    /// moves anyone, while session and weekly keep working exactly as before.
     static func plan(
         active: Account,
         candidates: [Account],
@@ -111,9 +114,10 @@ enum AutoSwitchEngine {
         activeSampledThisCycle: Bool,
         threshold: Double,
         hysteresisPct: Double,
+        watchFable: Bool = true,
         asOf now: Date = Date()
     ) -> (limit: Limit, targets: [Account])? {
-        for limit in [Limit.windows, .fable] {
+        for limit in (watchFable ? [Limit.windows, .fable] : [Limit.windows]) {
             let targets = rankedTargets(
                 active: active,
                 candidates: candidates,
@@ -200,5 +204,15 @@ enum AutoSwitchEngine {
             //    those rank purely by Fable headroom.
             .sorted { ($0.keepsFable ? 0 : 1, $0.util) < ($1.keepsFable ? 0 : 1, $1.util) }
             .map(\.account)
+    }
+}
+
+/// Whether auto-switch also acts on the weekly Fable allowance. On by default;
+/// off leaves Fable as a reading only, and session and weekly switching alone.
+enum AutoSwitchFableSetting {
+    static let key = "autoSwitchOnFable"
+
+    static var isOn: Bool {
+        UserDefaults.standard.object(forKey: key) as? Bool ?? true
     }
 }
