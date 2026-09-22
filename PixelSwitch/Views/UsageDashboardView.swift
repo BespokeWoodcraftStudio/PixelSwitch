@@ -58,7 +58,11 @@ struct UsageDashboardView: View {
                     todayActivityCard
 
                     ForEach(appState.accounts) { account in
-                        accountUsageCard(account: account, usage: appState.accountUsage[account.id])
+                        accountUsageCard(
+                            account: account,
+                            usage: appState.accountUsage[account.id],
+                            swatch: accountSwatches[account.id]
+                        )
                     }
                 }
 
@@ -199,9 +203,15 @@ struct UsageDashboardView: View {
 
     // MARK: - Per-Account Card
 
-    private func accountUsageCard(account: Account, usage: UsageAPIResponse?) -> some View {
+    /// A colour per account, worked out once per render from the accounts on
+    /// screen, so every card differs and each keeps its colour across launches.
+    private var accountSwatches: [UUID: Int] {
+        AccountPalette.assignment(for: appState.accounts.map(\.id))
+    }
+
+    private func accountUsageCard(account: Account, usage: UsageAPIResponse?, swatch: Int?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            accountHeader(account)
+            accountHeader(account, swatch: swatch)
             if let usage = usage {
                 usageBars(usage)
                 extraUsageRow(usage.extraUsage)
@@ -232,7 +242,7 @@ struct UsageDashboardView: View {
                 .padding(.top, 4)
             }
         }
-        .cardStyle(fill: account.isActive ? .cardFill : .cardFill)
+        .cardStyle(fill: AccountPalette.fill(swatch), border: AccountPalette.border(swatch))
         .sectionPadding()
     }
 
@@ -255,11 +265,11 @@ struct UsageDashboardView: View {
     }
 
     @ViewBuilder
-    private func accountHeader(_ account: Account) -> some View {
+    private func accountHeader(_ account: Account, swatch: Int?) -> some View {
         HStack(spacing: 8) {
             Image(systemName: account.provider.iconName)
                 .font(.subheadline)
-                .foregroundStyle(account.isActive ? .brand : .secondary)
+                .foregroundStyle(AccountPalette.color(swatch))
 
             Text(account.displayEmail(obfuscated: !showFullEmail))
                 .font(.subheadline.weight(.medium))

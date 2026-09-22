@@ -78,8 +78,12 @@ struct UsageLimitRow: View {
         .padding(.vertical, 7)
         .padding(.horizontal, 8)
         .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(identityColor.opacity(0.08))
+            // Two layers: a neutral inset so the row keeps its contrast on a
+            // coloured account card, then the limit's own tint on top.
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(.cardFill)
+                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(identityColor.opacity(0.10))
+            }
         )
     }
 

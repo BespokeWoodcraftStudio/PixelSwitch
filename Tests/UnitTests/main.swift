@@ -246,6 +246,35 @@ do {
     }
 }
 
+// MARK: - A colour per account
+
+do {
+    let ids = (0..<5).map { _ in UUID() }
+    let first = AccountPalette.assignment(for: ids)
+    check(first.count == 5, "palette: every account gets a colour")
+    check(Set(first.values).count == 5, "palette: five accounts get five different colours", "\(first.values.sorted())")
+    check(AccountPalette.assignment(for: ids) == first, "palette: the same accounts always get the same colours")
+    check(AccountPalette.assignment(for: ids.reversed()).count == 5, "palette: order does not lose an account")
+
+    let fixed = UUID(uuidString: "CB7797E5-5257-402B-80D6-ADAE1220D368")!
+    let alone = AccountPalette.assignment(for: [fixed])[fixed]
+    check(alone == Int(AccountPalette.fnv1a(fixed.uuidString) % UInt64(AccountPalette.swatches.count)),
+          "palette: an account's colour comes from its id, not from its position")
+    check(AccountPalette.fnv1a("PixelSwitch") == AccountPalette.fnv1a("PixelSwitch"),
+          "palette: the hash is stable within a run")
+    check(AccountPalette.fnv1a("a") != AccountPalette.fnv1a("b"), "palette: different ids hash differently")
+
+    check(AccountPalette.swatches.count == 10, "palette: ten colours, as asked", "\(AccountPalette.swatches.count)")
+
+    let ten = (0..<10).map { _ in UUID() }
+    check(Set(AccountPalette.assignment(for: ten).values).count == 10, "palette: ten accounts get ten different colours")
+
+    let many = (0..<14).map { _ in UUID() }
+    let crowded = AccountPalette.assignment(for: many)
+    check(crowded.count == 14, "palette: more accounts than colours still all get one")
+    check(Set(crowded.values).count == AccountPalette.swatches.count, "palette: all ten colours are used before any repeats")
+}
+
 // MARK: - How much cost history actually exists
 
 do {

@@ -18,7 +18,7 @@ struct AccountSwitcherView: View {
                         emptyState
                     } else {
                         ForEach(appState.accounts) { account in
-                            accountRow(account)
+                            accountRow(account, swatch: accountSwatches[account.id])
                         }
                     }
                 }
@@ -54,12 +54,18 @@ struct AccountSwitcherView: View {
 
     // MARK: - Account Row
 
-    private func accountRow(_ account: Account) -> some View {
+    /// The same colour per account as the Usage tab, so an account looks the
+    /// same wherever it appears.
+    private var accountSwatches: [UUID: Int] {
+        AccountPalette.assignment(for: appState.accounts.map(\.id))
+    }
+
+    private func accountRow(_ account: Account, swatch: Int?) -> some View {
         HStack(spacing: 12) {
-            // Provider icon
+            // Provider icon, in the account's colour
             Image(systemName: account.provider.iconName)
                 .font(.title2)
-                .foregroundStyle(account.isActive ? .brand : .secondary)
+                .foregroundStyle(AccountPalette.color(swatch))
                 .frame(width: 32, height: 32)
 
             // Account info
@@ -160,8 +166,8 @@ struct AccountSwitcherView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(account.isActive ? .cardFillStrong : .clear)
-                .strokeBorder(.cardBorder, lineWidth: 1)
+                .fill(AccountPalette.fill(swatch))
+                .strokeBorder(AccountPalette.border(swatch), lineWidth: account.isActive ? 2 : 1)
                 .shadow(color: AppStyle.cardShadowColor, radius: AppStyle.cardShadowRadius, x: 0, y: AppStyle.cardShadowY)
         )
     }
