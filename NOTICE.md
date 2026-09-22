@@ -15,10 +15,10 @@ over every tracked Swift file at the 1.0.12 release:
 
 | Author | Lines | Share |
 |---|---:|---:|
-| Xueshi Qiao | 8,410 | 72.7% |
-| Pixel Ventures (this fork) | 2,464 | 21.3% |
-| neonwatty, Sandor Bogyo, Kyoube Lyu, AlexDesign420 | 687 | 5.9% |
-| **Total** | **11,561** | |
+| Xueshi Qiao | 7,810 | 69.5% |
+| Pixel Ventures (this fork) | 2,741 | 24.4% |
+| neonwatty, Sandor Bogyo, Kyoube Lyu, AlexDesign420 | 687 | 6.1% |
+| **Total** | **11,238** | |
 
 Those four other contributors committed to CCSwitcher before this fork existed,
 so five people hold copyright in this tree, not two.

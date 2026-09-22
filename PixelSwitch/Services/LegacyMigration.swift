@@ -39,7 +39,7 @@ enum LegacyMigration {
         defaults.set(true, forKey: doneKey)
 
         guard let legacy = defaults.persistentDomain(forName: legacyDomain), !legacy.isEmpty else {
-            log.info("No CCSwitcher settings found; nothing to migrate")
+            log.info("No legacy settings found; nothing to import")
             return
         }
         var copied: [String] = []
