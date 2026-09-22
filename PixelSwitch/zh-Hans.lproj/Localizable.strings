@@ -186,3 +186,4 @@
 "The login saved for %@ belongs to %@. Re-authenticate %@ to fix it." = "为 %1$@ 保存的登录属于 %2$@。请重新验证 %3$@ 以修复。";
 "The login saved for %@ is also saved under another account. Re-authenticate %@ to fix it." = "为 %1$@ 保存的登录也保存在另一个账户下。请重新验证 %2$@ 以修复。";
 "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "其保存的登录属于另一个账户，已被移除。请重新验证（↻）以修复。";
+"The saved login for %@ has expired and could not be renewed. Re-authenticate %@ to fix it." = "为 %1$@ 保存的登录已过期且无法续期。请重新验证 %2$@ 以修复。";

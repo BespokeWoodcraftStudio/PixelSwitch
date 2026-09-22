@@ -186,3 +186,4 @@
 "The login saved for %@ belongs to %@. Re-authenticate %@ to fix it." = "La connexion enregistrée pour %1$@ appartient à %2$@. Réauthentifiez %3$@ pour corriger cela.";
 "The login saved for %@ is also saved under another account. Re-authenticate %@ to fix it." = "La connexion enregistrée pour %1$@ est aussi enregistrée sous un autre compte. Réauthentifiez %2$@ pour corriger cela.";
 "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "Sa connexion enregistrée appartenait à un autre compte et a été supprimée. Réauthentifiez (↻) pour corriger cela.";
+"The saved login for %@ has expired and could not be renewed. Re-authenticate %@ to fix it." = "La connexion enregistrée pour %1$@ a expiré et n’a pas pu être renouvelée. Réauthentifiez %2$@ pour corriger cela.";

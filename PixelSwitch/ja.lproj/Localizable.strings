@@ -186,3 +186,4 @@
 "The login saved for %@ belongs to %@. Re-authenticate %@ to fix it." = "%1$@ に保存されたログインは %2$@ のものです。%3$@ を再認証して修正してください。";
 "The login saved for %@ is also saved under another account. Re-authenticate %@ to fix it." = "%1$@ に保存されたログインは別のアカウントにも保存されています。%2$@ を再認証して修正してください。";
 "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "保存されたログインは別のアカウントのものだったため削除しました。再認証（↻）して修正してください。";
+"The saved login for %@ has expired and could not be renewed. Re-authenticate %@ to fix it." = "%1$@ の保存されたログインは期限切れで、更新できませんでした。%2$@ を再認証して修正してください。";

@@ -159,10 +159,11 @@ do {
 do {
     func cred(_ access: String, _ refresh: String?) -> String {
         let r = refresh.map { #","refreshToken":"\#($0)""# } ?? ""
-        return #"{"claudeAiOauth":{"accessToken":"\#(access)"\#(r),"expiresAt":1790000000000},"mcpOAuth":{"x":{"serverName":"x"}}}"#
+        return #"{"claudeAiOauth":{"accessToken":"\#(access)"\#(r),"expiresAt":4102444800000},"mcpOAuth":{"x":{"serverName":"x"}}}"#
     }
     let a = CredentialOwnership.login(fromCredential: cred("at-A", "rt-A"))!
-    check(a == .init(accessToken: "at-A", refreshToken: "rt-A"), "ownership: reads the Claude login from a credential")
+    check(a == .init(accessToken: "at-A", refreshToken: "rt-A", expiresAt: 4102444800000), "ownership: reads the Claude login from a credential")
+    check(!a.isExpired && CredentialOwnership.Login(accessToken: "x", refreshToken: nil, expiresAt: 1000).isExpired, "ownership: knows an expired login from a live one")
     check(CredentialOwnership.login(fromCredential: #"{"mcpOAuth":{}}"#) == nil, "ownership: a credential without a Claude login has no owner")
 
     let refreshedA = CredentialOwnership.Login(accessToken: "at-A2", refreshToken: "rt-A")

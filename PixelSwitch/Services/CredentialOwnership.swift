@@ -7,14 +7,23 @@ import Foundation
 /// sessions rewrite that file from memory, so after a switch it can name one
 /// account while the Keychain holds another's token. On 2026-09-21 that made
 /// PixelSwitch back up account A's login under account B, after which switching
-/// to B silently used A's token. Ownership therefore comes from the token:
-/// first by lineage (the same OAuth grant as a saved login), then by asking the
-/// API whose token it is (`ClaudeService.accountEmail(forAccessToken:)`).
+/// to B silently used A's token. Ownership is therefore proven by asking the
+/// API whose token it is (`ClaudeService.accountIdentity(forAccessToken:)`).
+/// Lineage (the same OAuth grant as a saved login) is only a warning sign, used
+/// to refuse, because one wrongly saved login makes it point the wrong way.
 enum CredentialOwnership {
     /// The account-identifying part of a Claude Code credential.
     struct Login: Equatable {
         let accessToken: String
         let refreshToken: String?
+        /// Access-token expiry in milliseconds since 1970, as Claude Code stores it.
+        var expiresAt: Double? = nil
+
+        /// True when the access token has expired or will within a minute.
+        var isExpired: Bool {
+            guard let expiresAt else { return false }
+            return expiresAt / 1000 < Date().timeIntervalSince1970 + 60
+        }
     }
 
     /// The `claudeAiOauth` login inside a credential JSON, or nil.
@@ -24,7 +33,7 @@ enum CredentialOwnership {
               let oauth = object["claudeAiOauth"] as? [String: Any],
               let access = oauth["accessToken"] as? String, !access.isEmpty else { return nil }
         let refresh = (oauth["refreshToken"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        return Login(accessToken: access, refreshToken: refresh)
+        return Login(accessToken: access, refreshToken: refresh, expiresAt: (oauth["expiresAt"] as? NSNumber)?.doubleValue)
     }
 
     /// True when two logins come from the same OAuth grant: the same refresh
@@ -59,12 +68,3 @@ enum CredentialOwnership {
     }
 }
 
-extension Optional {
-    /// `map` for an async transform.
-    func asyncMap<T>(_ transform: (Wrapped) async -> T) async -> T? {
-        switch self {
-        case .some(let value): return await transform(value)
-        case .none: return nil
-        }
-    }
-}

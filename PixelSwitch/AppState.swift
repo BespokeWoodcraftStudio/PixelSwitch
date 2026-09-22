@@ -161,10 +161,10 @@ final class AppState: ObservableObject {
         // Passive token health check (no CLI calls, keychain reads only)
         diagnoseTokenHealth()
 
-        // Ownership comes from the token, not from ~/.claude.json (which running
-        // sessions rewrite): first fix any saved login found under two accounts,
-        // then follow the live login's real owner.
-        await repairSharedLogins()
+        // Ownership comes from the token (via Anthropic's API), not from
+        // ~/.claude.json, which running sessions rewrite: first check saved
+        // logins, then follow the live login's proven owner.
+        await auditSavedLogins()
         await reconcileLiveLogin()
 
         // Fetch usage limits for all accounts
@@ -439,9 +439,14 @@ final class AppState: ObservableObject {
         isSwitching = true
         defer { isSwitching = false }
 
-        // Whose login is live, proven from the token. If it is already the
-        // target's, there is nothing to switch; just make sure we know it.
-        let liveOwner = await keychain.readClaudeToken().asyncMap { await resolveOwner(ofCredential: $0) } ?? nil
+        // Whose login is live, proven by Anthropic's API from the token (never
+        // from ~/.claude.json, which running sessions rewrite). If it already
+        // is the target's, there is nothing to switch; just make sure we know it.
+        let liveCredential = keychain.readClaudeToken()
+        var liveOwner: Account?
+        if let liveCredential {
+            liveOwner = await provenOwner(ofCredential: liveCredential)
+        }
         if liveOwner?.id == account.id || (liveOwner == nil && currentActive.id == account.id) {
             log.info("[switchTo] No switch needed: \(account.email)'s login is already live")
             if liveOwner?.id == account.id, currentActive.id != account.id { adoptActive(account) }
@@ -450,32 +455,17 @@ final class AppState: ObservableObject {
 
         log.info("[switchTo] ===== Switching from \((liveOwner ?? currentActive).email) to \(account.email) =====")
 
-        // Pre-switch: resolve the target's backup ONCE and hand it down.
-        // "The store is briefly unreadable" and "no backup exists" are
-        // different problems with different fixes — don't send the user to
-        // re-authenticate over a locked keychain. Passing the resolved backup
-        // into switchAccount also removes its second lookup, which collapsed
-        // exactly this distinction one layer down.
+        // Resolve the target's backup ONCE, check that its login really is the
+        // target's (renewing it first if it has expired), and hand it down.
+        // "No backup", "store briefly unreadable" and "this login is someone
+        // else's" are different problems with different fixes.
         let targetBackup: AccountBackup
-        switch keychain.lookupAccountBackup(forAccountId: account.id.uuidString) {
-        case .found(let backup):
+        switch await validatedTargetBackup(for: account) {
+        case .success(let backup):
             targetBackup = backup
-        case .missing:
-            log.error("[switchTo] ABORT: no backup for target account")
-            errorMessage = String(localized: "No stored credentials for \(account.email). Use re-authenticate to fix.", bundle: L10n.bundle)
-            return
-        case .storeUnavailable:
-            log.error("[switchTo] ABORT: backup store unreadable right now")
-            errorMessage = String(localized: "Credential storage is temporarily unavailable. Try again shortly.", bundle: L10n.bundle)
-            return
-        }
-
-        // The saved login must really be the target's. A login saved under the
-        // wrong account would otherwise be written with the target's identity:
-        // the CLI would say one account while billing another.
-        if let problem = await targetLoginProblem(targetBackup, for: account) {
-            log.error("[switchTo] ABORT: \(problem)")
-            errorMessage = problem
+        case .failure(let problem):
+            log.error("[switchTo] ABORT: \(problem.message)")
+            errorMessage = problem.message
             return
         }
 
@@ -486,7 +476,9 @@ final class AppState: ObservableObject {
 
         isLoading = true
         do {
-            let outcome = try await claudeService.switchAccount(liveOwner: liveOwner, to: account, targetBackup: targetBackup)
+            let outcome = try await claudeService.switchAccount(
+                liveOwner: liveOwner, verifiedLiveCredential: liveCredential,
+                to: account, targetBackup: targetBackup)
 
             for i in accounts.indices {
                 accounts[i].isActive = (accounts[i].id == account.id)
@@ -511,6 +503,16 @@ final class AppState: ObservableObject {
     }
 
     // MARK: - Login ownership
+    //
+    // Ownership is proven ONLY by Anthropic's API (whose access token is this).
+    // Lineage against saved logins is not proof: one wrongly saved login makes
+    // it point at the wrong account (it did on 2026-09-21), so lineage is only
+    // ever used to REFUSE something, never to write anything.
+
+    struct SwitchProblem: Error { let message: String }
+
+    /// Set after the first full audit of saved logins in this app launch.
+    private var didAuditSavedLogins = false
 
     /// Claude Code accounts' saved logins, keyed by account id; nil if the
     /// backup store is unreadable right now.
@@ -524,35 +526,74 @@ final class AppState: ObservableObject {
         return logins
     }
 
-    /// The account a credential's login belongs to, proven from the token: the
-    /// one saved login of the same grant, else whoever the API says owns the
-    /// access token. nil when neither can prove it.
-    private func resolveOwner(ofCredential credential: String) async -> Account? {
-        guard let login = CredentialOwnership.login(fromCredential: credential) else { return nil }
-        if let saved = savedLogins() {
-            let matches = CredentialOwnership.lineageMatches(login, in: saved)
-            if matches.count == 1, let account = accounts.first(where: { $0.id.uuidString == matches[0] }) {
-                return account
-            }
+    /// The one Claude Code account an API identity names: by the permanent
+    /// account id (`accountUuid` in that account's saved identity) and by
+    /// email. nil if neither names exactly one account, or if they disagree.
+    private func account(matching identity: ClaudeService.AccountIdentity) -> Account? {
+        let claude = accounts.filter { $0.provider == .claudeCode }
+        let backups = keychain.allAccountBackups() ?? [:]
+        var byUuid: Account?
+        if let uuid = identity.uuid {
+            let hits = claude.filter { (backups[$0.id.uuidString]?.oauthAccount["accountUuid"]?.value as? String) == uuid }
+            if hits.count == 1 { byUuid = hits[0] }
         }
-        // No lineage match (the CLI has refreshed the login since it was saved),
-        // or more than one (a login saved under two accounts): ask the API.
-        guard let email = await claudeService.accountEmail(forAccessToken: login.accessToken) else { return nil }
-        return accounts.first { $0.provider == .claudeCode && $0.email.caseInsensitiveCompare(email) == .orderedSame }
+        var byEmail: Account?
+        if let email = identity.email {
+            let hits = claude.filter { $0.email.caseInsensitiveCompare(email) == .orderedSame }
+            if hits.count == 1 { byEmail = hits[0] }
+        }
+        if let byUuid, let byEmail, byUuid.id != byEmail.id { return nil }
+        return byUuid ?? byEmail
     }
 
-    /// Why `backup` cannot be switched to as `account`'s login, or nil if it can.
-    private func targetLoginProblem(_ backup: AccountBackup, for account: Account) async -> String? {
-        guard let login = CredentialOwnership.login(fromCredential: backup.token) else { return nil }
-        if let owner = await claudeService.accountEmail(forAccessToken: login.accessToken) {
-            guard owner.caseInsensitiveCompare(account.email) != .orderedSame else { return nil }
-            return String(localized: "The login saved for \(account.email) belongs to \(owner). Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)
+    /// The account the credential's login belongs to, per Anthropic's API; nil
+    /// if the API cannot say (expired token, network) or names no known account.
+    private func provenOwner(ofCredential credential: String) async -> Account? {
+        guard let login = CredentialOwnership.login(fromCredential: credential),
+              let identity = await claudeService.accountIdentity(forAccessToken: login.accessToken) else { return nil }
+        return account(matching: identity)
+    }
+
+    /// The target's backup, if its login provably is the target's. An expired
+    /// login is renewed first (with the usage refresh's own guards) so the API
+    /// can be asked; if the API still cannot say, only a login that is also
+    /// saved under another account is refused.
+    private func validatedTargetBackup(for account: Account) async -> Result<AccountBackup, SwitchProblem> {
+        var backup: AccountBackup
+        switch keychain.lookupAccountBackup(forAccountId: account.id.uuidString) {
+        case .found(let found):
+            backup = found
+        case .missing:
+            return .failure(SwitchProblem(message: String(localized: "No stored credentials for \(account.email). Use re-authenticate to fix.", bundle: L10n.bundle)))
+        case .storeUnavailable:
+            return .failure(SwitchProblem(message: String(localized: "Credential storage is temporarily unavailable. Try again shortly.", bundle: L10n.bundle)))
         }
-        // The API could not say (expired token, network): refuse only a login
-        // that is provably another account's too.
+        guard var login = CredentialOwnership.login(fromCredential: backup.token) else { return .success(backup) }
+
+        var identity = await claudeService.accountIdentity(forAccessToken: login.accessToken)
+        if identity == nil, login.isExpired {
+            switch await refreshBackupInPlace(for: account) {
+            case .refreshed(let renewed):
+                if let current = keychain.getAccountBackup(forAccountId: account.id.uuidString) { backup = current }
+                if let renewedLogin = CredentialOwnership.login(fromCredential: renewed) {
+                    login = renewedLogin
+                    identity = await claudeService.accountIdentity(forAccessToken: renewedLogin.accessToken)
+                }
+            default:
+                return .failure(SwitchProblem(message: String(localized: "The saved login for \(account.email) has expired and could not be renewed. Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)))
+            }
+        }
+
+        if let identity {
+            if let owner = self.account(matching: identity), owner.id == account.id { return .success(backup) }
+            let ownerName = self.account(matching: identity)?.email ?? identity.email ?? "another account"
+            return .failure(SwitchProblem(message: String(localized: "The login saved for \(account.email) belongs to \(ownerName). Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)))
+        }
         let others = (savedLogins() ?? [:]).filter { $0.key != account.id.uuidString }
-        guard !CredentialOwnership.lineageMatches(login, in: others).isEmpty else { return nil }
-        return String(localized: "The login saved for \(account.email) is also saved under another account. Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)
+        if !CredentialOwnership.lineageMatches(login, in: others).isEmpty {
+            return .failure(SwitchProblem(message: String(localized: "The login saved for \(account.email) is also saved under another account. Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)))
+        }
+        return .success(backup)
     }
 
     /// Marks `account` as the active one in PixelSwitch's own records.
@@ -563,14 +604,20 @@ final class AppState: ObservableObject {
     }
 
     /// Keeps PixelSwitch tied to the live login rather than to ~/.claude.json:
-    /// follows the login's real owner, restores that owner's identity in
+    /// follows the login's proven owner, restores that owner's identity in
     /// ~/.claude.json if a session left another account's there, and keeps the
     /// owner's backup current, so switching back restores the newest login
     /// instead of one whose refresh token the CLI has since rotated.
     private func reconcileLiveLogin() async {
-        guard !isSwitching, !isLoggingIn,
-              let credential = keychain.readClaudeToken(),
-              let owner = await resolveOwner(ofCredential: credential) else { return }
+        guard !isSwitching, !isLoggingIn, let credential = keychain.readClaudeToken() else { return }
+        guard let owner = await provenOwner(ofCredential: credential) else { return }
+        // The API call left the main actor free: act only if no switch or login
+        // started meanwhile and the live login is still the one that was checked.
+        // Everything below is synchronous, so nothing can slip in between.
+        guard !isSwitching, !isLoggingIn, keychain.readClaudeToken() == credential else {
+            log.info("[reconcile] The login changed while its owner was being checked; skipping this cycle")
+            return
+        }
 
         if activeAccount?.id != owner.id {
             log.warning("[reconcile] The live login belongs to \(owner.email), not \(activeAccount?.email ?? "none"); following the login")
@@ -594,27 +641,34 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// A login saved under two accounts belongs to at most one of them (on
-    /// 2026-09-21 account A's login was saved under B, and switching to B then
-    /// used A's token). Ask the API whose it is and remove it from the others,
-    /// so they ask for re-authentication instead of using the wrong login.
-    private func repairSharedLogins() async {
+    /// Checks saved logins against Anthropic's API and removes any that
+    /// provably belongs to a DIFFERENT known account, flagging that account
+    /// for re-authentication (on 2026-09-21 account A's login was saved under
+    /// B, and switching to B then used A's token). Every saved login is checked
+    /// once per launch; after that, only logins saved under two accounts.
+    private func auditSavedLogins() async {
         guard !isSwitching, !isLoggingIn, let saved = savedLogins() else { return }
-        for group in CredentialOwnership.sharedLogins(saved) {
-            guard let login = saved[group[0]],
-                  let owner = await claudeService.accountEmail(forAccessToken: login.accessToken) else {
-                log.warning("[repair] \(group.count) accounts share one saved login and its owner could not be confirmed; leaving them")
-                continue
-            }
-            for id in group {
-                guard let account = accounts.first(where: { $0.id.uuidString == id }),
-                      account.email.caseInsensitiveCompare(owner) != .orderedSame else { continue }
-                if keychain.removeAccountBackup(forAccountId: id) {
-                    log.error("[repair] \(account.email)'s saved login belonged to \(owner); removed it")
-                    accountUsageErrors[account.id] = UsageErrorState(
-                        isExpired: true, isRateLimited: false,
-                        message: String(localized: "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix.", bundle: L10n.bundle))
-                }
+        let shared = Set(CredentialOwnership.sharedLogins(saved).flatMap { $0 })
+        let toCheck = didAuditSavedLogins ? saved.filter { shared.contains($0.key) } : saved
+        guard !toCheck.isEmpty else { return }
+        didAuditSavedLogins = true
+
+        for (id, login) in toCheck.sorted(by: { $0.key < $1.key }) {
+            guard let account = accounts.first(where: { $0.id.uuidString == id }),
+                  let identity = await claudeService.accountIdentity(forAccessToken: login.accessToken),
+                  let owner = self.account(matching: identity), owner.id != account.id else { continue }
+            // Act only if nothing moved during the call and this account still
+            // holds that same login.
+            guard !isSwitching, !isLoggingIn,
+                  let current = keychain.getAccountBackup(forAccountId: id),
+                  let currentLogin = CredentialOwnership.login(fromCredential: current.token),
+                  CredentialOwnership.sameGrant(currentLogin, login) else { continue }
+            if keychain.removeAccountBackup(forAccountId: id) {
+                log.error("[audit] \(account.email)'s saved login belongs to \(owner.email); removed it")
+                accountUsage[account.id] = nil
+                accountUsageErrors[account.id] = UsageErrorState(
+                    isExpired: true, isRateLimited: false,
+                    message: String(localized: "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix.", bundle: L10n.bundle))
             }
         }
     }
@@ -966,6 +1020,15 @@ final class AppState: ObservableObject {
 
         switch await claudeService.refreshOAuthCredentials(backup.token) {
         case .success(let refreshed):
+            // A renewed token is fresh, so the API can say whose it is. A login
+            // that belongs to another account must not stay under this one.
+            if let renewed = CredentialOwnership.login(fromCredential: refreshed),
+               let identity = await claudeService.accountIdentity(forAccessToken: renewed.accessToken),
+               let owner = self.account(matching: identity), owner.id != account.id {
+                log.error("[refreshBackup] \(account.id)'s saved login belongs to \(owner.email); removing it")
+                keychain.removeAccountBackup(forAccountId: accountId)
+                return .grantRejected
+            }
             if keychain.saveAccountBackup(token: refreshed, oauthAccount: backup.oauthAccount, forAccountId: accountId) {
                 return .refreshed(refreshed)
             }

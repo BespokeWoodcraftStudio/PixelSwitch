@@ -4,13 +4,17 @@ import Security
 private let log = FileLog("Keychain")
 
 /// Per-account backup: keychain token + oauthAccount from ~/.claude.json
-struct AccountBackup: Codable {
+struct AccountBackup: Codable, Sendable {
     let token: String
     let oauthAccount: [String: AnyCodable]
 }
 
 /// Type-erased Codable wrapper for heterogeneous JSON values.
-struct AnyCodable: Codable, Equatable {
+///
+/// `@unchecked Sendable`: `value` is an immutable `let` holding only what JSON
+/// decodes to (NSNull, Bool, Int, Double, String, and arrays/dictionaries of
+/// AnyCodable), none of which is ever mutated after decoding.
+struct AnyCodable: Codable, Equatable, @unchecked Sendable {
     let value: Any
 
     init(_ value: Any) { self.value = value }

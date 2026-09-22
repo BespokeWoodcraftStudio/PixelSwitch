@@ -274,10 +274,17 @@ final class ClaudeService: @unchecked Sendable {
 
     // MARK: - Whose login is this?
 
-    /// The email of the account an access token belongs to, from the API
+    /// Who an access token belongs to, per the API.
+    struct AccountIdentity: Sendable, Equatable {
+        /// The permanent account id (`accountUuid` in ~/.claude.json's `oauthAccount`).
+        let uuid: String?
+        let email: String?
+    }
+
+    /// The account an access token belongs to, from the API
     /// (`/api/oauth/profile`), or nil if the token is expired or the call fails.
-    /// This is the ground truth for ownership; see `CredentialOwnership`.
-    func accountEmail(forAccessToken accessToken: String) async -> String? {
+    /// This is the only proof of ownership; see `CredentialOwnership`.
+    func accountIdentity(forAccessToken accessToken: String) async -> AccountIdentity? {
         guard let url = URL(string: "https://api.anthropic.com/api/oauth/profile") else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
@@ -288,14 +295,19 @@ final class ClaudeService: @unchecked Sendable {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard status == 200,
                   let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                  let account = object["account"] as? [String: Any],
-                  let email = account["email"] as? String ?? account["email_address"] as? String else {
-                log.warning("[accountEmail] Profile lookup failed (HTTP \(status))")
+                  let account = object["account"] as? [String: Any] else {
+                log.warning("[accountIdentity] Profile lookup failed (HTTP \(status))")
                 return nil
             }
-            return email
+            let uuid = account["uuid"] as? String
+            let email = account["email"] as? String ?? account["email_address"] as? String
+            guard uuid != nil || email != nil else {
+                log.warning("[accountIdentity] Profile response names no account")
+                return nil
+            }
+            return AccountIdentity(uuid: uuid, email: email)
         } catch {
-            log.warning("[accountEmail] Profile lookup failed: \(error.localizedDescription)")
+            log.warning("[accountIdentity] Profile lookup failed: \(error.localizedDescription)")
             return nil
         }
     }
@@ -420,19 +432,25 @@ final class ClaudeService: @unchecked Sendable {
     /// missing backup from a briefly unreadable store) and handed down so no
     /// second, ambiguity-collapsing lookup happens here.
     @discardableResult
-    /// `liveOwner` is the account the live login was proven to belong to (by
-    /// the token, not by `~/.claude.json`; see `CredentialOwnership`), or nil if
-    /// that could not be proven, in which case nothing is backed up: saving an
-    /// unproven login under an account is how one account's backup came to hold
-    /// another's token.
-    func switchAccount(liveOwner: Account?, to targetAccount: Account, targetBackup: AccountBackup) async throws -> SwitchOutcome {
+    /// `liveOwner` is the account the live login was proven (by the API) to
+    /// belong to, and `verifiedLiveCredential` the exact credential that proof
+    /// was about. Nothing is backed up unless both are known and the Keychain
+    /// still holds that same login: saving an unproven login under an account
+    /// is how one account's backup came to hold another's token.
+    func switchAccount(liveOwner: Account?, verifiedLiveCredential: String?, to targetAccount: Account, targetBackup: AccountBackup) async throws -> SwitchOutcome {
         let keychain = KeychainService.shared
 
         log.info("[switchAccount] Switching to \(targetAccount.id); live login belongs to \(liveOwner?.id.uuidString ?? "an unproven account")")
 
         // 1. Back up the live login under the account it belongs to.
         log.info("[switchAccount] Step 1: Backing up the live login...")
-        if let owner = liveOwner, let liveToken = keychain.readClaudeToken() {
+        let freshCredential = keychain.readClaudeToken()
+        let stillTheCheckedLogin: Bool = {
+            guard let verified = verifiedLiveCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }),
+                  let fresh = freshCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }) else { return false }
+            return CredentialOwnership.sameGrant(verified, fresh)
+        }()
+        if let owner = liveOwner, let liveToken = freshCredential, stillTheCheckedLogin {
             // Take the identity from ~/.claude.json only if it names the same
             // account; running sessions can leave another account's there.
             let fileIdentity = keychain.readOAuthAccount()
@@ -446,7 +464,7 @@ final class ClaudeService: @unchecked Sendable {
                 log.warning("[switchAccount] Step 1: No identity on record for the owner; skipping backup")
             }
         } else {
-            log.warning("[switchAccount] Step 1: Live login's owner not proven (or no live login); skipping backup so no account's backup is overwritten with another's login")
+            log.warning("[switchAccount] Step 1: The live login's owner is not proven (or it changed since it was checked); skipping the backup so no account's backup is overwritten with another's login")
         }
 
         // 2. Target backup was resolved and validated by the caller.
@@ -703,6 +721,9 @@ final class ClaudeService: @unchecked Sendable {
         let claudePath = self.claudePath
         log.debug("[runClaude] Running: \(claudePath) \(args.joined(separator: " "))")
         return try await withCheckedThrowingContinuation { continuation in
+            // Resumed exactly once: by the reader when the process ends, or by
+            // the deadline if it never does.
+            let once = ResumeOnce(continuation)
             DispatchQueue.global(qos: .userInitiated).async { [claudePath] in
                 let process = Process()
                 let pipe = Pipe()
@@ -735,14 +756,21 @@ final class ClaudeService: @unchecked Sendable {
                 env["HOME"] = homeDir
                 process.environment = env
 
+                let command = "claude \(args.joined(separator: " "))"
                 do {
                     try process.run()
-                    let timedOut = TimeoutFlag()
                     if let timeout {
+                        let pid = process.processIdentifier
                         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                            if process.isRunning {
-                                timedOut.set()
-                                process.terminate()
+                            guard process.isRunning else { return }
+                            log.error("[runClaude] Timed out after \(Int(timeout)) s: \(command); stopping it")
+                            // Release the caller now, whatever the process does next:
+                            // a grandchild holding the pipe open must not hang a switch.
+                            once.resume(throwing: ClaudeServiceError.timedOut(command))
+                            process.terminate()
+                            // A process that ignores SIGTERM (a blocked event loop) is killed.
+                            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                                if process.isRunning { kill(pid, SIGKILL) }
                             }
                         }
                     }
@@ -751,19 +779,18 @@ final class ClaudeService: @unchecked Sendable {
                     process.waitUntilExit()
                     let output = String(data: data, encoding: .utf8) ?? ""
 
-                    if timedOut.isSet {
-                        log.error("[runClaude] Timed out after \(Int(timeout ?? 0)) s: claude \(args.joined(separator: " "))")
-                        continuation.resume(throwing: ClaudeServiceError.timedOut("claude \(args.joined(separator: " "))"))
+                    if once.isResumed {
+                        return  // the deadline already answered
                     } else if process.terminationStatus == 0 {
                         log.debug("[runClaude] Success (exit 0), output length: \(output.count)")
-                        continuation.resume(returning: output)
+                        once.resume(returning: output)
                     } else {
                         log.error("[runClaude] Failed (exit \(process.terminationStatus))")
-                        continuation.resume(throwing: ClaudeServiceError.cliError("exit \(process.terminationStatus)"))
+                        once.resume(throwing: ClaudeServiceError.cliError("exit \(process.terminationStatus)"))
                     }
                 } catch {
                     log.error("[runClaude] Process launch failed: \(error.localizedDescription)")
-                    continuation.resume(throwing: ClaudeServiceError.processLaunchFailed(error))
+                    once.resume(throwing: ClaudeServiceError.processLaunchFailed(error))
                 }
             }
         }
@@ -810,10 +837,21 @@ enum ClaudeServiceError: LocalizedError {
     }
 }
 
-/// Set from the timeout timer, read after the process exits.
-private final class TimeoutFlag: @unchecked Sendable {
+/// Resumes a checked continuation exactly once, from whichever path gets there first.
+private final class ResumeOnce<T: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
-    private var value = false
-    func set() { lock.lock(); value = true; lock.unlock() }
-    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    private var continuation: CheckedContinuation<T, Error>?
+
+    init(_ continuation: CheckedContinuation<T, Error>) { self.continuation = continuation }
+
+    var isResumed: Bool { lock.lock(); defer { lock.unlock() }; return continuation == nil }
+    func resume(returning value: T) { take()?.resume(returning: value) }
+    func resume(throwing error: Error) { take()?.resume(throwing: error) }
+
+    private func take() -> CheckedContinuation<T, Error>? {
+        lock.lock(); defer { lock.unlock() }
+        let taken = continuation
+        continuation = nil
+        return taken
+    }
 }
