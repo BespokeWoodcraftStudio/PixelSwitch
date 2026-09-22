@@ -2,44 +2,63 @@ import SwiftUI
 
 /// A colour per account, so a card is recognised before it is read.
 ///
-/// The colours deliberately avoid the limit colours that sit inside a card
-/// (green Session, blue Weekly, purple Fable): an account is the background, a
-/// limit is the content, and the two must never be mistaken for each other.
+/// The colour is an accent, not a background. A first attempt washed the whole
+/// card in the account's colour; the founder's verdict was that the colours
+/// were too alike and the text became hard to read on some of them. So the
+/// colour now lives in a solid edge and the account's glyph, where it can be
+/// strong and obvious, while the surface you read keeps almost none of it:
+/// `wash` is faint enough that text holds its contrast on every swatch, in
+/// light and dark.
 enum AccountPalette {
-    /// Ten washes that stay apart from each other in light and dark. Ten covers
-    /// far more accounts than anyone runs; beyond that they repeat, which is
-    /// the founder's call ("10 color options and then it repeats").
-    static let swatches: [Color] = [
-        Color(red: 1.00, green: 0.62, blue: 0.04),   // amber
-        Color(red: 1.00, green: 0.18, blue: 0.47),   // pink
-        Color(red: 0.17, green: 0.70, blue: 0.64),   // teal
-        Color(red: 0.37, green: 0.36, blue: 0.90),   // indigo
-        Color(red: 0.64, green: 0.52, blue: 0.37),   // clay
-        Color(red: 0.20, green: 0.68, blue: 0.90),   // sky
-        Color(red: 0.85, green: 0.72, blue: 0.00),   // ochre
-        Color(red: 0.38, green: 0.78, blue: 0.51),   // sage
-        Color(red: 1.00, green: 0.45, blue: 0.33),   // coral
-        Color(red: 0.49, green: 0.55, blue: 0.69),   // slate
-    ]
+    /// Ten hues, spread around the wheel by eye rather than in equal steps,
+    /// because equal steps bunch up in the greens and leave amber, ochre and
+    /// coral looking like one another. Degrees: red, orange, amber, green,
+    /// teal, cyan, blue, indigo, violet, magenta.
+    private static let hues: [Double] = [2, 30, 52, 96, 160, 186, 212, 252, 288, 324]
+
+    static var swatchCount: Int { hues.count }
+
+    /// The account's colour at full strength: its edge and its glyph. Deeper in
+    /// light appearance, brighter in dark, so it reads on both.
+    static func color(_ index: Int?) -> Color {
+        guard let index, hues.indices.contains(index) else { return .gray }
+        let hue = hues[index] / 360.0
+        return Color.adaptive(
+            light: Color(hue: hue, saturation: 0.85, brightness: 0.70),
+            dark: Color(hue: hue, saturation: 0.62, brightness: 1.00)
+        )
+    }
+
+    /// The card's background hint. Deliberately faint: a card is something to
+    /// read, and the edge already says whose it is.
+    static func wash(_ index: Int?) -> Color {
+        guard index != nil else { return .cardFill }
+        return color(index).opacity(0.07)
+    }
+
+    /// The card's edge, enough to separate neighbouring cards.
+    static func border(_ index: Int?) -> Color {
+        guard index != nil else { return .cardBorder }
+        return color(index).opacity(0.45)
+    }
 
     /// Which swatch each account gets.
     ///
     /// The preference is a stable hash of the account's id, so an account keeps
     /// its colour across launches (Swift's own `Hasher` is seeded per process
     /// and would not). When two accounts prefer the same swatch the later one
-    /// takes the next free swatch, so the cards on screen differ even though
-    /// the preference is only a hash. With more accounts than swatches, colours
-    /// repeat; nothing else breaks.
+    /// takes the next free swatch, so the accounts on screen always differ.
+    /// With more accounts than swatches, colours repeat; nothing else breaks.
     static func assignment(for ids: [UUID]) -> [UUID: Int] {
         var taken = Set<Int>()
         var result: [UUID: Int] = [:]
         for id in ids where result[id] == nil {
-            let preferred = Int(fnv1a(id.uuidString) % UInt64(swatches.count))
+            let preferred = Int(fnv1a(id.uuidString) % UInt64(swatchCount))
             var pick = preferred
             var step = 0
-            while taken.contains(pick), step < swatches.count {
+            while taken.contains(pick), step < swatchCount {
                 step += 1
-                pick = (preferred + step) % swatches.count
+                pick = (preferred + step) % swatchCount
             }
             taken.insert(pick)
             result[id] = pick
@@ -57,17 +76,14 @@ enum AccountPalette {
         }
         return hash
     }
+}
 
-    /// An account with no colour yet (it is not on screen with the others) gets
-    /// a neutral grey rather than borrowing another account's colour.
-    static func color(_ index: Int?) -> Color {
-        guard let index, swatches.indices.contains(index) else { return .gray }
-        return swatches[index]
+/// Whether accounts are colour-coded at all. Off gives the plain, uncoloured
+/// cards PixelSwitch had before, for anyone who prefers them.
+enum AccountColorCoding {
+    static let key = "colorCodeAccounts"
+
+    static var isOn: Bool {
+        UserDefaults.standard.object(forKey: key) as? Bool ?? true
     }
-
-    /// The card's wash. Light enough that the limit rows inside stay legible.
-    static func fill(_ index: Int?) -> Color { color(index).opacity(0.16) }
-
-    /// A firmer edge, so neighbouring cards separate even when scrolled.
-    static func border(_ index: Int?) -> Color { color(index).opacity(0.40) }
 }

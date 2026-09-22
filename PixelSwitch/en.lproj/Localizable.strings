@@ -206,3 +206,5 @@
 "7 days" = "7 days";
 "30 days" = "30 days";
 "%lld hours" = "%lld hours";
+"Give each account its own color" = "Give each account its own color";
+"Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards.";

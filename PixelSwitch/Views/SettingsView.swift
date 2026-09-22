@@ -8,6 +8,7 @@ struct SettingsView: View {
     @EnvironmentObject private var menuBarConfig: MenuBarConfig
     @AppStorage("refreshInterval") private var refreshInterval: Double = 300
     @AppStorage("showFullEmail") private var showFullEmail = false
+    @AppStorage(AccountColorCoding.key) private var colorCodeAccounts = true
     @AppStorage("showInDock") private var showInDock = false
     @AppStorage("appLanguage") private var appLanguage = "auto"
     @AppStorage("autoSwitchEnabled") private var autoSwitchEnabled = false
@@ -94,6 +95,10 @@ struct SettingsView: View {
 
             Section("Account display") {
                 Toggle("Show full email address", isOn: $showFullEmail)
+                Toggle("Give each account its own color", isOn: $colorCodeAccounts)
+                Text("Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Appearance") {

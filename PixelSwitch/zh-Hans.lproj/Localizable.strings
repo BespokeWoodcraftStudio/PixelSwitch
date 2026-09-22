@@ -204,3 +204,5 @@
 "7 days" = "7 天";
 "30 days" = "30 天";
 "%lld hours" = "%lld 小时";
+"Give each account its own color" = "为每个账户分配专属颜色";
+"Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "在用量和账户标签页中，每个账户都有彩色边条和图标，便于分辨这是谁的数据。关闭后显示朴素卡片。";

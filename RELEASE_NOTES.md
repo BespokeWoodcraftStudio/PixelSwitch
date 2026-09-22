@@ -1,14 +1,16 @@
-## PixelSwitch 1.0.5
+## PixelSwitch 1.0.6
 
-### New
+### Improved
 
-- **Every account has its own colour.** Each account's card on the Usage tab, and its row on the Accounts tab, now carries a colour of its own, so you know whose numbers you are looking at before you read the address. There are ten colours; with more accounts than that they repeat. An account keeps its colour between launches, because the colour comes from the account itself rather than from its position in the list, and the accounts on screen are always given different colours.
-- The limit rows inside a card sit on their own neutral inset, so Session, Weekly and Fable stay just as readable on a coloured card as on a plain one.
+- **Account colours you can actually read.** 1.0.5 washed a whole card in the account's colour, which made some text hard to read and left several colours looking alike. The colour is now an accent instead: a solid bar down the edge of the card and the account's icon, with only a whisper of tint on the card itself. Text contrast measures at least 13:1 on every colour in both light and dark, where 7:1 is the strictest common standard.
+- **Ten colours that are properly different**, spread around the colour wheel by eye rather than in even steps, which had bunched amber, ochre and coral together. They repeat only past ten accounts.
+- **You can turn it off.** Settings → Account display → **"Give each account its own color"**. Off gives you the plain cards.
 
-#### Included from 1.0.4
+#### Included from 1.0.5 and 1.0.4
 
-- **The app's own mark** in the panel header and the menu bar, and Settings says "Show PixelSwitch logo in menu bar".
-- **Cost totals that only claim history that exists:** a "Last 7 days" or "Last 30 days" card appears only when that much is kept, otherwise a single card states the real span, with a line naming your usage history window.
+- An account keeps its colour between launches, because the colour comes from the account itself rather than its position in the list.
+- The app's own mark in the panel header and the menu bar; Settings says "Show PixelSwitch logo in menu bar".
+- Cost totals that only claim the history actually kept.
 
 #### Included from 1.0.3 and 1.0.2
 
@@ -19,4 +21,4 @@
 
 - This build is not signed with an Apple Developer ID yet. The first time you open it, clear the download flag with `xattr -dr com.apple.quarantine /Applications/PixelSwitch.app`, or use System Settings → Privacy & Security → Open Anyway.
 
-**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.0.4...v1.0.5
+**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.0.5...v1.0.6

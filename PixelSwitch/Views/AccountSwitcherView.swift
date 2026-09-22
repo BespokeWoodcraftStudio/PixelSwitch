@@ -2,6 +2,8 @@ import SwiftUI
 
 /// Lists all configured accounts with switching and management.
 struct AccountSwitcherView: View {
+    /// Settings → Appearance. Off restores the plain, uncoloured rows.
+    @AppStorage(AccountColorCoding.key) private var colorCodeAccounts = true
     @EnvironmentObject private var appState: AppState
     @AppStorage("showFullEmail") private var showFullEmail = false
     @State private var showingAddConfirm = false
@@ -62,10 +64,18 @@ struct AccountSwitcherView: View {
 
     private func accountRow(_ account: Account, swatch: Int?) -> some View {
         HStack(spacing: 12) {
+            if colorCodeAccounts {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(AccountPalette.color(swatch))
+                    .frame(width: 4)
+                    .frame(maxHeight: .infinity)
+                    .accessibilityHidden(true)
+            }
+
             // Provider icon, in the account's colour
             Image(systemName: account.provider.iconName)
                 .font(.title2)
-                .foregroundStyle(AccountPalette.color(swatch))
+                .foregroundStyle(colorCodeAccounts ? AccountPalette.color(swatch) : (account.isActive ? Color.brand : Color.secondary))
                 .frame(width: 32, height: 32)
 
             // Account info
@@ -166,8 +176,8 @@ struct AccountSwitcherView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(AccountPalette.fill(swatch))
-                .strokeBorder(AccountPalette.border(swatch), lineWidth: account.isActive ? 2 : 1)
+                .fill(colorCodeAccounts ? AccountPalette.wash(swatch) : (account.isActive ? .cardFillStrong : .clear))
+                .strokeBorder(colorCodeAccounts ? AccountPalette.border(swatch) : .cardBorder, lineWidth: account.isActive ? 2 : 1)
                 .shadow(color: AppStyle.cardShadowColor, radius: AppStyle.cardShadowRadius, x: 0, y: AppStyle.cardShadowY)
         )
     }

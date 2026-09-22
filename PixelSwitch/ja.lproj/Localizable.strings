@@ -204,3 +204,5 @@
 "7 days" = "7 日";
 "30 days" = "30 日";
 "%lld hours" = "%lld 時間";
+"Give each account its own color" = "アカウントごとに色を割り当てる";
+"Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "使用状況タブとアカウントタブで、各アカウントに色付きの縁とアイコンが付き、どのアカウントの数値か一目でわかります。オフにすると装飾なしのカードになります。";

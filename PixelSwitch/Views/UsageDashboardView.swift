@@ -25,6 +25,8 @@ struct UsageDashboardView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var menuBarConfig: MenuBarConfig
     @AppStorage("showFullEmail") private var showFullEmail = false
+    /// Settings → Appearance. Off restores the plain, uncoloured cards.
+    @AppStorage(AccountColorCoding.key) private var colorCodeAccounts = true
 
     var body: some View {
         ScrollView {
@@ -210,8 +212,19 @@ struct UsageDashboardView: View {
     }
 
     private func accountUsageCard(account: Account, usage: UsageAPIResponse?, swatch: Int?) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            accountHeader(account, swatch: swatch)
+        HStack(alignment: .top, spacing: 10) {
+            if colorCodeAccounts {
+                // The account's colour lives here, at full strength, instead of
+                // over the text.
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(AccountPalette.color(swatch))
+                    .frame(width: 4)
+                    .frame(maxHeight: .infinity)
+                    .accessibilityHidden(true)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                accountHeader(account, swatch: swatch)
             if let usage = usage {
                 usageBars(usage)
                 extraUsageRow(usage.extraUsage)
@@ -242,7 +255,11 @@ struct UsageDashboardView: View {
                 .padding(.top, 4)
             }
         }
-        .cardStyle(fill: AccountPalette.fill(swatch), border: AccountPalette.border(swatch))
+        }
+        .cardStyle(
+            fill: colorCodeAccounts ? AccountPalette.wash(swatch) : .cardFill,
+            border: colorCodeAccounts ? AccountPalette.border(swatch) : .cardBorder
+        )
         .sectionPadding()
     }
 
@@ -269,7 +286,7 @@ struct UsageDashboardView: View {
         HStack(spacing: 8) {
             Image(systemName: account.provider.iconName)
                 .font(.subheadline)
-                .foregroundStyle(AccountPalette.color(swatch))
+                .foregroundStyle(colorCodeAccounts ? AccountPalette.color(swatch) : (account.isActive ? Color.brand : Color.secondary))
 
             Text(account.displayEmail(obfuscated: !showFullEmail))
                 .font(.subheadline.weight(.medium))

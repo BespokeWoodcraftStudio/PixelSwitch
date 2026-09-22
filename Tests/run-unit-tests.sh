@@ -13,6 +13,7 @@ swiftc -swift-version 6 \
   PixelSwitch/Services/CredentialOwnership.swift \
   PixelSwitch/Models/UsageData.swift \
   PixelSwitch/Models/CostHistoryWindow.swift \
+  PixelSwitch/Models/BrandColor.swift \
   PixelSwitch/Models/AccountPalette.swift \
   PixelSwitch/Models/Account.swift \
   PixelSwitch/Models/String+Obfuscation.swift \

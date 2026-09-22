@@ -204,3 +204,5 @@
 "7 days" = "7 jours";
 "30 days" = "30 jours";
 "%lld hours" = "%lld heures";
+"Give each account its own color" = "Donner à chaque compte sa propre couleur";
+"Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "Chaque compte reçoit un liseré et une icône colorés dans les onglets Utilisation et Comptes, pour savoir de quel compte viennent les chiffres. Désactivez pour des cartes neutres.";
