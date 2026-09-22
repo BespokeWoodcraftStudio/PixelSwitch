@@ -1332,6 +1332,15 @@ final class AppState: ObservableObject {
             return
         }
         let cameFromLegacyKey = UserDefaults.standard.data(forKey: accountsKey) == nil
+        // Same hole as the keychain item had: if the current key is already
+        // populated, the legacy one is redundant no matter how it got there,
+        // and the migration branch below would never run to clear it. An older
+        // build run after migrating re-creates it.
+        if !cameFromLegacyKey, UserDefaults.standard.data(forKey: legacyAccountsKey) != nil {
+            UserDefaults.standard.removeObject(forKey: legacyAccountsKey)
+            UserDefaults.standard.removeObject(forKey: "migratedFromCCSwitcher")
+            log.info("[loadAccounts] Current key is populated; removed the redundant legacy key")
+        }
         accounts = decoded
         activeAccount = accounts.first(where: \.isActive)
         log.info("[loadAccounts] Loaded \(decoded.count) accounts\(cameFromLegacyKey ? " from the legacy key" : "")")

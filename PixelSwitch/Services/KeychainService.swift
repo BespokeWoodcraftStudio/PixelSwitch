@@ -329,6 +329,17 @@ final class KeychainService: Sendable {
 
     private let appBackupAccount = "all-accounts"
 
+    /// Tried once per launch: see `retireLegacyBackupItemIfPresent`.
+    ///
+    /// `nonisolated(unsafe)` because this class is `Sendable` and so may hold no
+    /// mutable state that the compiler cannot reason about. It is safe here for
+    /// the same reason the store itself is: every read and write of this flag
+    /// happens inside a method documented as "must be called with `storeLock`
+    /// held", and `storeLock` already serialises all access to the backup store.
+    /// Worst case if that discipline were ever broken is a duplicate
+    /// `SecItemDelete` of an item that is already gone, which is a no-op.
+    private nonisolated(unsafe) var hasRetiredLegacyItem = false
+
     /// Result of reading the single keychain item that holds every backup.
     /// The `empty`/`failed` distinction is load-bearing: `empty` means the item
     /// genuinely does not exist yet, while `failed` means it MAY exist but could
@@ -394,6 +405,14 @@ final class KeychainService: Sendable {
         switch readBackupItem(service: appBackupService) {
         case .loaded(let dict):
             log.debug("[loadBackupStore] Loaded \(dict.count) entries from Keychain")
+            // A healthy current item makes the legacy one redundant by
+            // definition, however it got there. This covers the case the
+            // migration path cannot: an older build run AFTER migrating
+            // re-creates the legacy item, and nothing would ever clear it,
+            // because migration only happens on the one launch where the
+            // current item is still empty. Found by actually updating an old
+            // build on a migrated Mac rather than by reading the code.
+            retireLegacyBackupItemIfPresent()
             return .loaded(dict)
         case .failed(let reason):
             return .failed(reason)
@@ -506,6 +525,36 @@ final class KeychainService: Sendable {
             log.info("[retireLegacyBackupItem] Verified \(readBack.count) accounts in \(appBackupService); legacy item removed")
         } else {
             log.error("[retireLegacyBackupItem] Verified the copy but could not remove the legacy item, OSStatus: \(status)")
+        }
+        hasRetiredLegacyItem = true
+    }
+
+    /// Removes the legacy item when the current one is already healthy.
+    ///
+    /// Deliberately a DELETE with no read: `SecItemDelete` does not need the
+    /// secret, so this never raises a keychain prompt of its own. The caller
+    /// has just loaded the current item successfully, which is the only
+    /// precondition that matters — the legacy copy is redundant.
+    ///
+    /// Tried once per launch. `loadBackupStore` runs on every refresh, and
+    /// asking the keychain to delete a thing that is not there, several times a
+    /// minute, is pure waste.
+    ///
+    /// Must be called with `storeLock` held.
+    private func retireLegacyBackupItemIfPresent() {
+        guard !hasRetiredLegacyItem else { return }
+        hasRetiredLegacyItem = true
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: legacyBackupService,
+            kSecAttrAccount as String: appBackupAccount
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        if status == errSecSuccess {
+            log.info("[retireLegacyBackupItem] Current item is healthy; removed the redundant legacy item")
+        } else if status != errSecItemNotFound {
+            log.error("[retireLegacyBackupItem] Could not remove the redundant legacy item, OSStatus: \(status)")
         }
     }
 
