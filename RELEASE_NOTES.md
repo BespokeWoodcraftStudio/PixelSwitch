@@ -1,21 +1,17 @@
-## PixelSwitch 1.0.1
+## PixelSwitch 1.0.2
 
 ### Fixed
 
-- **Running Claude Code sessions now follow a switch.** A running session only re-reads its login when Claude Code's fallback file `~/.claude/.credentials.json` changes, or when that file does not exist. On a Mac where the file had been left behind, sessions that were already open kept billing the old account for hours after a switch. PixelSwitch now bumps that file's date after every switch (it never creates, rewrites or deletes it), so open sessions move to the new account on their next request.
-- **The credential is kept off the command line when it fits.** The login is now handed to `/usr/bin/security` on stdin instead of as a command-line argument, so other programs listing processes cannot see it. A login that also carries MCP server tokens is usually too long for that route (about 2,000 characters is the limit); it is then passed as hex on the command line, which is what Claude Code itself does.
-- **Safer write.** The Keychain item is now updated in place instead of deleted and re-added, so there is no moment when it is missing, and PixelSwitch reads it back and compares it byte for byte before it reports the switch as done.
+- **Your MCP server logins survive an account switch.** Claude Code keeps the logins for MCP servers (Stripe, Supabase, Linear and the rest) in the same Keychain item as your Claude account login. Until now a switch put back the whole item as it was the last time that account was active, so MCP logins made or renewed since then were replaced by older copies, and those servers asked you to sign in again. Measured on one Mac: a switch took the stored MCP logins from 48 entries to 8. PixelSwitch now takes only the Claude account login from the account you switch to, and keeps this Mac's MCP logins exactly as they are.
 
-#### Included from v1.0
+#### Included from v1.0.1
 
-- **New name, icon and About page.** PixelSwitch by Pixel Ventures, based on CCSwitcher by Xueshi Qiao.
-- **Much lighter on memory.** Cost and activity read only recent Claude Code history, the last 24 hours by default. Change it in Settings → General → Usage history window.
-- **Brings your CCSwitcher accounts with it.** On first launch PixelSwitch copies CCSwitcher's accounts and settings. Quit CCSwitcher before opening PixelSwitch.
-- **Its own update feed**, signed with the PixelSwitch update key.
+- **Running Claude Code sessions follow a switch.** PixelSwitch bumps the date on `~/.claude/.credentials.json` after every switch (it never creates, rewrites or deletes it), which is Claude Code's own signal to re-read the login. Open sessions used to keep billing the old account for hours.
+- **The credential is kept off the command line when it fits**, and the Keychain item is updated in place and read back byte for byte before a switch counts as done.
 
 ### Good to know
 
 - This build is not signed with an Apple Developer ID yet. The first time you open it, clear the download flag with `xattr -dr com.apple.quarantine /Applications/PixelSwitch.app`, or use System Settings → Privacy & Security → Open Anyway.
-- Desktop widgets need a Developer ID signed build, so they do not load in this release.
+- A connector you added on claude.ai belongs to that Claude account, not to this Mac, so those still differ between accounts. Only the MCP servers configured on this Mac are kept.
 
-**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.0...v1.0.1
+**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.0.1...v1.0.2

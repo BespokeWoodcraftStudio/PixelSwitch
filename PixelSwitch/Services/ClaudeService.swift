@@ -415,9 +415,20 @@ final class ClaudeService: @unchecked Sendable {
         // 2. Target backup was resolved and validated by the caller.
         log.info("[switchAccount] Step 2: Using caller-resolved backup for target account")
 
-        // 3. Write target token to keychain + target oauthAccount to ~/.claude.json
+        // 3. Write target token to keychain + target oauthAccount to ~/.claude.json.
+        // Only the Claude login comes from the backup; this Mac's MCP server
+        // logins (and any other key) stay as they are in the live item.
         log.info("[switchAccount] Step 3: Writing target credentials...")
-        guard keychain.writeClaudeToken(targetBackup.token) else {
+        let credential: String
+        switch ClaudeCredentialMerge.credentialForSwitch(live: keychain.readClaudeToken(), target: targetBackup.token) {
+        case .merged(let merged, let kept):
+            credential = merged
+            log.info("[switchAccount] Step 3: claudeAiOauth from the target backup; kept this Mac's \(kept.isEmpty ? "(nothing else)" : kept.joined(separator: ", ")) from the live credential")
+        case .targetOnly(let target, let reason):
+            credential = target
+            log.warning("[switchAccount] Step 3: Writing the target backup verbatim (\(reason)); MCP logins come from the backup")
+        }
+        guard keychain.writeClaudeToken(credential) else {
             log.error("[switchAccount] Step 3: Failed to write token to keychain!")
             throw ClaudeServiceError.keychainWriteFailed
         }

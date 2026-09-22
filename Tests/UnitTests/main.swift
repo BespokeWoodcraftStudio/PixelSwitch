@@ -124,6 +124,36 @@ do {
     else { check(false, "a missing item after writing is a failed write") }
 }
 
+// MARK: - ClaudeCredentialMerge
+
+func parse(_ json: String) -> NSDictionary? {
+    (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? NSDictionary
+}
+
+do {
+    let live = #"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-LIVE","refreshToken":"sk-ant-ort01-LIVE","expiresAt":1790000000000,"scopes":["user:inference"],"subscriptionType":"max"},"mcpOAuth":{"stripe|abc123":{"serverName":"stripe","serverUrl":"https://mcp.stripe.com","accessToken":"at-NEW","refreshToken":"rt-NEW-rotated","expiresAt":1790000009999,"discoveryState":{"issuer":"https://access.stripe.com/","nested":[1,2.5,true,false,null]}},"supabase|def":{"serverName":"supabase","clientSecret":"s","note":"naïve café ☕"}},"someFutureKey":{"keep":true}}"#
+    let target = #"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-TARGET","refreshToken":"sk-ant-ort01-TARGET","expiresAt":1790000005555,"scopes":["user:inference","user:profile"],"subscriptionType":"max","rateLimitTier":"default_claude_max_20x"},"mcpOAuth":{"stripe|abc123":{"serverName":"stripe","accessToken":"at-OLD","refreshToken":"rt-OLD-already-rotated-away"}}}"#
+
+    let result = ClaudeCredentialMerge.credentialForSwitch(live: live, target: target)
+    if case .merged(let merged, let kept) = result, let out = parse(merged), let liveObj = parse(live), let targetObj = parse(target) {
+        check(out["claudeAiOauth"] as? NSDictionary == targetObj["claudeAiOauth"] as? NSDictionary, "merge: the Claude login comes from the target account")
+        check(out["mcpOAuth"] as? NSDictionary == liveObj["mcpOAuth"] as? NSDictionary, "merge: this Mac's MCP logins are kept exactly (not the target's older copy)")
+        check(out["someFutureKey"] as? NSDictionary == liveObj["someFutureKey"] as? NSDictionary, "merge: unknown top-level keys are kept")
+        check(kept == ["mcpOAuth", "someFutureKey"], "merge: reports which keys it kept", "\(kept)")
+        check(merged.contains("https://mcp.stripe.com") && !merged.contains(#"https:\/\/"#), "merge: slashes are not escaped")
+        check(merged.contains("naïve café ☕"), "merge: non-ASCII text survives")
+        check(!merged.contains("rt-OLD-already-rotated-away") && merged.contains("rt-NEW-rotated"), "merge: a rotated MCP refresh token is never rolled back")
+    } else {
+        check(false, "merge: a live and a target credential merge", "\(result)")
+    }
+
+    check(ClaudeCredentialMerge.credentialForSwitch(live: nil, target: target) == .targetOnly(credential: target, reason: "live credential missing or not JSON"), "merge: no live credential falls back to the target verbatim")
+    if case .targetOnly(let c, _) = ClaudeCredentialMerge.credentialForSwitch(live: "not json", target: target) { check(c == target, "merge: an unreadable live credential falls back to the target verbatim") }
+    else { check(false, "merge: an unreadable live credential falls back to the target verbatim") }
+    if case .targetOnly(let c, _) = ClaudeCredentialMerge.credentialForSwitch(live: live, target: #"{"mcpOAuth":{}}"#) { check(c == #"{"mcpOAuth":{}}"#, "merge: a target without claudeAiOauth is written verbatim, never merged") }
+    else { check(false, "merge: a target without claudeAiOauth is written verbatim, never merged") }
+}
+
 // MARK: - Opt-in: real /usr/bin/security on a throwaway item
 
 if ProcessInfo.processInfo.environment["PIXELSWITCH_KEYCHAIN_TESTS"] == "1" {
