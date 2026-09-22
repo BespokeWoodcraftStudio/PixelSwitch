@@ -62,7 +62,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: PixelSwitch/Resources/PixelSwitch.entitlements
         PRODUCT_NAME: PixelSwitch
         MARKETING_VERSION: "1.0.2"
-        CURRENT_PROJECT_VERSION: "6"
+        CURRENT_PROJECT_VERSION: "7"
         COMBINE_HIDPI_IMAGES: true
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
@@ -97,7 +97,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: PixelSwitchWidget/Resources/PixelSwitchWidget.entitlements
         PRODUCT_NAME: PixelSwitchWidgetExtension
         MARKETING_VERSION: "1.0.2"
-        CURRENT_PROJECT_VERSION: "6"
+        CURRENT_PROJECT_VERSION: "7"
         SWIFT_VERSION: "6.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         CODE_SIGN_STYLE: Automatic

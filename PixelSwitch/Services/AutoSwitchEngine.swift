@@ -185,14 +185,20 @@ enum AutoSwitchEngine {
         //    out, which is the exact failure this feature exists to prevent.
         let ceiling = threshold - hysteresisPct
         return candidates
-            .compactMap { candidate -> (Account, Double)? in
-                guard candidate.id != active.id, isSwitchable(candidate),
-                      let util = eligibleUtilization(usageByAccount[candidate.id], limit: limit, ceiling: ceiling, asOf: now)
-                else { return nil }
-                return (candidate, util)
+            .compactMap { candidate -> (account: Account, util: Double, keepsFable: Bool)? in
+                // The usage check comes first: `isSwitchable` reads the Keychain.
+                guard candidate.id != active.id,
+                      let util = eligibleUtilization(usageByAccount[candidate.id], limit: limit, ceiling: ceiling, asOf: now),
+                      isSwitchable(candidate) else { return nil }
+                let keepsFable = utilization(usageByAccount[candidate.id], limit: .fable, asOf: now).map { $0 <= ceiling } ?? false
+                return (candidate, util, keepsFable)
             }
-            // 3) Most headroom first (lowest known utilization).
-            .sorted { $0.1 < $1.1 }
-            .map { $0.0 }
+            // 3) Accounts with Fable to spare first, so a session/weekly switch
+            //    does not land on an account that is out of Fable and force a
+            //    second switch minutes later; then most headroom first (lowest
+            //    known utilization). Every `.fable` candidate keeps Fable, so
+            //    those rank purely by Fable headroom.
+            .sorted { ($0.keepsFable ? 0 : 1, $0.util) < ($1.keepsFable ? 0 : 1, $1.util) }
+            .map(\.account)
     }
 }

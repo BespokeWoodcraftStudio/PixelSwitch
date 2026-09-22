@@ -244,10 +244,11 @@ do {
     let now = ISO8601DateFormatter().date(from: "2026-09-22T17:00:00Z")!
     let future = "2026-09-28T18:00:00.000000+00:00"
     let past = "2026-09-20T18:00:00.000000+00:00"
-    func usage(session: Double, weekly: Double, fable: Double?, fableResets: String = future) -> UsageAPIResponse {
+    func usage(session: Double, weekly: Double, fable: Double?, fableResets: String? = future) -> UsageAPIResponse {
         var json = #"{"five_hour":{"utilization":\#(session),"resets_at":"2026-09-22T19:00:00.000000+00:00"},"seven_day":{"utilization":\#(weekly),"resets_at":"\#(future)"}"#
         if let fable {
-            json += #","limits":[{"kind":"weekly_scoped","group":"weekly","percent":\#(fable),"resets_at":"\#(fableResets)","scope":{"model":{"id":null,"display_name":"Fable"}}}]"#
+            let resets = fableResets.map { #","resets_at":"\#($0)""# } ?? ""
+            json += #","limits":[{"kind":"weekly_scoped","group":"weekly","percent":\#(fable)\#(resets),"scope":{"model":{"id":null,"display_name":"Fable"}}}]"#
         }
         return try! JSONDecoder().decode(UsageAPIResponse.self, from: Data((json + "}").utf8))
     }
@@ -298,6 +299,23 @@ do {
     let lockedOut = plan([active.id: usage(session: 10, weekly: 50, fable: 99), e.id: usage(session: 5, weekly: 10, fable: 20)],
                          switchable: { $0.id != e.id })
     check(names(lockedOut) == "stay", "auto-switch: an account that cannot be switched to is never chosen for Fable", names(lockedOut))
+
+    // Both limits at once: the session/weekly switch prefers an account with Fable
+    // to spare, so it does not need a second (Fable) switch minutes later.
+    let both = plan([active.id: usage(session: 99, weekly: 99, fable: 99),
+                     b.id: usage(session: 10, weekly: 10, fable: 100),
+                     c.id: usage(session: 50, weekly: 50, fable: 5)])
+    check(names(both) == "windows: C,B", "auto-switch: a session/weekly switch prefers an account that still has Fable", names(both))
+
+    // A kept (not fresh) Fable reading with no reset time never triggers; a fresh one does.
+    let retained = [active.id: usage(session: 10, weekly: 50, fable: 99, fableResets: nil), e.id: usage(session: 5, weekly: 10, fable: 20)]
+    check(names(plan(retained, sampled: false)) == "stay", "auto-switch: a kept Fable reading with no reset time never triggers")
+    check(names(plan(retained, sampled: true)) == "fable: E", "auto-switch: a fresh Fable reading with no reset time does trigger", names(plan(retained, sampled: true)))
+
+    var keychainReads = 0
+    _ = plan([active.id: usage(session: 10, weekly: 50, fable: 99), b.id: usage(session: 5, weekly: 10, fable: 95), c.id: usage(session: 5, weekly: 10, fable: 97)],
+             switchable: { _ in keychainReads += 1; return true })
+    check(keychainReads == 0, "auto-switch: accounts that fail on usage are never checked in the Keychain", "\(keychainReads)")
 
     let edge = AutoSwitchEngine.eligibleUtilization(usage(session: 5, weekly: 89, fable: 10), limit: .fable, ceiling: 88, asOf: now)
     let ok = AutoSwitchEngine.eligibleUtilization(usage(session: 5, weekly: 88, fable: 88), limit: .fable, ceiling: 88, asOf: now)
