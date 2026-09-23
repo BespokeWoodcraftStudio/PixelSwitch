@@ -76,9 +76,9 @@ struct AccountSwitcherView: View {
             AccountGlyph(
                 provider: account.provider,
                 tint: colorCodeAccounts ? AccountPalette.color(swatch) : (account.isActive ? Color.brand : Color.secondary),
-                size: 26
+                size: 20
             )
-            .frame(width: 32, height: 32)
+            .frame(width: 22, height: 22)
 
             // Account info
             VStack(alignment: .leading, spacing: 2) {
@@ -106,9 +106,22 @@ struct AccountSwitcherView: View {
                         .buttonStyle(.plain)
                     }
                 } else {
+                    // The address, and nothing above it.
+                    //
+                    // This row used to lead with the organisation name, which
+                    // Anthropic returns as "<your address>'s Organization", and
+                    // then print the address again underneath. On a 360pt panel
+                    // with a Switch button and two icons beside it, that left
+                    // the text about 130pt wide and it wrapped mid-word:
+                    // "ahmed@be-spokewood-craftstudio.-com's Organization", with
+                    // even the Max badge splitting into "Ma" and "x". The
+                    // founder's verdict: "We don't need the email address or
+                    // organization. It should just be the email address."
                     HStack(spacing: 6) {
-                        Text(account.effectiveDisplayName(obfuscated: maskEmails))
+                        Text(primaryLabel(for: account))
                             .font(.subheadline.weight(.medium))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
 
                         Button {
                             editingLabel = account.customLabel ?? ""
@@ -120,30 +133,55 @@ struct AccountSwitcherView: View {
                         }
                         .buttonStyle(.plain)
                         .help("Edit label")
+                        .fixedSize()
 
                         if account.isActive {
                             Badge(text: String(localized: "Active", bundle: L10n.bundle), color: .green)
+                                .fixedSize()
                         }
                     }
                 }
 
-                Text(account.displayEmail(obfuscated: maskEmails))
-                    .font(.caption)
-                    .foregroundStyle(.textSecondary)
-
-                HStack(spacing: 8) {
-                    if let sub = account.displaySubscriptionType {
-                        Label(sub, systemImage: "creditcard")
-                            .font(.caption2)
-                            .foregroundStyle(.textSecondary)
+                // One quiet line underneath: the plan and the provider, plus the
+                // address when a custom label has taken its place above.
+                // `fixedSize` on each piece is what stops a two-letter word
+                // breaking in half when the column is narrow.
+                HStack(spacing: 5) {
+                    let hasLabel = !(account.customLabel ?? "").isEmpty
+                    if hasLabel {
+                        // The address matters more than anything else on this
+                        // line, so it truncates last. Without the priority the
+                        // fixed-size pieces beside it win and it collapses to
+                        // "so...", which identifies nothing.
+                        Text(account.displayEmail(obfuscated: maskEmails))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(1)
+                        Text(verbatim: "·").foregroundStyle(.quaternary).fixedSize()
                     }
-                    Text(account.provider.rawValue)
-                        .font(.caption2)
-                        .foregroundStyle(.textSecondary)
+                    if let sub = account.displaySubscriptionType {
+                        Text(sub).fixedSize()
+                        if !hasLabel {
+                            Text(verbatim: "·").foregroundStyle(.quaternary).fixedSize()
+                        }
+                    }
+                    // Dropped when a label has pushed the address down here:
+                    // every account is a Claude Code account today, so it is the
+                    // first thing worth giving up for room.
+                    if !hasLabel {
+                        Text(account.provider.rawValue).fixedSize()
+                    }
                 }
+                .font(.caption2)
+                .foregroundStyle(.textSecondary)
+                .lineLimit(1)
             }
-
-            Spacer()
+            // Takes every point the buttons do not need. There is deliberately
+            // NO Spacer after this: a Spacer expands too, so the two of them
+            // split the leftover space between them and the text truncated at
+            // about half the width available to it, cutting even a short
+            // address ("short@example.c..." with 50pt of empty row beside it).
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             // Actions
             if !account.isActive {
@@ -185,6 +223,15 @@ struct AccountSwitcherView: View {
                               lineWidth: account.isActive ? 2 : 1)
                 .shadow(color: AppStyle.cardShadowColor, radius: AppStyle.cardShadowRadius, x: 0, y: AppStyle.cardShadowY)
         )
+    }
+
+    /// What the row leads with: a custom label if one has been set, otherwise
+    /// the address. Never the organisation name, which Anthropic returns as
+    /// "<address>'s Organization" and which therefore says nothing the address
+    /// does not already say, at three times the width.
+    private func primaryLabel(for account: Account) -> String {
+        if let label = account.customLabel, !label.isEmpty { return label }
+        return account.displayEmail(obfuscated: maskEmails)
     }
 
     private func commitLabelEdit(_ account: Account) {
