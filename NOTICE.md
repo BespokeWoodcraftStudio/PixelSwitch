@@ -11,14 +11,17 @@ no license grants no rights: it is not public domain and it is not open source,
 whatever the fact that it is publicly readable might suggest.
 
 Most of the code here is still that code. Measured with `git blame -w -M -C -C`
-over every tracked Swift file at the 1.0.12 release:
+over all 52 tracked Swift files at the **1.0.16** release:
 
 | Author | Lines | Share |
 |---|---:|---:|
-| Xueshi Qiao | 7,810 | 69.5% |
-| Pixel Ventures (this fork) | 2,741 | 24.4% |
-| neonwatty, Sandor Bogyo, Kyoube Lyu, AlexDesign420 | 687 | 6.1% |
-| **Total** | **11,238** | |
+| Xueshi Qiao | 7,808 | 67.4% |
+| Pixel Ventures (this fork) | 3,096 | 26.7% |
+| neonwatty, Sandor Bogyo, Kyoube Lyu, AlexDesign420 | 687 | 5.9% |
+| **Total** | **11,593** | |
+
+These figures are re-measured at each release rather than carried forward, and
+they move: at 1.0.12 the split was 7,810 / 2,741 / 687.
 
 Those four other contributors committed to CCSwitcher before this fork existed,
 so five people hold copyright in this tree, not two.

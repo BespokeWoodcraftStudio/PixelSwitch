@@ -198,7 +198,7 @@ To sign locally, set your own Apple team as `DEVELOPMENT_TEAM` in `project.yml` 
 
 ## Credits
 
-PixelSwitch began as a fork of [CCSwitcher](https://github.com/XueshiQiao/CCSwitcher) by [Xueshi Qiao](https://github.com/XueshiQiao), and a majority of this code is still his: measured with `git blame -w -M -C -C` at the v1.0.12 tag, 7,810 of 11,238 Swift lines. Four other people contributed a further 687 lines to that project before this fork existed: [neonwatty](https://github.com/neonwatty), Sandor Bogyo, Kyoube Lyu and AlexDesign420. Thank you, all of you. Several ideas come from [CodexBar](https://github.com/steipete/CodexBar).
+PixelSwitch began as a fork of [CCSwitcher](https://github.com/XueshiQiao/CCSwitcher) by [Xueshi Qiao](https://github.com/XueshiQiao), and a majority of this code is still his: measured with `git blame -w -M -C -C` at the v1.0.16 tag, 7,808 of 11,593 Swift lines. Four other people contributed a further 687 lines to that project before this fork existed: [neonwatty](https://github.com/neonwatty), Sandor Bogyo, Kyoube Lyu and AlexDesign420. Thank you, all of you. Several ideas come from [CodexBar](https://github.com/steipete/CodexBar).
 
 **Licensing.** The CCSwitcher repository publishes no license, which under copyright means no rights are granted by default. PixelSwitch therefore carries no license of its own: one cannot be granted over code this project does not own. If CCSwitcher adopts a license, PixelSwitch will follow it.
 
