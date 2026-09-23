@@ -27,6 +27,15 @@ struct UsageDashboardView: View {
     @AppStorage(EmailDisplay.key) private var maskEmails = false
     /// Settings → Appearance. Off restores the plain, uncoloured cards.
     @AppStorage(AccountColorCoding.key) private var colorCodeAccounts = true
+    /// Which card the pointer is over, so it can offer the double-click.
+    @State private var hoveredAccount: UUID?
+    /// The card whose hover pushed the pointing-hand cursor, so exactly one
+    /// pop answers it. See `pushPointingHand`.
+    @State private var cursorPushedFor: UUID?
+    /// Which card was just double-clicked. Held for a moment so the press
+    /// animation is visible: a switch can take a second or two to report
+    /// anything, and until it does the click must still look like it landed.
+    @State private var pressedAccount: UUID?
 
     var body: some View {
         ScrollView {
@@ -228,7 +237,7 @@ struct UsageDashboardView: View {
             if let usage = usage {
                 usageBars(usage)
                 extraUsageRow(usage.extraUsage)
-                sampleAgeLabel(account)
+                cardFooter(account)
             } else if let errorState = appState.accountUsageErrors[account.id] {
                 HStack {
                     Image(systemName: errorState.isRateLimited ? "timer" : (errorState.isExpired ? "exclamationmark.triangle" : "xmark.circle"))
@@ -260,16 +269,114 @@ struct UsageDashboardView: View {
         // the way round. The small green "Active" badge is still there, but a
         // badge has to be hunted for; a ring is seen without reading anything.
         .cardStyle(
-            border: account.isActive ? .activeAccountRing : .cardBorder,
-            borderWidth: account.isActive ? 2 : 1
+            border: borderColor(for: account),
+            borderWidth: (account.isActive || appState.switchingTo == account.id) ? 2 : 1
         )
+        // The click has to be FELT. A switch can take a second or two before it
+        // reports anything, and a card that does not move in that time reads as
+        // a click that missed, so people click again.
+        .scaleEffect(pressedAccount == account.id ? 0.96 : (hoveredAccount == account.id && canSwitch(to: account) ? 1.01 : 1.0))
+        .animation(.spring(response: 0.25, dampingFraction: 0.6), value: pressedAccount)
+        .animation(.easeOut(duration: 0.12), value: hoveredAccount)
+        .animation(.easeInOut(duration: 0.2), value: appState.switchingTo)
+        // Double-click rather than single, on purpose: this is a scrolling,
+        // readable surface, and a single click would switch a live Claude login
+        // while someone was only trying to read a number off it.
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { switchByDoubleClick(to: account) }
+        .onHover { hovering in
+            if hovering {
+                hoveredAccount = account.id
+                // A pointing hand is the only thing that says "this is
+                // clickable" before anyone has clicked it.
+                pushPointingHand(for: account)
+            } else {
+                if hoveredAccount == account.id { hoveredAccount = nil }
+                popPointingHand(for: account)
+            }
+        }
+        // The popover can close while the pointer is still over a card, and
+        // onHover does not fire on the way out. Without this the pointing hand
+        // would be left on the stack for the rest of the session.
+        .onDisappear { popPointingHand(for: account) }
         .sectionPadding()
+    }
+
+    /// `NSCursor` is a STACK: every `push` needs exactly one `pop`. Popping
+    /// without having pushed removes whatever another view put there, so both
+    /// are recorded against the card that did them.
+    private func pushPointingHand(for account: Account) {
+        guard cursorPushedFor == nil, canSwitch(to: account) else { return }
+        NSCursor.pointingHand.push()
+        cursorPushedFor = account.id
+    }
+
+    private func popPointingHand(for account: Account) {
+        guard cursorPushedFor == account.id else { return }
+        NSCursor.pop()
+        cursorPushedFor = nil
+    }
+
+    /// Orange while this account is live OR while a switch is moving to it, so
+    /// the ring travels to the card you picked before the switch completes.
+    private func borderColor(for account: Account) -> Color {
+        if appState.switchingTo == account.id { return .activeAccountRing }
+        return account.isActive ? .activeAccountRing : .cardBorder
+    }
+
+    /// True when a double-click on this card would actually do something: not
+    /// the account already live, and nothing else mid-switch.
+    private func canSwitch(to account: Account) -> Bool {
+        !account.isActive && appState.switchingTo == nil && !appState.isLoggingIn
+    }
+
+    private func switchByDoubleClick(to account: Account) {
+        guard canSwitch(to: account) else { return }
+        popPointingHand(for: account)
+        Task {
+            // Press, then release. Both halves are visible because the release
+            // is a spring, and the "Switching…" label takes over from here.
+            pressedAccount = account.id
+            try? await Task.sleep(for: .milliseconds(140))
+            pressedAccount = nil
+            await appState.switchTo(account)
+        }
     }
 
     /// Accounts are polled round-robin (active + one other per cycle), so a
     /// card's numbers can be several cycles old — say so instead of letting a
     /// stale percentage render exactly like a live one. Hidden while the sample
     /// is fresh (< 90s); the relative text then counts up by itself.
+    /// The bottom line of a card: how old the numbers are on the left, and what
+    /// clicking would do on the right.
+    ///
+    /// Both live here rather than in the header because the header already
+    /// holds an address that truncates on a real account
+    /// (`claude@bespokewoodc...`), and squeezing a hint in beside it would eat
+    /// the one thing the card exists to identify.
+    @ViewBuilder
+    private func cardFooter(_ account: Account) -> some View {
+        HStack(spacing: 6) {
+            sampleAgeLabel(account)
+            Spacer(minLength: 4)
+            if appState.switchingTo == account.id {
+                HStack(spacing: 4) {
+                    ProgressView().controlSize(.small).scaleEffect(0.6)
+                    Text("Switching…")
+                        .font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(.activeAccountRing)
+                .transition(.opacity)
+            } else if hoveredAccount == account.id && canSwitch(to: account) {
+                Text("Double-click to switch")
+                    .font(.caption2)
+                    .foregroundStyle(.textSecondary)
+                    .transition(.opacity)
+            }
+        }
+        .frame(minHeight: 14)
+    }
+
     @ViewBuilder
     private func sampleAgeLabel(_ account: Account) -> some View {
         if let sampledAt = appState.accountUsageSampledAt[account.id],

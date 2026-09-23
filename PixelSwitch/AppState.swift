@@ -37,6 +37,10 @@ final class AppState: ObservableObject {
     }
     
     @Published var accountUsageErrors: [UUID: UsageErrorState] = [:]
+    /// The account a switch is currently moving to, so a card can show that it
+    /// is the one being switched to. Nil when nothing is in flight. `isSwitching`
+    /// below is the guard; this is purely what the interface reads.
+    @Published var switchingTo: UUID?
 
     // MARK: - Services
 
@@ -448,7 +452,11 @@ final class AppState: ObservableObject {
             return
         }
         isSwitching = true
-        defer { isSwitching = false }
+        switchingTo = account.id
+        defer {
+            isSwitching = false
+            switchingTo = nil
+        }
 
         // Whose login is live, proven by Anthropic's API from the token (never
         // from ~/.claude.json, which running sessions rewrite). If it already

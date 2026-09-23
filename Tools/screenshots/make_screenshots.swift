@@ -52,6 +52,9 @@ private struct Card: View {
     let config: MenuBarConfig
 
     let logo: Image
+    /// "", "hover" or "switching": the three states a card can be in once
+    /// double-click-to-switch exists.
+    var interaction: String = ""
 
     private func row(_ kind: LimitBarKind, _ title: LocalizedStringKey, _ used: Double, _ reset: String) -> UsageLimitRow {
         UsageLimitRow(kind: kind, title: title, utilization: used, resetText: reset,
@@ -94,11 +97,33 @@ private struct Card: View {
                 row(.session, "Session", account.session, account.sessionReset)
                 row(.weekly, "Weekly", account.weekly, account.weekReset)
                 row(.fable, "Fable", account.fable, account.weekReset)
+
+                HStack(spacing: 6) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "clock").font(.caption2)
+                        Text("Updated 1 min ago").font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    if interaction == "switching" {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.2.circlepath").font(.caption2)
+                            Text("Switching…").font(.caption2.weight(.semibold))
+                        }
+                        .foregroundStyle(Color.activeAccountRing)
+                    } else if interaction == "hover" {
+                        Text("Double-click to switch")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(minHeight: 14)
             }
         }
+        .scaleEffect(interaction == "hover" ? 1.01 : 1.0)
         .cardStyle(
-            border: account.active ? .activeAccountRing : .cardBorder,
-            borderWidth: account.active ? 2 : 1
+            border: (account.active || interaction == "switching") ? .activeAccountRing : .cardBorder,
+            borderWidth: (account.active || interaction == "switching") ? 2 : 1
         )
     }
 }
@@ -190,6 +215,16 @@ enum Screenshots {
 
                 write(autoSwitch(config: config, logo: logo, scheme: scheme),
                       width: 420, scheme: scheme, to: "\(out)/auto-switch-\(name).png")
+
+                write(VStack(alignment: .leading, spacing: 12) {
+                        Text("Resting").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Card(account: sample[2], config: config, logo: logo)
+                        Text("Pointer over it").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Card(account: sample[2], config: config, logo: logo, interaction: "hover")
+                        Text("Double-clicked").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Card(account: sample[2], config: config, logo: logo, interaction: "switching")
+                      },
+                      width: 400, scheme: scheme, to: "\(out)/switch-states-\(name).png")
             }
         }
     }
