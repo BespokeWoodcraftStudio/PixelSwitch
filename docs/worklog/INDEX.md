@@ -15,3 +15,4 @@ that file for the full entry. Start here to get up to speed on the project.
 - [WL-2026-09-24-002](./2026-09-24.md) — Released 1.1: first signed and notarized public build — _feature/done_
 - [WL-2026-09-24-003](./2026-09-24.md) — Removed the old CCSwitcher from the founder's Mac — _chore/done_
 - [WL-2026-09-24-004](./2026-09-24.md) — Widgets confirmed working on signed 1.1 — _note/done_
+- [WL-2026-09-24-005](./2026-09-24.md) — v1.1 release page now mentions the working widgets — _docs/done_
