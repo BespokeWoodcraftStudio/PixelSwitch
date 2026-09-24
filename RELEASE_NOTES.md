@@ -1,24 +1,15 @@
-## PixelSwitch 1.0.16
+## PixelSwitch 1.1
 
-### Fixed
+### Changed
 
-- **The Accounts tab is readable again.** Each row led with the organisation name, which Anthropic returns as "*your address*'s Organization", and then printed your address a second time underneath. On a 360pt panel with a Switch button and two icons beside it, that left the text about 130pt wide, so it wrapped mid-word: `ahmed@be-spokewood-craftstudio.-com's Organization`. Even the **Max** badge split into "Ma" and "x".
+- **PixelSwitch is now signed and notarized by Apple.** It opens with a normal double-click and no security warning. You no longer need to run `xattr -dr com.apple.quarantine` or use Privacy & Security → Open Anyway on a fresh install.
+- **Version numbers are shorter.** From here on releases are numbered 1.1, 1.2, 1.3, then 2.0, and so on, instead of 1.0.16.
 
-A row is now two lines and never wraps:
+Nothing else changes in this release. Your accounts, settings and saved tokens carry over as they are.
 
-- **your address** (or your own label, if you have set one), truncated with an ellipsis if it is long
-- **Max · Claude Code** underneath, quietly
+#### Included from 1.0.16
 
-The organisation name is gone. It never said anything the address did not already say, at three times the width.
+- **The Accounts tab is readable again.** Each row is now two lines and never wraps: your address (or your own label, if you have set one) on top, and **Max · Claude Code** underneath. The organisation name is gone, because it never said anything the address did not already say.
+- Double-click an account on the Usage tab to switch to it. Also in the 1.0 series: whole email addresses with masking as an opt-in, a colour per account, honest cost totals, a switch for Fable auto-switching, MCP logins that survive a switch, and a switch that cannot mix up two accounts.
 
-Also fixed along the way: the text column and the spacer beside it were both trying to expand, so they split the row between them and the address truncated at about half the width actually available. A seventeen-character address was being cut short with 50pt of empty row next to it.
-
-#### Included from 1.0.15 to 1.0.2
-
-- Double-click an account on the Usage tab to switch to it, with the card pressing in, the orange ring moving across and a "Switching…" label; the app clears the identifiers it inherited from the project it was forked from; whole email addresses, with masking as an opt-in; limit rows in plain readable text; the account you are signed in to ringed in orange; a colour per account; a switch for Fable auto-switching; honest cost totals; auto-switch covering the weekly Fable allowance; MCP logins that survive a switch; a switch that cannot mix up two accounts; and [NOTICE.md](NOTICE.md), which states the licensing position honestly.
-
-### Good to know
-
-- This build is not signed with an Apple Developer ID yet. On a fresh install, clear the download flag with `xattr -dr com.apple.quarantine /Applications/PixelSwitch.app`, or use System Settings → Privacy & Security → Open Anyway. Updating in place through Check for Updates does not need this.
-
-**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.0.15...v1.0.16
+**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.0.16...v1.1
