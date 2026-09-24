@@ -43,18 +43,12 @@ It also watches what you have left. Every account's card shows its 5-hour sessio
 
 1. Download **PixelSwitch.dmg** from the [latest release](https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/latest).
 2. Open it and drag **PixelSwitch** into **Applications**.
-3. The release is not signed with an Apple Developer ID yet, so macOS blocks the first launch. Clear the download flag once in Terminal:
-
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/PixelSwitch.app
-   ```
-
-   Or try to open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
-4. Open PixelSwitch. It lives in the menu bar; there is no Dock icon.
+3. Open PixelSwitch. Releases from 1.1 on are signed with a Developer ID and notarized by Apple, so it opens with a normal double-click. (Older builds, 1.0.16 and earlier, were not signed and needed `xattr -dr com.apple.quarantine /Applications/PixelSwitch.app` on first launch.)
+4. PixelSwitch lives in the menu bar; there is no Dock icon.
 
 ### On first launch
 
-macOS asks once whether PixelSwitch may use its saved account credentials. Click **Always Allow**. It asks again after an update, because the app's signature changes.
+macOS asks once whether PixelSwitch may use its saved account credentials. Click **Always Allow**. It can ask again after an update that changes the app's signature, including the update to 1.1, the first release signed with a Developer ID.
 
 ## What you are looking at
 
@@ -82,7 +76,7 @@ This account is nearly out of its session and has 13% of its Fable left. With au
 - **The live account is ringed in orange**: the account you are signed in to right now carries a bright orange ring right round its card, on the Usage tab and in the Accounts list, so you find it without reading anything.
 - **Honest cost history**: the Costs tab totals only the history PixelSwitch actually keeps, which is bounded by your usage history window. A "Last 7 days" or "Last 30 days" total appears only when that much history exists; otherwise one card states the real span.
 - **Configurable Menu Bar Modules**: Build your own iStats-style menu bar readout. Choose any combination of the PixelSwitch logo, account name, 5-hour session usage, weekly usage, Fable usage, today's cost, and session/weekly reset countdowns — each rendered as a compact two-line module (label over value, with monochrome progress bars for utilization). Drag to reorder and toggle modules in Settings, with a live preview.
-- **Desktop Widgets**: Native macOS desktop widgets in small, medium, and large sizes showing account usage, costs, and activity stats, plus a circular ring variant. Widgets need a build signed with an Apple Developer ID; the public release is not signed yet, so its widgets do not load (see [Install](#install)).
+- **Desktop Widgets**: Native macOS desktop widgets in small, medium, and large sizes showing account usage, costs, and activity stats, plus a circular ring variant. Widgets need a build signed with an Apple Developer ID. Releases from 1.1 on are signed. Earlier releases were not, so their widgets did not load (see [Install](#install)).
 - **In-App Updates**: Powered by [Sparkle 2.x](https://sparkle-project.org/), reading PixelSwitch's own release feed. Every release is signed with the PixelSwitch update key, so the app only accepts updates published here.
 - **Dark Mode**: Full light and dark mode support with adaptive colors that follow your system appearance.
 - **Internationalization**: Available in English, 简体中文 (Chinese), 日本語 (Japanese), Deutsch (German), and Français (French).

@@ -12,3 +12,4 @@ that file for the full entry. Start here to get up to speed on the project.
 
 ## 2026-09-24
 - [WL-2026-09-24-001](./2026-09-24.md) — Two-part version numbers (1.1, 1.2, 2.0) — _decision/done_
+- [WL-2026-09-24-002](./2026-09-24.md) — Released 1.1: first signed and notarized public build — _feature/done_
