@@ -1,0 +1,321 @@
+<!doctype html>
+<!--
+  THE FOUNDER QUESTIONS TEMPLATE. Standing rule, founder, 2026-09-19: every question for him is an HTML page
+  with multiple choice options, a box for his own words on every card, and a Copy my answers button whose
+  block he pastes into the session. Never a question only in chat.
+  HOW TO USE: copy this file into the project's decisions folder (PixelOS: program/decisions/
+  founder-questions-round-<N>-<date>-v1.html), change ONLY the PAGE object and the <title>, render it at 390
+  and 1280 in both themes and look at it, test the Copy button, commit it, and link it from the final
+  message and the handoff with its full path. Recommended option first. Every question carries a default
+  that stands if he says nothing, and the page says up front whether anything on it blocks the work.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>PixelSwitch: remote control decisions</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --surface: #ffffff; --ink: #16181d; --muted: #565b66; --line: #dcd9d0;
+    --accent: #1f4fd8; --accent-ink: #ffffff; --soft: #eef1fb; --ok: #17694a; --ok-soft: #e4f3ec; --warn: #8a5a00; --warn-soft: #fbf1dc;
+    --radius: 14px; --pad: clamp(16px, 3vw, 48px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a21; --ink: #eceef2; --muted: #a3a9b6; --line: #2a2f3a;
+      --accent: #8fb0ff; --accent-ink: #0b1020; --soft: #1c2436; --ok: #7fd6ad; --ok-soft: #13291f; --warn: #f0c46a; --warn-soft: #2b2312;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; padding-bottom: 120px; }
+  .wrap { max-width: 1800px; margin: 0 auto; padding: 0 var(--pad); }
+  header.top { padding: clamp(28px, 4vw, 56px) 0 8px; }
+  .eyebrow { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  h1 { font-size: clamp(28px, 3.4vw, 46px); line-height: 1.1; letter-spacing: -.02em; margin: 10px 0 14px; }
+  .lede { font-size: clamp(17px, 1.3vw, 20px); color: var(--muted); margin: 0 0 8px; }
+  .lede strong { color: var(--ink); }
+  .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 22px 0 8px; padding: 0; list-style: none; counter-reset: how; }
+  .how li { counter-increment: how; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px 14px 52px; position: relative; }
+  .how li::before { content: counter(how); position: absolute; left: 14px; top: 13px; width: 26px; height: 26px; border-radius: 50%; background: var(--soft); color: var(--accent); font-weight: 700; font-size: 14px; display: grid; place-items: center; }
+  h2 { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 40px 0 12px; }
+
+  /* The comparison table. It never scrolls sideways: on a narrow screen each row becomes a block. */
+  table.sum { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; table-layout: fixed; }
+  table.sum th, table.sum td { text-align: left; vertical-align: top; padding: 13px 16px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  table.sum th { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; background: var(--soft); }
+  table.sum tr:last-child td { border-bottom: 0; }
+  table.sum col.n { width: 56px; } table.sum col.state { width: 170px; }
+  table.sum a { color: var(--accent); font-weight: 600; }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .pill.open { background: var(--warn-soft); color: var(--warn); } .pill.done { background: var(--ok-soft); color: var(--ok); }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); margin: 0 0 18px; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); scroll-margin-top: 16px; }
+  .card > div { padding: clamp(18px, 2vw, 30px); min-width: 0; }
+  .card .ask { border-left: 1px solid var(--line); }
+  .num { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .card h3 { font-size: clamp(21px, 1.7vw, 27px); line-height: 1.2; letter-spacing: -.01em; margin: 6px 0 12px; }
+  .card p { margin: 0 0 12px; overflow-wrap: anywhere; }
+  .card .label { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 18px 0 6px; }
+  .card a { color: var(--accent); }
+  .steps { margin: 0 0 12px; padding-left: 22px; } .steps li { margin: 0 0 6px; }
+  code { font: 0.92em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--soft); padding: .1em .4em; border-radius: 5px; overflow-wrap: anywhere; }
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  legend { font-weight: 600; padding: 0; margin: 0 0 10px; }
+  .option { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; align-items: start; padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; margin: 0 0 9px; cursor: pointer; min-height: 48px; }
+  .option:hover { border-color: var(--accent); }
+  .option:has(input:checked) { border-color: var(--accent); background: var(--soft); box-shadow: inset 0 0 0 1px var(--accent); }
+  .option input { width: 20px; height: 20px; margin: 3px 0 0; accent-color: var(--accent); }
+  .option b { display: block; } .option span.note { display: block; color: var(--muted); font-size: 15px; margin-top: 2px; }
+  .rec { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 99px; background: var(--ok-soft); color: var(--ok); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; vertical-align: 2px; }
+  label.c { display: block; font-weight: 600; margin: 16px 0 6px; }
+  textarea { width: 100%; min-height: 86px; resize: vertical; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 11px; padding: 11px 13px; }
+  textarea:focus-visible, .option input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  #out { min-height: 260px; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -8px 30px rgba(0,0,0,.08); z-index: 5; }
+  .bar .wrap { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+  .bar .status { flex: 1 1 240px; min-width: 0; color: var(--muted); }
+  .bar .status strong { color: var(--ink); }
+  button { font: inherit; font-weight: 650; border-radius: 11px; padding: 12px 20px; min-height: 48px; cursor: pointer; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:active { transform: translateY(1px); }
+
+  @media (max-width: 900px) {
+    .how { grid-template-columns: 1fr; }
+    .card { grid-template-columns: 1fr; } .card .ask { border-left: 0; border-top: 1px solid var(--line); }
+    table.sum, table.sum tbody, table.sum tr, table.sum td { display: block; width: 100%; }
+    table.sum colgroup, table.sum thead { display: none; }
+    table.sum tr { border-bottom: 1px solid var(--line); padding: 8px 0; } table.sum tr:last-child { border-bottom: 0; }
+    table.sum td { border: 0; padding: 4px 16px; }
+    table.sum td[data-h]::before { content: attr(data-h) ": "; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+    .bar .wrap { gap: 6px 8px; padding-top: 8px; padding-bottom: 10px; }
+    .bar .status { flex: 1 1 100%; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .bar .status .long { display: none; }
+    .bar button { flex: 1 1 0; white-space: nowrap; padding: 10px 12px; }
+    body { padding-bottom: 110px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow" id="eyebrow"></div>
+    <h1 id="title"></h1>
+    <p class="lede" id="lede"></p>
+    <ol class="how">
+      <li>Pick one answer on each card. The first option is the one I recommend.</li>
+      <li>Add a comment anywhere you want to say more, or to overrule every option.</li>
+      <li>Press <strong>Copy my answers</strong> at the bottom and paste it into the Claude session.</li>
+    </ol>
+  </header>
+
+  <h2>All of it on one screen</h2>
+  <table class="sum" id="sum">
+    <colgroup><col class="n"><col><col><col><col class="state"></colgroup>
+    <thead><tr><th>#</th><th>Decision</th><th>What I recommend</th><th>If you say nothing</th><th>Your answer</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>The decisions</h2>
+  <main id="cards"></main>
+
+  <h2>What you will paste back</h2>
+  <label class="c" for="all-comment">Anything else you want me to know</label>
+  <textarea id="all-comment" placeholder="Optional. Anything that is not about one card."></textarea>
+  <label class="c" for="out">Your answers, as they will be pasted. It updates as you go. If the button does not work, click in this box, select all, and copy.</label>
+  <textarea id="out" readonly></textarea>
+</div>
+
+<div class="bar" role="region" aria-label="Your answers">
+  <div class="wrap">
+    <div class="status" id="status" aria-live="polite"></div>
+    <button type="button" id="save">Save as a file</button>
+    <button type="button" class="primary" id="copy">Copy my answers</button>
+  </div>
+</div>
+
+<script>
+/* ==========================================================================================
+   THE ONLY PART THAT CHANGES FROM ROUND TO ROUND. Everything below PAGE is rendered from it.
+   html: true fields may carry links and <code>. Put the recommended option FIRST.
+   ========================================================================================== */
+var PAGE = {
+  key: 'pixelswitch-remote-control-2026-09-24',
+  heading: 'PIXELSWITCH: FOUNDER QUESTIONS, REMOTE CONTROL (2026-09-24)',
+  eyebrow: 'PixelSwitch · remote control for AI · 2026-09-24',
+  title: 'Letting an AI on another Mac run PixelSwitch',
+  lede: '<strong>Nothing here blocks other work, but I cannot write the design until questions 1 and 2 are answered.</strong> The plan I recommend: a small command called <code>pixelswitch</code> that talks to the running app on this Mac. Your other Mac runs it through the connection it already uses to run work here. The AI can read usage, switch accounts and change settings, and it can never see a login token. Your answers below shape the design; nothing gets built until you approve the written design.',
+  questions: [
+    {
+      id: 'how-reach',
+      title: 'How does the other Mac run work on this one today?',
+      what: 'You said the other Mac is already set up to run tasks on this Mac. I need to know how, because it decides whether PixelSwitch has to open a door onto your network at all.',
+      why: 'If it runs commands here (over SSH, or a tool that works like it), the new command simply runs on this Mac and talks to the app on this Mac only. PixelSwitch opens no network door, which is the safest design. If not, PixelSwitch has to listen on your network, and that needs its own password and encryption. That is a bigger and riskier build.',
+      nothing: 'I design for the safe case: no network door. The other Mac reaches PixelSwitch through whatever already runs commands here. A network listener can be added later.',
+      recommend: 'It runs commands here (SSH or similar): no network door',
+      options: [
+        { label: 'It runs commands on this Mac (SSH, or a tool like it)', note: 'PixelSwitch opens no network door. The command runs here and talks to the app on this Mac only.' },
+        { label: 'It cannot run commands here, so PixelSwitch must listen on the network', note: 'Say how it connects in the box. I add a locked listener with its own password and encryption. More work and more to secure.' },
+        { label: 'I am not sure how it is set up', note: 'I design for the first choice and list what to check on the other Mac.' }
+      ]
+    },
+    {
+      id: 'permissions',
+      title: 'What is the AI allowed to do?',
+      what: 'This controls the app that holds your Claude logins, so the power has to be yours to grant. The plan is a master switch in PixelSwitch Settings that is off until you turn it on, with levels of power.',
+      why: 'Read-only cannot hurt anything. Switching accounts and changing settings can disrupt work that is in progress. Removing an account deletes its saved login, and putting it back needs you at the keyboard.',
+      nothing: 'Off by default. When you turn it on it starts at the middle level (read, switch accounts, change settings), and removing accounts stays blocked until you pick the top level.',
+      recommend: 'Off by default; you pick the level in Settings',
+      options: [
+        { label: 'Off by default. In Settings you pick: Read-only, Control (also switch and change settings), or Everything (also remove accounts)', note: 'You stay in charge, and the level can be turned down or off at any moment.' },
+        { label: 'Always on, everything allowed, no switch in Settings', note: 'Simplest to build. Anything that can run a command on this Mac can also remove your accounts.' },
+        { label: 'Read-only only', note: 'The AI can watch usage but never change anything. Safest, but not what you described.' }
+      ]
+    },
+    {
+      id: 'adding-accounts',
+      title: 'How should the AI add an account?',
+      what: 'Signing a new account in means signing in to Anthropic in a web browser on this Mac. An AI cannot type your password or approve that sign-in. It can only start it. PixelSwitch also has "Add current account", which saves whichever account Claude is already signed in to on this Mac.',
+      why: 'This is Anthropic\'s sign-in, not a PixelSwitch limit, so no design lets an AI add a brand new account with nobody at this Mac. Starting a sign-in opens a browser window on this Mac, which could pop up while you are working.',
+      nothing: 'Both are offered: the AI can save the account already signed in, and it can start a new sign-in that waits for you to finish it in the browser.',
+      recommend: 'Both: save the current account, or start a sign-in you finish',
+      options: [
+        { label: 'Both: save the current account, and start a new sign-in that I finish in the browser', note: 'The command reports "waiting for you" until you finish, then "added".' },
+        { label: 'Only save the account that is already signed in', note: 'No browser window ever opens by itself.' },
+        { label: 'The AI cannot add accounts; I do it by hand', note: 'The AI can still read, switch and change settings.' }
+      ]
+    },
+    {
+      id: 'shape',
+      title: 'What should the AI plug into?',
+      what: 'There are two ways for an AI to use the command. It can run plain shell commands that print structured results it can read. Or it can use the command as an MCP server, the format Claude uses for real tools, so Claude sees "switch account" as a tool instead of typing a shell command.',
+      why: 'Shell commands work with any AI. The MCP mode is smoother for Claude and safer, because every tool has a fixed shape and cannot be misspelled. Both come from the same one program, so building both costs little extra.',
+      nothing: 'Both are built, from the same program.',
+      recommend: 'Both: shell commands and an MCP mode',
+      options: [
+        { label: 'Both: shell commands and an MCP mode', note: 'One program, two ways in. Claude on the other Mac can use it either way.' },
+        { label: 'Shell commands only', note: 'Simpler and smaller. The AI types commands and reads the printed result. You can still use it yourself in Terminal.' }
+      ]
+    }
+  ]
+};
+
+/* ================================== the page, rendered ================================== */
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var el = function (tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
+  var store = {
+    read: function () { try { return JSON.parse(localStorage.getItem(PAGE.key) || '{}'); } catch (e) { return {}; } },
+    write: function (v) { try { localStorage.setItem(PAGE.key, JSON.stringify(v)); } catch (e) { /* a private window: the page still works */ } }
+  };
+  var saved = store.read();
+
+  $('eyebrow').textContent = PAGE.eyebrow;
+  $('title').textContent = PAGE.title;
+  $('lede').innerHTML = PAGE.lede;
+
+  var tbody = $('sum').querySelector('tbody');
+  var cards = $('cards');
+  PAGE.questions.forEach(function (q, i) {
+    var n = i + 1;
+    var tr = el('tr');
+    tr.appendChild(el('td', '', String(n)));
+    tr.appendChild(el('td', '', '<a href="#q-' + q.id + '">' + q.title + '</a>'));
+    var r = el('td', '', q.recommend); r.setAttribute('data-h', 'I recommend'); tr.appendChild(r);
+    var d = el('td', '', q.nothing); d.setAttribute('data-h', 'If you say nothing'); tr.appendChild(d);
+    var s = el('td', '', '<span class="pill open" id="pill-' + q.id + '">Not answered</span>'); tr.appendChild(s);
+    tbody.appendChild(tr);
+
+    var card = el('section', 'card'); card.id = 'q-' + q.id;
+    var left = el('div', 'ctx');
+    left.appendChild(el('div', 'num', 'Decision ' + n + ' of ' + PAGE.questions.length));
+    left.appendChild(el('h3', '', q.title));
+    left.appendChild(el('p', '', q.what));
+    left.appendChild(el('div', 'label', 'Why it matters'));
+    left.appendChild(el('p', '', q.why));
+    if (q.steps) {
+      left.appendChild(el('div', 'label', 'How to do it'));
+      var ol = el('ol', 'steps'); q.steps.forEach(function (t) { ol.appendChild(el('li', '', t)); }); left.appendChild(ol);
+    }
+    left.appendChild(el('div', 'label', 'If you say nothing'));
+    left.appendChild(el('p', '', q.nothing));
+    card.appendChild(left);
+
+    var right = el('div', 'ask');
+    var fs = el('fieldset');
+    fs.appendChild(el('legend', '', 'Your answer'));
+    q.options.forEach(function (o, k) {
+      var lab = el('label', 'option');
+      var inp = el('input'); inp.type = 'radio'; inp.name = q.id; inp.value = String(k);
+      if (saved[q.id] && saved[q.id].pick === String(k)) inp.checked = true;
+      lab.appendChild(inp);
+      lab.appendChild(el('span', '', '<b>' + o.label + (k === 0 ? '<span class="rec">Recommended</span>' : '') + '</b><span class="note">' + o.note + '</span>'));
+      fs.appendChild(lab);
+    });
+    right.appendChild(fs);
+    var cl = el('label', 'c', 'Your own words (optional)'); cl.setAttribute('for', 'c-' + q.id); right.appendChild(cl);
+    var ta = el('textarea'); ta.id = 'c-' + q.id; ta.placeholder = 'Add to your answer, or overrule every option above.';
+    if (saved[q.id] && saved[q.id].comment) ta.value = saved[q.id].comment;
+    right.appendChild(ta);
+    card.appendChild(right);
+    cards.appendChild(card);
+  });
+  if (saved._all) $('all-comment').value = saved._all;
+
+  var plain = function (html) { var t = document.createElement('div'); t.innerHTML = html; return (t.textContent || '').replace(/\s+/g, ' ').trim(); };
+
+  function collect() {
+    var state = {}, lines = [PAGE.heading, ''], answered = 0;
+    PAGE.questions.forEach(function (q, i) {
+      var picked = document.querySelector('input[name="' + q.id + '"]:checked');
+      var comment = $('c-' + q.id).value.trim();
+      state[q.id] = { pick: picked ? picked.value : null, comment: comment };
+      var pill = $('pill-' + q.id);
+      if (picked || comment) { answered += 1; pill.className = 'pill done'; pill.textContent = 'Answered'; }
+      else { pill.className = 'pill open'; pill.textContent = 'Not answered'; }
+      lines.push((i + 1) + '. ' + plain(q.title) + ' [' + q.id + ']');
+      if (picked) lines.push('   ANSWER: ' + plain(q.options[Number(picked.value)].label) + (picked.value === '0' ? ' (the recommended one)' : ''));
+      else if (comment) lines.push('   ANSWER: see my comment; I picked none of the options.');
+      else lines.push('   ANSWER: none given. The default stands: ' + plain(q.nothing));
+      if (comment) lines.push('   COMMENT: ' + comment.replace(/\n+/g, '\n            '));
+      lines.push('');
+    });
+    var all = $('all-comment').value.trim();
+    state._all = all;
+    if (all) { lines.push('ANYTHING ELSE: ' + all.replace(/\n+/g, '\n               ')); lines.push(''); }
+    lines.push('(' + answered + ' of ' + PAGE.questions.length + ' answered)');
+    store.write(state);
+    $('out').value = lines.join('\n');
+    $('status').innerHTML = '<strong>' + answered + ' of ' + PAGE.questions.length + '</strong> answered.<span class="long"> Your answers are kept in this browser until you clear them.</span>';
+    return lines.join('\n');
+  }
+
+  document.addEventListener('input', collect);
+  document.addEventListener('change', collect);
+  collect();
+
+  function say(msg) { $('status').innerHTML = '<strong>' + msg + '</strong>'; }
+  $('copy').addEventListener('click', function () {
+    var text = collect();
+    var fallback = function () {
+      var out = $('out'); out.focus(); out.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      say(ok ? 'Copied. Paste it into the Claude session.' : 'Your answers are selected in the box above. Press Command C, then paste into the Claude session.');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { say('Copied. Paste it into the Claude session.'); }, fallback);
+    } else { fallback(); }
+  });
+  $('save').addEventListener('click', function () {
+    var blob = new Blob([collect() + '\n'], { type: 'text/plain' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = PAGE.key + '-answers.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    say('Saved to your Downloads folder as ' + PAGE.key + '-answers.txt.');
+  });
+})();
+</script>
+</body>
+</html>
