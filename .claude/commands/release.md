@@ -13,10 +13,10 @@ When the user invokes `/release`, follow these steps EXACTLY. Do NOT skip or imp
 ### 2. Determine version
 
 - Read the current `MARKETING_VERSION` from `project.yml`
-- Ask the user what the new version should be, or accept it as an argument (e.g., `/release 1.3.0` or `/release patch`)
-- `patch`: bump 1.2.3 → 1.2.4
-- `minor`: bump 1.2.3 → 1.3.0
-- `major`: bump 1.2.3 → 2.0.0
+- Ask the user what the new version should be, or accept it as an argument (e.g., `/release 1.3` or `/release minor`)
+- Versions are **two-part** (founder's rule, 2026-09-24): 1.1, 1.2, 1.3 ... then 2.0, 2.1. Never three-part, and there are no patch releases: every release is a new minor.
+- `minor`: bump 1.2 → 1.3 (from the old 1.0.16 it gives 1.1)
+- `major`: bump 1.2 → 2.0
 
 ### 3. Write & commit `RELEASE_NOTES.md` (REQUIRED — do this BEFORE tagging)
 
@@ -24,15 +24,11 @@ When the user invokes `/release`, follow these steps EXACTLY. Do NOT skip or imp
 
 - Overwrite `RELEASE_NOTES.md` with the notes for this version (it always reflects the latest release; it's fine that it's overwritten each time).
 - Write the notes in English.
-  - End the file with a footer line: `**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/vPREV...vX.Y.Z` (CI does not auto-append one).
+  - End the file with a footer line: `**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/vPREV...vX.Y` (CI does not auto-append one).
   - Keep it user-facing and concise — lead with what changed for the user, not internal implementation.
   - Derive content from the commits in `vPREV..HEAD` (`git log --oneline vPREV..HEAD`).
   - This applies to every release, including fix-only ones (a short "Bug fix" entry is fine).
-- **Patch releases must include the parent minor version's content.** For a patch `X.Y.Z` where `Z > 0` (e.g. `1.8.1` is a patch of `1.8.0`), users who update directly may have skipped `X.Y.0` entirely (Sparkle jumps them straight to the latest). So the patch's `RELEASE_NOTES.md` must:
-  1. Lead with the patch's own changes (the delta — what `X.Y.Z` adds over `X.Y.(Z-1)`).
-  2. Then append the full `X.Y.0` notes below, under a heading such as `#### Included from vX.Y.0`.
-  3. Cumulative across multiple patches: `1.8.2` includes `1.8.1`'s delta + `1.8.0`'s full notes (everything since the last minor/major).
-- Commit it on its own: `git add RELEASE_NOTES.md && git commit -m "docs: Release notes for X.Y.Z"`. This commit must land **before** running the release script so the tag includes it.
+- Commit it on its own: `git add RELEASE_NOTES.md && git commit -m "docs: Release notes for X.Y"`. This commit must land **before** running the release script so the tag includes it.
 
 ### 4. Run the release script
 
@@ -40,8 +36,8 @@ Run `./scripts/release.sh <version>` which handles everything:
 - Updates `MARKETING_VERSION` in project.yml (all occurrences)
 - Increments `CURRENT_PROJECT_VERSION` (build number)
 - Runs `xcodegen generate`
-- Commits with message: `chore: Bump to X.Y.Z (build N)`
-- Creates git tag `vX.Y.Z`
+- Commits with message: `chore: Bump to X.Y (build N)`
+- Creates git tag `vX.Y`
 - Pushes the commit to `main`
 - Pushes ONLY the specific tag (never `git push --tags`)
 
@@ -49,6 +45,6 @@ CI then builds/notarizes and **automatically** publishes `RELEASE_NOTES.md` to t
 
 ### Critical rules
 
-- **NEVER use `git push --tags`** — it pushes ALL local tags including stale ones. Always push the specific tag: `git push origin vX.Y.Z`
-- **MARKETING_VERSION must match the git tag** — if the tag is `v1.3.0`, MARKETING_VERSION must be `"1.3.0"`. They are the same value. No exceptions.
+- **NEVER use `git push --tags`** — it pushes ALL local tags including stale ones. Always push the specific tag: `git push origin vX.Y`
+- **MARKETING_VERSION must match the git tag** — if the tag is `v1.3`, MARKETING_VERSION must be `"1.3"`. They are the same value. No exceptions.
 - **Verify before pushing** — check that the tag doesn't already exist locally or on remote before creating it

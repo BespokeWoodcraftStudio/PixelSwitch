@@ -6,13 +6,14 @@ set -euo pipefail
 #
 # Usage:
 #   ./scripts/release.sh <version>
-#   ./scripts/release.sh patch|minor|major
+#   ./scripts/release.sh minor|major
+#
+# Versions are two-part (1.1, 1.2, 2.0), never three-part.
 #
 # Examples:
-#   ./scripts/release.sh 1.3.0
-#   ./scripts/release.sh patch    # 1.2.3 -> 1.2.4
-#   ./scripts/release.sh minor    # 1.2.3 -> 1.3.0
-#   ./scripts/release.sh major    # 1.2.3 -> 2.0.0
+#   ./scripts/release.sh 1.3
+#   ./scripts/release.sh minor    # 1.2 -> 1.3   (also 1.0.16 -> 1.1)
+#   ./scripts/release.sh major    # 1.2 -> 2.0
 
 PROJECT_YML="project.yml"
 
@@ -28,13 +29,12 @@ get_current_build() {
     grep 'CURRENT_PROJECT_VERSION:' "$PROJECT_YML" | head -1 | sed 's/.*"\(.*\)".*/\1/'
 }
 
-bump_semver() {
+bump_version() {
     local current="$1" type="$2"
-    IFS='.' read -r major minor patch <<< "$current"
+    IFS='.' read -r major minor _ <<< "$current"
     case "$type" in
-        major) echo "$((major + 1)).0.0" ;;
-        minor) echo "$major.$((minor + 1)).0" ;;
-        patch) echo "$major.$minor.$((patch + 1))" ;;
+        major) echo "$((major + 1)).0" ;;
+        minor) echo "$major.$((minor + 1))" ;;
         *) die "Unknown bump type: $type" ;;
     esac
 }
@@ -65,16 +65,16 @@ CURRENT_BUILD=$(get_current_build)
 if [ $# -ne 1 ]; then
     echo "Current: v${CURRENT_VERSION} (build ${CURRENT_BUILD})"
     echo ""
-    echo "Usage: $0 <version|patch|minor|major>"
+    echo "Usage: $0 <version|minor|major>"
     exit 1
 fi
 
 INPUT="$1"
 
 case "$INPUT" in
-    patch|minor|major) NEW_VERSION=$(bump_semver "$CURRENT_VERSION" "$INPUT") ;;
-    [0-9]*) NEW_VERSION="$INPUT" ;;
-    *) die "Invalid argument: $INPUT (expected version number or patch/minor/major)" ;;
+    minor|major) NEW_VERSION=$(bump_version "$CURRENT_VERSION" "$INPUT") ;;
+    [0-9]*.[0-9]*) [[ "$INPUT" =~ ^[0-9]+\.[0-9]+$ ]] || die "Version must be two-part, like 1.1 or 2.0 (got $INPUT)"; NEW_VERSION="$INPUT" ;;
+    *) die "Invalid argument: $INPUT (expected a version like 1.1, or minor/major)" ;;
 esac
 
 NEW_BUILD=$((CURRENT_BUILD + 1))
