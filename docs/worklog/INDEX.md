@@ -17,3 +17,6 @@ that file for the full entry. Start here to get up to speed on the project.
 - [WL-2026-09-24-004](./2026-09-24.md) — Widgets confirmed working on signed 1.1 — _note/done_
 - [WL-2026-09-24-005](./2026-09-24.md) — v1.1 release page now mentions the working widgets — _docs/done_
 - [WL-2026-09-24-006](./2026-09-24.md) — Remote control for AI: design started, four decisions with the founder — _design/wip_
+
+## 2026-09-25
+- [WL-2026-09-25-001](./2026-09-25.md) — Design written: remote control, per-account thresholds, next-account strategy, sign-in links — _design/wip_
