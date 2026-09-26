@@ -629,6 +629,29 @@ extension ControlTestKit {
 // MARK: - Command-line output
 
 @MainActor func runControlCLIOutputTests() {
+    // Over SSH, or into a file, stdout is not a terminal. A line printed
+    // through stdio waits there in a 4 KB buffer, so `ssh … pixelswitch watch`
+    // showed nothing for dozens of events and lost them when stopped. Every
+    // line must reach the pipe as it is written.
+    var pipeFDs: [Int32] = [0, 0]
+    if pipe(&pipeFDs) == 0 {
+        fflush(stdout)
+        let savedStdout = dup(STDOUT_FILENO)
+        dup2(pipeFDs[1], STDOUT_FILENO)
+        CLIRunner(client: ControlClient(path: "/nonexistent")).out("probe-line")
+        dup2(savedStdout, STDOUT_FILENO)
+        close(savedStdout)
+        close(pipeFDs[1])
+        _ = fcntl(pipeFDs[0], F_SETFL, fcntl(pipeFDs[0], F_GETFL) | O_NONBLOCK)
+        var bytes = [UInt8](repeating: 0, count: 256)
+        let count = read(pipeFDs[0], &bytes, bytes.count)
+        close(pipeFDs[0])
+        let arrived = count > 0 ? String(decoding: bytes[0..<count], as: UTF8.self) : ""
+        check(arrived == "probe-line\n", "cli: each line reaches a pipe at once (watch over SSH is not held in a buffer)", "got \(arrived.debugDescription)")
+    } else {
+        check(false, "cli: each line reaches a pipe at once (watch over SSH is not held in a buffer)", "pipe() failed")
+    }
+
     let usage = UsageInfo(session: WindowInfo(utilization: 42.4, resetsAt: nil), weekly: WindowInfo(utilization: 61, resetsAt: nil),
                           fable: nil, extraUsage: nil, sampledAt: nil, error: nil)
     let accounts = [

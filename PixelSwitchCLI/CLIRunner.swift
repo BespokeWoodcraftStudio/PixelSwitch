@@ -22,7 +22,9 @@ enum CLIExit {
 /// Runs one parsed command against the app and prints the result.
 struct CLIRunner {
     let client: ControlClient
-    var out: (String) -> Void = { print($0) }
+    /// Unbuffered, like `err`: over SSH stdout is a pipe, and stdio would hold
+    /// `watch`'s events back in a 4 KB buffer.
+    var out: (String) -> Void = { FileHandle.standardOutput.write(Data(($0 + "\n").utf8)) }
     var err: (String) -> Void = { FileHandle.standardError.write(Data(($0 + "\n").utf8)) }
     /// How often `--wait` checks a sign-in, in seconds.
     var pollInterval: TimeInterval = 1
