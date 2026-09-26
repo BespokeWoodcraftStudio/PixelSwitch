@@ -224,7 +224,7 @@ private func sample(_ session: Double?, _ weekly: Double?,
         c.id: sample(10, 20, weeklyResetsIn: 30),    // binding 20, resets in 30 h
         d.id: sample(10, 40, weeklyResetsIn: 10),    // binding 40, resets in 10 h
     ]
-    check(plan(three, .mostRoom) == "windows/threshold: C,D,B", "rules: most room left ranks by lowest use", plan(three, .mostRoom))
+    check(plan(three, .mostRoom) == "windows/threshold: C,D,B", "rules: most room left ranks by lowest use when thresholds are equal", plan(three, .mostRoom))
     check(plan(three, .myOrder) == "windows/threshold: B,C,D", "rules: my order keeps the list's order", plan(three, .myOrder))
     check(plan(three, .resetsSoonest) == "windows/threshold: D,C,B", "rules: resets soonest ranks by the weekly reset", plan(three, .resetsSoonest))
 
@@ -267,6 +267,18 @@ private func sample(_ session: Double?, _ weekly: Double?,
     // Most room: equal use keeps the list's order, so the result never flickers.
     let equal: [UUID: UsageAPIResponse] = [a.id: sample(95, 40), b.id: sample(10, 30), c.id: sample(10, 30)]
     check(plan(equal, .mostRoom, candidates: [c, b]) == "windows/threshold: C,B", "rules: most room left breaks a tie by the list's order")
+
+    // Founder, 2026-09-25: "Most room left" means room left under each account's OWN
+    // threshold. X at 60% of a 70% threshold has 10 points left; Y at 65% of a 100%
+    // threshold has 35. Y has more room, although its use is higher.
+    let x = Account(email: "x@x.com", displayName: "X", switchThreshold: 70)
+    let y = Account(email: "y@x.com", displayName: "Y", switchThreshold: 100)
+    let ownRoom: [UUID: UsageAPIResponse] = [a.id: sample(95, 40), x.id: sample(10, 60), y.id: sample(10, 65)]
+    check(plan(ownRoom, .mostRoom, candidates: [x, y]) == "windows/threshold: Y,X",
+          "rules: most room left ranks by room under each account's own threshold", plan(ownRoom, .mostRoom, candidates: [x, y]))
+    let ownRoomTie: [UUID: UsageAPIResponse] = [a.id: sample(95, 40), x.id: sample(10, 50, weeklyResetsIn: 30), y.id: sample(10, 60, weeklyResetsIn: 30)]
+    check(plan(ownRoomTie, .resetsSoonest, candidates: [x, y]) == "windows/threshold: Y,X",
+          "rules: resets soonest breaks a tie by room under each account's own threshold", plan(ownRoomTie, .resetsSoonest, candidates: [x, y]))
 }
 
 // MARK: - Switching early to use quota before it resets

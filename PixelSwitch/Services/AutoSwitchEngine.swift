@@ -3,7 +3,8 @@ import Foundation
 /// How auto-switch picks the next account among the eligible ones
 /// (Settings → General → Auto-switch → "Choose the next account by").
 enum AutoSwitchStrategy: String, CaseIterable, Codable, Sendable {
-    /// Fable room first, then the lowest utilization. Today's behaviour, and the default.
+    /// Fable room first, then the most room left under each account's own
+    /// threshold (with equal thresholds, the lowest use). The default.
     case mostRoom
     /// The accounts list's own order, always from the top: a higher account
     /// that has freed up again beats the next one down.
@@ -310,6 +311,10 @@ enum AutoSwitchEngine {
             /// Position in `candidates`, i.e. in the user's order.
             let position: Int
             let util: Double
+            /// Points left under this account's own threshold: what "most room"
+            /// means (founder, 2026-09-25), so an account at 65% of a 100%
+            /// threshold has more room than one at 60% of a 70% threshold.
+            let room: Double
             let keepsFable: Bool
             /// The weekly reset in whole minutes since 1970, or nil when unknown.
             /// Whole minutes because the API stamps each reading with the
@@ -330,7 +335,7 @@ enum AutoSwitchEngine {
             let keepsFable = utilization(usage, limit: .fable, asOf: now).map { $0 <= own - hysteresisPct } ?? false
             let resetMinute = weeklyReset(usage, limit: limit, asOf: now)
                 .map { ($0.timeIntervalSince1970 / 60).rounded(.down) }
-            return Ranked(account: candidate, position: position, util: util,
+            return Ranked(account: candidate, position: position, util: util, room: own - util,
                           keepsFable: keepsFable, resetMinute: resetMinute)
         }
 
@@ -339,10 +344,10 @@ enum AutoSwitchEngine {
         case .mostRoom:
             // Accounts with Fable to spare first, so a session/weekly switch
             // does not land on an account that is out of Fable and force a
-            // second switch minutes later; then most headroom first (lowest
-            // known utilization); then the user's order, so a tie is stable.
+            // second switch minutes later; then most room under each account's
+            // own threshold; then the user's order, so a tie is stable.
             ordered = eligible.sorted {
-                ($0.keepsFable ? 0 : 1, $0.util, $0.position) < ($1.keepsFable ? 0 : 1, $1.util, $1.position)
+                ($0.keepsFable ? 0 : 1, -$0.room, $0.position) < ($1.keepsFable ? 0 : 1, -$1.room, $1.position)
             }
         case .myOrder:
             // Already in the user's order: always from the top.
@@ -353,7 +358,7 @@ enum AutoSwitchEngine {
                 case let (x?, y?) where x != y: return x < y
                 case (.some, nil): return true
                 case (nil, .some): return false
-                default: return (a.util, a.position) < (b.util, b.position)
+                default: return (-a.room, a.position) < (-b.room, b.position)
                 }
             }
         }
