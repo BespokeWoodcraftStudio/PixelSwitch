@@ -75,6 +75,15 @@ targets:
       - target: PixelSwitchWidgetExtension
         embed: true
         codeSign: true
+      # The `pixelswitch` command-line tool, copied to Contents/Helpers.
+      # Not linked; CI signs it (see .github/workflows/build.yml).
+      - target: pixelswitch
+        embed: true
+        link: false
+        codeSign: false
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
       - package: Sparkle
 
   PixelSwitchWidgetExtension:
@@ -111,3 +120,22 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.application-groups:
           - $(TeamIdentifierPrefix)ai.pixelventures.pixelswitch
+
+  # `pixelswitch`: remote control from the command line or an AI (MCP).
+  pixelswitch:
+    type: tool
+    platform: macOS
+    sources:
+      - path: PixelSwitchCLI
+      - path: PixelSwitch/Control/ControlProtocol.swift
+    settings:
+      base:
+        PRODUCT_NAME: pixelswitch
+        PRODUCT_BUNDLE_IDENTIFIER: ai.pixelventures.pixelswitch.cli
+        MARKETING_VERSION: "1.1"
+        CURRENT_PROJECT_VERSION: "22"
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        SKIP_INSTALL: true

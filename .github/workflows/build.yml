@@ -114,6 +114,13 @@ jobs:
             fi
           done
 
+          # The pixelswitch command-line tool (Contents/Helpers). Signed
+          # before the app so the app's seal covers the signed tool.
+          codesign --force --options runtime --timestamp \
+            --sign "$IDENTITY" \
+            --identifier ai.pixelventures.pixelswitch.cli \
+            "$APP/Contents/Helpers/pixelswitch"
+
           # Widget extension with its own entitlements file
           # The entitlements files carry $(TeamIdentifierPrefix), which Xcode
           # expands at signing time but raw codesign does not.
