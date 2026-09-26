@@ -418,6 +418,62 @@ final class AppState: ObservableObject {
         log.info("[updateAccountLabel] Set label for \(account.email): \(trimmed ?? "nil")")
     }
 
+    // MARK: - Per-account threshold and priority order
+
+    /// The threshold auto-switch applies to `account`: its own when set, else
+    /// the default from Settings → General. Read from `accounts` by id, so a
+    /// stale copy (such as `activeAccount` held across an await) still gets
+    /// the value saved most recently.
+    func effectiveSwitchThreshold(for account: Account) -> Double {
+        let stored = accounts.first(where: { $0.id == account.id }) ?? account
+        return AutoSwitchSettings.effectiveThreshold(own: stored.switchThreshold,
+                                                     defaultThreshold: AutoSwitchSettings.defaultThreshold)
+    }
+
+    /// Sets `account`'s own threshold, kept within 50–100; nil (or a value that
+    /// is not a number) clears it back to the default. Saves.
+    func setSwitchThreshold(_ threshold: Double?, for account: Account) {
+        guard let index = accounts.firstIndex(where: { $0.id == account.id }) else {
+            log.warning("[setSwitchThreshold] No account \(account.id)")
+            return
+        }
+        let value = AutoSwitchSettings.normalizedAccountThreshold(threshold)
+        guard accounts[index].switchThreshold != value else { return }
+        accounts[index].switchThreshold = value
+        if accounts[index].isActive {
+            activeAccount = accounts[index]
+        }
+        saveAccounts()
+        log.info("[setSwitchThreshold] \(account.id): \(value.map { String(format: "%.0f%%", $0) } ?? "default")")
+    }
+
+    /// Puts the accounts list in the order `orderedIds` gives. That order is
+    /// the priority "My order" follows and the order every list shows.
+    /// Returns false, and changes nothing, unless `orderedIds` names every
+    /// current account exactly once.
+    @discardableResult
+    func setAccountOrder(_ orderedIds: [UUID]) -> Bool {
+        guard let reordered = AccountOrder.reordered(accounts, by: orderedIds) else {
+            log.warning("[setAccountOrder] Refused: the order does not name each of the \(self.accounts.count) accounts exactly once")
+            return false
+        }
+        applyOrder(reordered)
+        return true
+    }
+
+    /// SwiftUI's `onMove` for the Settings → Accounts list. Saves.
+    func moveAccounts(fromOffsets source: IndexSet, toOffset destination: Int) {
+        applyOrder(AccountOrder.moving(accounts, fromOffsets: source, toOffset: destination))
+    }
+
+    private func applyOrder(_ reordered: [Account]) {
+        guard reordered.map(\.id) != accounts.map(\.id) else { return }
+        accounts = reordered
+        // The widget lists accounts in this order too.
+        saveAccounts(refreshWidget: true)
+        log.info("[order] Accounts reordered: \(reordered.map { $0.id.uuidString.prefix(8) }.joined(separator: ", "))")
+    }
+
     func removeAccount(_ account: Account) {
         log.info("[removeAccount] Removing account \(account.id)")
         keychain.removeAccountBackup(forAccountId: account.id.uuidString)

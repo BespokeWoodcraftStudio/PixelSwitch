@@ -8,6 +8,7 @@ import Foundation
     perAccountThresholdTests()
     strategyTests()
     earlyDrainTests()
+    accountOrderTests()
 }
 
 /// Fixtures shared by every case in this file.
@@ -355,4 +356,32 @@ private func sample(_ session: Double?, _ weekly: Double?,
           "rules: verification: 85% passes as a drain (1-point room) but not as a threshold switch (10-point), and a drain needs the active reset and the windows limit",
           "\(String(describing: asDrain)) \(String(describing: asThreshold)) \(String(describing: noActiveReset)) \(String(describing: onFable))")
     check(AutoSwitchEngine.drainMinimumRoom == 1.0, "rules: the drain's minimum room is 1 percentage point")
+}
+
+// MARK: - The accounts list's order
+
+@MainActor private func accountOrderTests() {
+    let a = Account(email: "a@x.com", displayName: "A")
+    let b = Account(email: "b@x.com", displayName: "B")
+    let c = Account(email: "c@x.com", displayName: "C")
+    let d = Account(email: "d@x.com", displayName: "D")
+    let removed = Account(email: "gone@x.com", displayName: "Gone")
+    let list = [a, b, c, d]
+    func names(_ accounts: [Account]?) -> String { accounts.map { $0.map(\.displayName).joined() } ?? "refused" }
+
+    check(names(AccountOrder.reordered(list, by: [c.id, a.id, d.id, b.id])) == "CADB", "order: a full permutation is applied")
+    check(names(AccountOrder.reordered(list, by: list.map(\.id))) == "ABCD", "order: the same order is accepted unchanged")
+    check(names(AccountOrder.reordered(list, by: [a.id, b.id, c.id])) == "refused", "order: leaving an account out is refused")
+    check(names(AccountOrder.reordered(list, by: [a.id, b.id, c.id, removed.id])) == "refused", "order: naming a removed account is refused")
+    check(names(AccountOrder.reordered(list, by: [a.id, b.id, c.id, d.id, removed.id])) == "refused", "order: an extra account is refused")
+    check(names(AccountOrder.reordered(list, by: [a.id, a.id, c.id, d.id])) == "refused", "order: repeating an account is refused")
+    check(names(AccountOrder.reordered([], by: [])) == "", "order: no accounts and an empty order is fine")
+
+    func moved(_ from: [Int], to: Int) -> String { AccountOrder.moving(list, fromOffsets: IndexSet(from), toOffset: to).map(\.displayName).joined() }
+    check(moved([0], to: 3) == "BCAD", "order: dragging the first account down to above the last", moved([0], to: 3))
+    check(moved([3], to: 0) == "DABC", "order: dragging the last account to the top", moved([3], to: 0))
+    check(moved([1, 2], to: 4) == "ADBC", "order: dragging two accounts to the bottom", moved([1, 2], to: 4))
+    check(moved([1], to: 2) == "ABCD" && moved([1], to: 1) == "ABCD", "order: dropping an account where it already is changes nothing")
+    check(moved([9], to: 0) == "ABCD", "order: an offset outside the list is ignored")
+    check(moved([0], to: 99) == "BCDA", "order: a destination past the end moves to the bottom")
 }

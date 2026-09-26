@@ -16,6 +16,7 @@ swiftc -swift-version 6 \
   PixelSwitch/Models/BrandColor.swift \
   PixelSwitch/Models/AccountPalette.swift \
   PixelSwitch/Models/Account.swift \
+  PixelSwitch/Models/AccountOrder.swift \
   PixelSwitch/Models/String+Obfuscation.swift \
   PixelSwitch/Models/EmailDisplay.swift \
   PixelSwitch/Services/AutoSwitchEngine.swift \
