@@ -14,6 +14,7 @@ import Foundation
     runControlCLIParserTests()
     runControlCLIOutputTests()
     runControlMCPTests()
+    runControlInstallerTests()
 }
 
 /// Shared helpers, in one namespace so nothing collides with other test files.
@@ -726,4 +727,59 @@ extension ControlTestKit {
     check(reply(#"{"jsonrpc":"2.0","id":11,"method":"ping"}"#)?["result"] == .object([:]), "mcp: ping answers")
     check(reply(#"{"jsonrpc":"2.0","id":12,"method":"resources/list"}"#)?["error"]?["code"] == .number(-32601), "mcp: an unknown method is method-not-found")
     check(reply("garbage")?["error"]?["code"] == .number(-32700), "mcp: garbage is a parse error")
+}
+
+// MARK: - Command-line tool installer
+
+@MainActor func runControlInstallerTests() {
+    let dir = ControlTestKit.makeTempDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let app = dir.appendingPathComponent("PixelSwitch.app/Contents/Helpers", isDirectory: true)
+    try? FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+    let tool = app.appendingPathComponent("pixelswitch").path
+    FileManager.default.createFile(atPath: tool, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
+    let link = dir.appendingPathComponent("home/.local/bin/pixelswitch").path
+
+    check(CommandLineToolInstaller.status(linkPath: link, toolPath: tool) == .notInstalled, "installer: nothing there reads as not installed")
+    check((try? CommandLineToolInstaller.install(linkPath: link, toolPath: tool)) == .installed, "installer: install creates ~/.local/bin and the link")
+    check((try? FileManager.default.destinationOfSymbolicLink(atPath: link)) == tool, "installer: the link points into the app, so updates keep it current")
+    check((try? CommandLineToolInstaller.install(linkPath: link, toolPath: tool)) == .installed, "installer: installing twice is harmless")
+
+    try? FileManager.default.removeItem(atPath: link)
+    try? FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "/Applications/Old/PixelSwitch.app/Contents/Helpers/pixelswitch")
+    check(CommandLineToolInstaller.status(linkPath: link, toolPath: tool) == .linkedToOtherCopy("/Applications/Old/PixelSwitch.app/Contents/Helpers/pixelswitch"),
+          "installer: a link to another copy of PixelSwitch is recognised")
+    check((try? CommandLineToolInstaller.install(linkPath: link, toolPath: tool)) == .installed, "installer: it is repointed here")
+
+    try? FileManager.default.removeItem(atPath: link)
+    try? FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "/usr/local/bin/something-else")
+    check(CommandLineToolInstaller.status(linkPath: link, toolPath: tool) == .occupied, "installer: a link to something else is not PixelSwitch's")
+    try? FileManager.default.removeItem(atPath: link)
+    FileManager.default.createFile(atPath: link, contents: Data("mine".utf8))
+    do {
+        try CommandLineToolInstaller.install(linkPath: link, toolPath: tool)
+        check(false, "installer: someone else's file is never overwritten")
+    } catch let error as CommandLineToolInstaller.InstallError {
+        check(error == .occupied(link) && (try? String(contentsOfFile: link, encoding: .utf8)) == "mine", "installer: someone else's file is never overwritten")
+    } catch {
+        check(false, "installer: someone else's file is never overwritten", "\(error)")
+    }
+    do {
+        try CommandLineToolInstaller.install(linkPath: dir.appendingPathComponent("x/pixelswitch").path, toolPath: dir.appendingPathComponent("missing").path)
+        check(false, "installer: a missing tool is reported")
+    } catch let error as CommandLineToolInstaller.InstallError {
+        if case .toolMissing = error { check(true, "installer: a missing tool is reported") } else { check(false, "installer: a missing tool is reported") }
+    } catch {
+        check(false, "installer: a missing tool is reported")
+    }
+
+    let config = CommandLineToolInstaller.mcpConfiguration(host: "studio.local", linkPath: "/Users/me/.local/bin/pixelswitch")
+    let parsed = try? ControlCoding.decoder.decode(JSONValue.self, from: Data(config.utf8))
+    check(parsed?["mcpServers"]?["pixelswitch"]?["command"] == .string("ssh")
+          && parsed?["mcpServers"]?["pixelswitch"]?["args"] == .array([.string("studio.local"), .string("/Users/me/.local/bin/pixelswitch"), .string("mcp")]),
+          "installer: the MCP snippet runs the tool over SSH by its absolute path", config)
+    check(CommandLineToolInstaller.sshExample(host: "studio.local", linkPath: "/Users/me/.local/bin/pixelswitch") == "ssh studio.local /Users/me/.local/bin/pixelswitch status",
+          "installer: the SSH example is one line")
+    check(CommandLineToolInstaller.isPixelSwitchTool("/Applications/PixelSwitch.app/Contents/Helpers/pixelswitch") && !CommandLineToolInstaller.isPixelSwitchTool("/usr/bin/pixelswitch"),
+          "installer: only a tool inside an app counts as PixelSwitch's")
 }
