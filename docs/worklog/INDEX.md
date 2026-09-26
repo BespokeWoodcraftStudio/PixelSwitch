@@ -29,3 +29,6 @@ that file for the full entry. Start here to get up to speed on the project.
 - [WL-2026-09-25-008](./2026-09-25.md) — 1.2 test build handed to the founder with the hand-check page — _chore/wip_
 - [WL-2026-09-25-009](./2026-09-25.md) — Released 1.2 through the updater before the hand checks (founder is the only user) — _decision/done_
 - [WL-2026-09-25-010](./2026-09-25.md) — release.sh no longer starts a second release build (the repo stopped being a fork) — _fix/done_
+
+## 2026-09-26
+- [WL-2026-09-26-001](./2026-09-26.md) — 1.3: Update automatically (Settings → About), released and verified — _feature/done_
