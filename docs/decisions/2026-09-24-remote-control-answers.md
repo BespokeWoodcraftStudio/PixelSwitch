@@ -86,3 +86,22 @@ What follows:
 - "Most room left" ranks by the room left under each account's own threshold (a change to Plan A Task 3, made with a test).
 - One round of hand checks, on one build with all three parts, after Part C.
 - No Xcode for now; GitHub builds the app. Revisit later.
+
+## Release 1.2 before the hand checks, 2026-09-25
+
+In chat, after the test DMG was handed over. He asked:
+
+> why can't I just use the updater from the PixelSwitch version I'm already running?
+
+The answer given: the updater reads only the latest release's appcast. A branch build is not in it and carries the same build number (22) as 1.1. Publishing it would release it to every user before the hand checks.
+
+He replied, verbatim:
+
+> nobody has the software but me. I'm the only one using it.
+
+What follows:
+- Taken as a go to release 1.2 now, so his running 1.1 updates itself.
+- The hand checks still happen, on the released 1.2; anything they find ships in 1.3.
+- The stacked branches part-a, part-b and part-c were fast-forwarded into main. v1.2 (build 23) was tagged, and CI run 36221957278 publishes it.
+- The test DMG was removed from Downloads.
+- Standing consequence: PixelSwitch has one user, the founder. "Don't release before the hand checks" protects nobody, so releasing through the updater and checking afterwards is fine.
