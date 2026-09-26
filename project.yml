@@ -54,6 +54,9 @@ targets:
         SUEnableAutomaticChecks: true
         # Every 6 hours, so "Update automatically" picks up a release the same day.
         SUScheduledCheckInterval: 21600
+        # "Update automatically" is ticked by default (founder, 2026-09-26); unticking
+        # it saves SUAutomaticallyUpdate = NO in user defaults, which wins over this.
+        SUAutomaticallyUpdate: true
         # PixelSwitch public EdDSA key. The private half lives in the founder's
         # login keychain (Sparkle generate_keys, account "pixelswitch") and in the
         # `SPARKLE_EDDSA_KEY` GitHub secret used by CI to sign each DMG.

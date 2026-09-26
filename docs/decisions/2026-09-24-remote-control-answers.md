@@ -105,3 +105,13 @@ What follows:
 - The stacked branches part-a, part-b and part-c were fast-forwarded into main. v1.2 (build 23) was tagged, and CI run 36221957278 publishes it.
 - The test DMG was removed from Downloads.
 - Standing consequence: PixelSwitch has one user, the founder. "Don't release before the hand checks" protects nobody, so releasing through the updater and checking afterwards is fine.
+
+## Update automatically on by default, 2026-09-26
+
+In chat, after 1.3 shipped with the box unticked by default. Verbatim:
+
+> I notice that by default it's not checked. You should have it checked by default.  What I mean is the checkbox for "Update automatically."
+
+What follows:
+- `SUAutomaticallyUpdate: true` is in the app's Info.plist (project.yml). Sparkle uses it until someone unticks the box, which saves NO in user defaults, and that wins.
+- Released as 1.4. His own Mac already had the box ticked (SUAutomaticallyUpdate = 1 in his defaults, read 2026-09-26), so his 1.3 should install 1.4 by itself within about 6 hours. That is the first end-to-end proof of automatic updates.

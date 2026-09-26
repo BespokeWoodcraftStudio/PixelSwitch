@@ -66,7 +66,10 @@ final class SettingsStore {
         case .claudeBinaryPath:
             return .string(defaults.string(forKey: kClaudeBinaryPathPreferenceKey) ?? "")
         case .autoUpdate:
-            return .bool(updateChecker?.installsAutomatically ?? defaults.bool(forKey: "SUAutomaticallyUpdate"))
+            // Sparkle's order: the saved choice, else the Info.plist default (on).
+            return .bool(updateChecker?.installsAutomatically
+                         ?? (defaults.object(forKey: "SUAutomaticallyUpdate") as? Bool
+                             ?? Bundle.main.object(forInfoDictionaryKey: "SUAutomaticallyUpdate") as? Bool ?? false))
         }
     }
 

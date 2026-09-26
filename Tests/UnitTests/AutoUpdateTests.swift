@@ -15,4 +15,9 @@ import Foundation
     check(may(signIn: .succeeded(accountId: UUID())) && may(signIn: .failed(message: "x")) && may(signIn: .cancelled),
           "auto-update: a finished sign-in does not hold it back")
     check(AutoUpdatePolicy.retryInterval == 60, "auto-update: while busy it looks again every minute")
+    // On by default (founder, 2026-09-26): Sparkle takes the default from the
+    // app's Info.plist until someone unticks the box.
+    let spec = (try? String(contentsOfFile: "project.yml", encoding: .utf8)) ?? ""
+    check(spec.contains("SUAutomaticallyUpdate: true"),
+          "auto-update: \"Update automatically\" is on by default for a new install (SUAutomaticallyUpdate in project.yml)")
 }
