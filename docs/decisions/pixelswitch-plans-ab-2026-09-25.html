@@ -1,0 +1,319 @@
+<!doctype html>
+<!--
+  THE FOUNDER QUESTIONS TEMPLATE. Standing rule, founder, 2026-09-19: every question for him is an HTML page
+  with multiple choice options, a box for his own words on every card, and a Copy my answers button whose
+  block he pastes into the session. Never a question only in chat.
+  HOW TO USE: copy this file into the project's decisions folder (PixelOS: program/decisions/
+  founder-questions-round-<N>-<date>-v1.html), change ONLY the PAGE object and the <title>, render it at 390
+  and 1280 in both themes and look at it, test the Copy button, commit it, and link it from the final
+  message and the handoff with its full path. Recommended option first. Every question carries a default
+  that stands if he says nothing, and the page says up front whether anything on it blocks the work.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>PixelSwitch: build plans A and B</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --surface: #ffffff; --ink: #16181d; --muted: #565b66; --line: #dcd9d0;
+    --accent: #1f4fd8; --accent-ink: #ffffff; --soft: #eef1fb; --ok: #17694a; --ok-soft: #e4f3ec; --warn: #8a5a00; --warn-soft: #fbf1dc;
+    --radius: 14px; --pad: clamp(16px, 3vw, 48px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a21; --ink: #eceef2; --muted: #a3a9b6; --line: #2a2f3a;
+      --accent: #8fb0ff; --accent-ink: #0b1020; --soft: #1c2436; --ok: #7fd6ad; --ok-soft: #13291f; --warn: #f0c46a; --warn-soft: #2b2312;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; padding-bottom: 120px; }
+  .wrap { max-width: 1800px; margin: 0 auto; padding: 0 var(--pad); }
+  header.top { padding: clamp(28px, 4vw, 56px) 0 8px; }
+  .eyebrow { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  h1 { font-size: clamp(28px, 3.4vw, 46px); line-height: 1.1; letter-spacing: -.02em; margin: 10px 0 14px; }
+  .lede { font-size: clamp(17px, 1.3vw, 20px); color: var(--muted); margin: 0 0 8px; }
+  .lede strong { color: var(--ink); }
+  .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 22px 0 8px; padding: 0; list-style: none; counter-reset: how; }
+  .how li { counter-increment: how; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px 14px 52px; position: relative; }
+  .how li::before { content: counter(how); position: absolute; left: 14px; top: 13px; width: 26px; height: 26px; border-radius: 50%; background: var(--soft); color: var(--accent); font-weight: 700; font-size: 14px; display: grid; place-items: center; }
+  h2 { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 40px 0 12px; }
+
+  /* The comparison table. It never scrolls sideways: on a narrow screen each row becomes a block. */
+  table.sum { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; table-layout: fixed; }
+  table.sum th, table.sum td { text-align: left; vertical-align: top; padding: 13px 16px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  table.sum th { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; background: var(--soft); }
+  table.sum tr:last-child td { border-bottom: 0; }
+  table.sum col.n { width: 56px; } table.sum col.state { width: 170px; }
+  table.sum a { color: var(--accent); font-weight: 600; }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .pill.open { background: var(--warn-soft); color: var(--warn); } .pill.done { background: var(--ok-soft); color: var(--ok); }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); margin: 0 0 18px; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); scroll-margin-top: 16px; }
+  .card > div { padding: clamp(18px, 2vw, 30px); min-width: 0; }
+  .card .ask { border-left: 1px solid var(--line); }
+  .num { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .card h3 { font-size: clamp(21px, 1.7vw, 27px); line-height: 1.2; letter-spacing: -.01em; margin: 6px 0 12px; }
+  .card p { margin: 0 0 12px; overflow-wrap: anywhere; }
+  .card .label { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 18px 0 6px; }
+  .card a { color: var(--accent); }
+  .steps { margin: 0 0 12px; padding-left: 22px; } .steps li { margin: 0 0 6px; }
+  code { font: 0.92em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--soft); padding: .1em .4em; border-radius: 5px; overflow-wrap: anywhere; }
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  legend { font-weight: 600; padding: 0; margin: 0 0 10px; }
+  .option { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; align-items: start; padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; margin: 0 0 9px; cursor: pointer; min-height: 48px; }
+  .option:hover { border-color: var(--accent); }
+  .option:has(input:checked) { border-color: var(--accent); background: var(--soft); box-shadow: inset 0 0 0 1px var(--accent); }
+  .option input { width: 20px; height: 20px; margin: 3px 0 0; accent-color: var(--accent); }
+  .option b { display: block; } .option span.note { display: block; color: var(--muted); font-size: 15px; margin-top: 2px; }
+  .rec { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 99px; background: var(--ok-soft); color: var(--ok); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; vertical-align: 2px; }
+  label.c { display: block; font-weight: 600; margin: 16px 0 6px; }
+  textarea { width: 100%; min-height: 86px; resize: vertical; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 11px; padding: 11px 13px; }
+  textarea:focus-visible, .option input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  #out { min-height: 260px; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -8px 30px rgba(0,0,0,.08); z-index: 5; }
+  .bar .wrap { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+  .bar .status { flex: 1 1 240px; min-width: 0; color: var(--muted); }
+  .bar .status strong { color: var(--ink); }
+  button { font: inherit; font-weight: 650; border-radius: 11px; padding: 12px 20px; min-height: 48px; cursor: pointer; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:active { transform: translateY(1px); }
+
+  @media (max-width: 900px) {
+    .how { grid-template-columns: 1fr; }
+    .card { grid-template-columns: 1fr; } .card .ask { border-left: 0; border-top: 1px solid var(--line); }
+    table.sum, table.sum tbody, table.sum tr, table.sum td { display: block; width: 100%; }
+    table.sum colgroup, table.sum thead { display: none; }
+    table.sum tr { border-bottom: 1px solid var(--line); padding: 8px 0; } table.sum tr:last-child { border-bottom: 0; }
+    table.sum td { border: 0; padding: 4px 16px; }
+    table.sum td[data-h]::before { content: attr(data-h) ": "; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+    .bar .wrap { gap: 6px 8px; padding-top: 8px; padding-bottom: 10px; }
+    .bar .status { flex: 1 1 100%; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .bar .status .long { display: none; }
+    .bar button { flex: 1 1 0; white-space: nowrap; padding: 10px 12px; }
+    body { padding-bottom: 110px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow" id="eyebrow"></div>
+    <h1 id="title"></h1>
+    <p class="lede" id="lede"></p>
+    <ol class="how">
+      <li>Pick one answer on each card. The first option is the one I recommend.</li>
+      <li>Add a comment anywhere you want to say more, or to overrule every option.</li>
+      <li>Press <strong>Copy my answers</strong> at the bottom and paste it into the Claude session.</li>
+    </ol>
+  </header>
+
+  <h2>All of it on one screen</h2>
+  <table class="sum" id="sum">
+    <colgroup><col class="n"><col><col><col><col class="state"></colgroup>
+    <thead><tr><th>#</th><th>Decision</th><th>What I recommend</th><th>If you say nothing</th><th>Your answer</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>The decisions</h2>
+  <main id="cards"></main>
+
+  <h2>What you will paste back</h2>
+  <label class="c" for="all-comment">Anything else you want me to know</label>
+  <textarea id="all-comment" placeholder="Optional. Anything that is not about one card."></textarea>
+  <label class="c" for="out">Your answers, as they will be pasted. It updates as you go. If the button does not work, click in this box, select all, and copy.</label>
+  <textarea id="out" readonly></textarea>
+</div>
+
+<div class="bar" role="region" aria-label="Your answers">
+  <div class="wrap">
+    <div class="status" id="status" aria-live="polite"></div>
+    <button type="button" id="save">Save as a file</button>
+    <button type="button" class="primary" id="copy">Copy my answers</button>
+  </div>
+</div>
+
+<script>
+/* ==========================================================================================
+   THE ONLY PART THAT CHANGES FROM ROUND TO ROUND. Everything below PAGE is rendered from it.
+   html: true fields may carry links and <code>. Put the recommended option FIRST.
+   ========================================================================================== */
+var PAGE = {
+  key: 'pixelswitch-plans-ab-2026-09-25',
+  heading: 'PIXELSWITCH: FOUNDER QUESTIONS, BUILD PLANS A AND B (2026-09-25)',
+  eyebrow: 'PixelSwitch · build plans A and B · 2026-09-25',
+  title: 'Approve the build plans for auto-switch rules and sign-in links',
+  lede: '<strong>Card 1 blocks building Part A and Part B; the other three have defaults and block nothing.</strong> I keep writing the Part C (remote control) plan while you look at this, in the same single lane.',
+  questions: [
+    {
+      id: 'approve-plans',
+      title: 'Approve the plans for Part A and Part B',
+      what: '<b>Part A, auto-switch rules</b> (9 steps): your own threshold per account, the "choose the next account by" setting (most room left, my order, resets soonest), switching early to use quota before it resets with its own on/off switch, and a new Settings → Accounts tab where you drag accounts into order and set each one\'s threshold. It was tried step by step on a copy of the code first: 205 automatic checks pass and the app compiles.<br><br><b>Part B, sign-in links</b> (8 steps): the sign-in window with Open, Open in (every browser you have) and Copy, the code box for another device, and Add Current Account / Sign In New Account buttons in Settings → Accounts. Also tried on a copy first: 146 new checks pass, including a run against a stand-in <code>claude</code> that behaves like the real one.<br><br>Following your single-lane rule, I build them myself in this session, one step at a time, no helper agents. Full plans: <a href="../superpowers/plans/2026-09-25-part-a-auto-switch-rules.md">Part A</a>, <a href="../superpowers/plans/2026-09-25-part-b-sign-in-links.md">Part B</a>.',
+      why: 'These are the step-by-step instructions every line of code will follow. They match the design you approved; the few choices they had to make that the design did not cover are the next three cards.',
+      nothing: 'Nothing is built until you say yes.',
+      recommend: 'Approve; build them in this session, one after the other',
+      options: [
+        { label: 'Approve; build Part A, then Part B, in this session', note: 'I start Part A right away and tell you when each part is done.' },
+        { label: 'Approve, with the changes in my comment', note: 'I change the plans first, then build.' },
+        { label: 'Wait until the Part C plan is written too', note: 'Nothing is built until all three plans are ready.' }
+      ]
+    },
+    {
+      id: 'most-room',
+      title: 'What should "Most room left" mean once accounts have their own thresholds?',
+      what: 'Today "Most room left" picks the account with the lowest usage. With per-account thresholds that can pick the wrong one: an account at 60% whose own threshold is 70% has 10 points left, while one at 65% with a 100% threshold has 35 points left, but the first looks better because its usage number is lower.',
+      why: 'When every account uses the default threshold, both ways pick exactly the same account, so nothing changes for you unless you set different thresholds. When you do, ranking by the room left under each account\'s own threshold avoids switching to an account that trips its limit again minutes later.',
+      nothing: 'The first option: rank by the room left under each account\'s own threshold.',
+      recommend: 'Room left under each account\'s own threshold',
+      options: [
+        { label: 'Rank by the room left under each account\'s own threshold', note: 'Same as today when all thresholds are the default; smarter when they differ.' },
+        { label: 'Keep ranking by lowest usage, as today', note: 'Exactly the old behaviour, even when thresholds differ.' }
+      ]
+    },
+    {
+      id: 'manual-checks',
+      title: 'When do you want to test by hand?',
+      what: 'Some things only a person can check: a real sign-in in two different browsers, dragging accounts into order, what the new windows look like. Each check needs you to install a test build of the app.',
+      why: 'Testing after every part means installing three test builds. Testing once, after Part C, means one build with everything in it. The automatic checks run after every step either way.',
+      nothing: 'The first option: one round of hand checks, on one build, after Part C.',
+      recommend: 'Once, after all three parts',
+      options: [
+        { label: 'Once, on one build with all three parts', note: 'One install, one checklist. Parts A and B wait in their own branches until then.' },
+        { label: 'After each part', note: 'Three installs; problems show up sooner.' }
+      ]
+    },
+    {
+      id: 'xcode',
+      title: 'Install Xcode on this Mac?',
+      what: 'This Mac has only Apple\'s command-line tools, not Xcode. I can still check that all the code compiles (in about 15 seconds), and GitHub builds the real app, as it does for your releases.',
+      why: 'Xcode would let me build and open the app here, which makes checking the new windows faster. It is a large download (about 15 GB), signs in with your Apple ID, and adds load to this laptop, which you asked me to keep low.',
+      nothing: 'The first option: no Xcode; GitHub builds the app.',
+      recommend: 'Not needed',
+      options: [
+        { label: 'Not needed; keep building on GitHub', note: 'No download, no extra load on this laptop.' },
+        { label: 'Install Xcode', note: 'I put the click-by-click steps on the next page; you sign in with your Apple ID.' }
+      ]
+    }
+  ]
+};
+
+/* ================================== the page, rendered ================================== */
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var el = function (tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
+  var store = {
+    read: function () { try { return JSON.parse(localStorage.getItem(PAGE.key) || '{}'); } catch (e) { return {}; } },
+    write: function (v) { try { localStorage.setItem(PAGE.key, JSON.stringify(v)); } catch (e) { /* a private window: the page still works */ } }
+  };
+  var saved = store.read();
+
+  $('eyebrow').textContent = PAGE.eyebrow;
+  $('title').textContent = PAGE.title;
+  $('lede').innerHTML = PAGE.lede;
+
+  var tbody = $('sum').querySelector('tbody');
+  var cards = $('cards');
+  PAGE.questions.forEach(function (q, i) {
+    var n = i + 1;
+    var tr = el('tr');
+    tr.appendChild(el('td', '', String(n)));
+    tr.appendChild(el('td', '', '<a href="#q-' + q.id + '">' + q.title + '</a>'));
+    var r = el('td', '', q.recommend); r.setAttribute('data-h', 'I recommend'); tr.appendChild(r);
+    var d = el('td', '', q.nothing); d.setAttribute('data-h', 'If you say nothing'); tr.appendChild(d);
+    var s = el('td', '', '<span class="pill open" id="pill-' + q.id + '">Not answered</span>'); tr.appendChild(s);
+    tbody.appendChild(tr);
+
+    var card = el('section', 'card'); card.id = 'q-' + q.id;
+    var left = el('div', 'ctx');
+    left.appendChild(el('div', 'num', 'Decision ' + n + ' of ' + PAGE.questions.length));
+    left.appendChild(el('h3', '', q.title));
+    left.appendChild(el('p', '', q.what));
+    left.appendChild(el('div', 'label', 'Why it matters'));
+    left.appendChild(el('p', '', q.why));
+    if (q.steps) {
+      left.appendChild(el('div', 'label', 'How to do it'));
+      var ol = el('ol', 'steps'); q.steps.forEach(function (t) { ol.appendChild(el('li', '', t)); }); left.appendChild(ol);
+    }
+    left.appendChild(el('div', 'label', 'If you say nothing'));
+    left.appendChild(el('p', '', q.nothing));
+    card.appendChild(left);
+
+    var right = el('div', 'ask');
+    var fs = el('fieldset');
+    fs.appendChild(el('legend', '', 'Your answer'));
+    q.options.forEach(function (o, k) {
+      var lab = el('label', 'option');
+      var inp = el('input'); inp.type = 'radio'; inp.name = q.id; inp.value = String(k);
+      if (saved[q.id] && saved[q.id].pick === String(k)) inp.checked = true;
+      lab.appendChild(inp);
+      lab.appendChild(el('span', '', '<b>' + o.label + (k === 0 ? '<span class="rec">Recommended</span>' : '') + '</b><span class="note">' + o.note + '</span>'));
+      fs.appendChild(lab);
+    });
+    right.appendChild(fs);
+    var cl = el('label', 'c', 'Your own words (optional)'); cl.setAttribute('for', 'c-' + q.id); right.appendChild(cl);
+    var ta = el('textarea'); ta.id = 'c-' + q.id; ta.placeholder = 'Add to your answer, or overrule every option above.';
+    if (saved[q.id] && saved[q.id].comment) ta.value = saved[q.id].comment;
+    right.appendChild(ta);
+    card.appendChild(right);
+    cards.appendChild(card);
+  });
+  if (saved._all) $('all-comment').value = saved._all;
+
+  var plain = function (html) { var t = document.createElement('div'); t.innerHTML = html; return (t.textContent || '').replace(/\s+/g, ' ').trim(); };
+
+  function collect() {
+    var state = {}, lines = [PAGE.heading, ''], answered = 0;
+    PAGE.questions.forEach(function (q, i) {
+      var picked = document.querySelector('input[name="' + q.id + '"]:checked');
+      var comment = $('c-' + q.id).value.trim();
+      state[q.id] = { pick: picked ? picked.value : null, comment: comment };
+      var pill = $('pill-' + q.id);
+      if (picked || comment) { answered += 1; pill.className = 'pill done'; pill.textContent = 'Answered'; }
+      else { pill.className = 'pill open'; pill.textContent = 'Not answered'; }
+      lines.push((i + 1) + '. ' + plain(q.title) + ' [' + q.id + ']');
+      if (picked) lines.push('   ANSWER: ' + plain(q.options[Number(picked.value)].label) + (picked.value === '0' ? ' (the recommended one)' : ''));
+      else if (comment) lines.push('   ANSWER: see my comment; I picked none of the options.');
+      else lines.push('   ANSWER: none given. The default stands: ' + plain(q.nothing));
+      if (comment) lines.push('   COMMENT: ' + comment.replace(/\n+/g, '\n            '));
+      lines.push('');
+    });
+    var all = $('all-comment').value.trim();
+    state._all = all;
+    if (all) { lines.push('ANYTHING ELSE: ' + all.replace(/\n+/g, '\n               ')); lines.push(''); }
+    lines.push('(' + answered + ' of ' + PAGE.questions.length + ' answered)');
+    store.write(state);
+    $('out').value = lines.join('\n');
+    $('status').innerHTML = '<strong>' + answered + ' of ' + PAGE.questions.length + '</strong> answered.<span class="long"> Your answers are kept in this browser until you clear them.</span>';
+    return lines.join('\n');
+  }
+
+  document.addEventListener('input', collect);
+  document.addEventListener('change', collect);
+  collect();
+
+  function say(msg) { $('status').innerHTML = '<strong>' + msg + '</strong>'; }
+  $('copy').addEventListener('click', function () {
+    var text = collect();
+    var fallback = function () {
+      var out = $('out'); out.focus(); out.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      say(ok ? 'Copied. Paste it into the Claude session.' : 'Your answers are selected in the box above. Press Command C, then paste into the Claude session.');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { say('Copied. Paste it into the Claude session.'); }, fallback);
+    } else { fallback(); }
+  });
+  $('save').addEventListener('click', function () {
+    var blob = new Blob([collect() + '\n'], { type: 'text/plain' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = PAGE.key + '-answers.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    say('Saved to your Downloads folder as ' + PAGE.key + '-answers.txt.');
+  });
+})();
+</script>
+</body>
+</html>
