@@ -1,7 +1,8 @@
 #!/bin/bash
 # Type-checks the app target with swiftc, without Xcode (this Mac has only the
 # Command Line Tools; full builds, signing and notarization run in CI).
-# Also type-checks the command-line tool when PixelSwitchCLI/ exists.
+# Also type-checks the command-line tool (PixelSwitchCLI/ plus the shared
+# PixelSwitch/Control/ControlProtocol.swift) when PixelSwitchCLI/ exists.
 # The widget is skipped: its #Preview macros need Xcode's PreviewsMacros plugin.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -24,7 +25,7 @@ echo "app: type-check OK (${#APP_SOURCES[@]} files)"
 if [ -d PixelSwitchCLI ]; then
     CLI_SOURCES=()
     while IFS= read -r f; do CLI_SOURCES+=("$f"); done < <(find PixelSwitchCLI -name '*.swift' | sort)
-    [ -f Shared/ControlProtocol.swift ] && CLI_SOURCES+=(Shared/ControlProtocol.swift)
+    CLI_SOURCES+=(PixelSwitch/Control/ControlProtocol.swift)
     swiftc "${COMMON[@]}" "${CLI_SOURCES[@]}"
     echo "cli: type-check OK (${#CLI_SOURCES[@]} files)"
 fi

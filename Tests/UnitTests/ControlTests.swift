@@ -10,6 +10,7 @@ import Foundation
     runControlSettingsCatalogTests()
     runControlAPITests()
     runControlNoTokenTests()
+    runControlSocketTests()
 }
 
 /// Shared helpers, in one namespace so nothing collides with other test files.
@@ -425,4 +426,129 @@ extension ControlTestKit {
     check(offenders.isEmpty, "no token: no result of any method carries a token, credential, secret or refresh field", offenders.joined(separator: ", "))
     let settingsResult = ControlTestKit.call(api, "settings.get")?.result?.compactText ?? ""
     check(!settingsResult.contains("sk-ant-"), "no token: settings carry nothing that looks like a key")
+}
+
+// MARK: - Socket server and client, end to end
+
+@MainActor func runControlSocketTests() {
+    let dir = ControlTestKit.makeTempDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let path = dir.appendingPathComponent("ctl/control.sock").path
+    let app = ControlTestKit.FakeApp()
+    let api = ControlAPI(controller: app)
+    let server = ControlServer(path: path, handler: { line, connection in
+        await api.handle(line, onSubscribe: { connection.markSubscribed() })
+    })
+    do {
+        try server.start()
+    } catch {
+        check(false, "socket: the server starts", "\(error)")
+        return
+    }
+    defer { server.stop() }
+    check(server.isListening, "socket: the server listens")
+    check(ControlTestKit.permissions(path) == 0o600, "socket: the socket is private to this user (0600)", String(ControlTestKit.permissions(path), radix: 8))
+    check(ControlTestKit.permissions((path as NSString).deletingLastPathComponent) == 0o700, "socket: its folder is private (0700)")
+
+    let status = ControlTestKit.offMain { () throws -> String in
+        let client = ControlClient(path: path)
+        try client.connect(launch: false)
+        return try client.call(.statusGet).decode(StatusInfo.self).activeAccountEmail ?? "nil"
+    }
+    check((try? status?.get()) == "alice@work.com", "socket: a client call goes through the real socket and back")
+
+    let busy = ControlTestKit.offMain { () throws -> String in
+        let client = ControlClient(path: path)
+        try client.connect(launch: false)
+        _ = try client.call(.accountsSwitch, .object(["account": .string("nobody")]))
+        return "no error"
+    }
+    if case .failure(let error as ControlError)? = busy {
+        check(error.kind == .notFound && error.candidates.count == 3, "socket: an error reply reaches the client as a ControlError")
+    } else {
+        check(false, "socket: an error reply reaches the client as a ControlError", "\(String(describing: busy))")
+    }
+
+    let line = RPCNotification(method: ControlEvent.notificationMethod,
+                               params: try? JSONValue.encode(ControlEvent(type: "usageUpdated", at: Date(), data: nil))).line
+    let waiter = ControlTestKit.Box<String?>(nil)
+    DispatchQueue.global().async {
+        let client = ControlClient(path: path)
+        var type = "none"
+        if (try? client.connect(launch: false)) != nil, (try? client.call(.eventsSubscribe)) != nil {
+            type = (try? client.nextEvent(until: Date().addingTimeInterval(5)))??.params?["type"]?.stringValue ?? "none"
+        }
+        DispatchQueue.main.async { MainActor.assumeIsolated { waiter.value = type } }
+    }
+    let before = server.subscribers().count
+    ControlTestKit.spin(until: { server.subscribers().count > before }, timeout: 5)
+    server.subscribers().forEach { $0.send(line) }
+    ControlTestKit.spin(until: { waiter.value != nil }, timeout: 5)
+    check(waiter.value == "usageUpdated", "socket: a pushed event reaches a subscribed client", waiter.value ?? "nil")
+
+    let second = ControlServer(path: path, handler: { _, _ in nil })
+    do {
+        try second.start()
+        check(false, "socket: a second copy does not take over a live socket")
+        second.stop()
+    } catch let error as ControlServer.StartError {
+        check(error == .alreadyRunning, "socket: a second copy does not take over a live socket", "\(error)")
+    } catch {
+        check(false, "socket: a second copy does not take over a live socket", "\(error)")
+    }
+
+    let flood = ControlTestKit.offMain { () throws -> Bool in
+        let client = ControlClient(path: path)
+        try client.connect(launch: false)
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        var address = ControlServer.address(path)
+        _ = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        let chunk = [UInt8](repeating: 0x61, count: 64 * 1024)
+        var total = 0
+        while total < ControlProtocol.maxLineBytes + 256 * 1024 {
+            let written = chunk.withUnsafeBytes { write(fd, $0.baseAddress!, $0.count) }
+            if written <= 0 { break }
+            total += written
+        }
+        close(fd)
+        // The server is still serving other clients.
+        return (try? client.call(.statusGet)) != nil
+    }
+    check((try? flood?.get()) == true, "socket: a client that never sends a newline is cut off and others keep working")
+
+    server.stop()
+    check(!FileManager.default.fileExists(atPath: path), "socket: stopping removes the socket file")
+
+    // A socket file left by a crash (nothing listening) is replaced.
+    let stale = socket(AF_UNIX, SOCK_STREAM, 0)
+    var address = ControlServer.address(path)
+    _ = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(stale, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+    close(stale)
+    check(FileManager.default.fileExists(atPath: path) && !ControlServer.canConnect(to: path), "socket: a dead socket file is left behind (the crash case)")
+    let restarted = ControlServer(path: path, handler: { _, _ in nil })
+    check((try? restarted.start()) != nil && restarted.isListening, "socket: a dead socket file is replaced at start")
+    restarted.stop()
+
+    let long = ControlServer(path: "/tmp/" + String(repeating: "x", count: 120), handler: { _, _ in nil })
+    do {
+        try long.start()
+        check(false, "socket: a path too long for macOS is refused clearly")
+    } catch let error as ControlServer.StartError {
+        if case .pathTooLong = error { check(true, "socket: a path too long for macOS is refused clearly") }
+        else { check(false, "socket: a path too long for macOS is refused clearly", "\(error)") }
+    } catch {
+        check(false, "socket: a path too long for macOS is refused clearly", "\(error)")
+    }
+
+    let unreachable = ControlTestKit.offMain { () throws -> String in
+        try ControlClient(path: path).connect(launch: false)
+        return "connected"
+    }
+    if case .failure(let error as ControlClient.ClientError)? = unreachable, case .unreachable = error {
+        check(true, "socket: with the app not running, the client says it is unreachable")
+    } else {
+        check(false, "socket: with the app not running, the client says it is unreachable", "\(String(describing: unreachable))")
+    }
 }
