@@ -38,6 +38,10 @@ struct Account: Identifiable, Codable, Hashable {
     var isActive: Bool
     var lastUsed: Date?
     var customLabel: String?
+    /// This account's own auto-switch threshold, 50–100 percent. nil means it
+    /// uses the default (global) threshold. Saved accounts from before this
+    /// existed decode it as nil, so they behave exactly as they did.
+    var switchThreshold: Double?   // 50...100; nil = use the default (global) threshold
 
     /// Subscription type with first letter capitalized (e.g., "max" → "Max").
     var displaySubscriptionType: String? {
@@ -90,7 +94,8 @@ struct Account: Identifiable, Codable, Hashable {
         subscriptionType: String? = nil,
         isActive: Bool = false,
         lastUsed: Date? = nil,
-        customLabel: String? = nil
+        customLabel: String? = nil,
+        switchThreshold: Double? = nil
     ) {
         self.id = id
         self.email = email
@@ -101,6 +106,7 @@ struct Account: Identifiable, Codable, Hashable {
         self.isActive = isActive
         self.lastUsed = lastUsed
         self.customLabel = customLabel
+        self.switchThreshold = switchThreshold
     }
 }
 

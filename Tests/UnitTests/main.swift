@@ -582,5 +582,7 @@ do {
     check(defaults.data(forKey: oldKey) == nil, "retire: the legacy key is cleared once the read-back succeeds")
 }
 
+runAutoSwitchRulesTests()
+
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

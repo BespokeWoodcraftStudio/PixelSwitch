@@ -1,5 +1,18 @@
 import Foundation
 
+/// How auto-switch picks the next account among the eligible ones
+/// (Settings → General → Auto-switch → "Choose the next account by").
+enum AutoSwitchStrategy: String, CaseIterable, Codable, Sendable {
+    /// Fable room first, then the lowest utilization. Today's behaviour, and the default.
+    case mostRoom
+    /// The accounts list's own order, always from the top: a higher account
+    /// that has freed up again beats the next one down.
+    case myOrder
+    /// The earliest weekly reset first, so quota about to expire is used
+    /// before it is lost. Ties go to most room; an unknown reset ranks last.
+    case resetsSoonest
+}
+
 /// Pure, UI-agnostic auto-switch decision logic.
 ///
 /// Mirrors the proven design in `claude-swap` (threshold + hysteresis): when the
@@ -214,5 +227,72 @@ enum AutoSwitchFableSetting {
 
     static var isOn: Bool {
         UserDefaults.standard.object(forKey: key) as? Bool ?? true
+    }
+}
+
+/// The auto-switch settings, their UserDefaults keys, defaults and ranges.
+/// The Settings window binds to the keys with `@AppStorage`; `AppState` and
+/// (later) the control API read them through the typed readers here, so the
+/// defaults live in one place.
+enum AutoSwitchSettings {
+    static let enabledKey = "autoSwitchEnabled"
+    static let thresholdKey = "autoSwitchThreshold"
+    static let onFableKey = AutoSwitchFableSetting.key
+    static let strategyKey = "autoSwitchStrategy"
+    static let drainEarlyKey = "autoSwitchDrainEarly"
+    static let drainWithinHoursKey = "autoSwitchDrainWithinHours"
+
+    /// A switch threshold, global or per account, in percent.
+    static let thresholdRange = 50.0...100.0
+    /// How soon a weekly reset must be for an early drain, in hours.
+    static let drainHoursRange = 1.0...72.0
+
+    /// The default threshold when none has been saved.
+    static let fallbackThreshold = 90.0
+    /// The drain window when none has been saved.
+    static let fallbackDrainWithinHours = 24.0
+
+    /// The global default threshold (Settings → General → Default threshold).
+    /// Unset (read as 0) means 90, as before; anything else is kept in range.
+    static var defaultThreshold: Double {
+        let stored = UserDefaults.standard.double(forKey: thresholdKey)
+        return stored == 0 ? fallbackThreshold : clampedThreshold(stored)
+    }
+
+    /// The next-account strategy. Unset or unrecognised reads as `.mostRoom`.
+    static var strategy: AutoSwitchStrategy {
+        UserDefaults.standard.string(forKey: strategyKey).flatMap(AutoSwitchStrategy.init(rawValue:)) ?? .mostRoom
+    }
+
+    /// "Switch early to use quota before it resets". On unless turned off.
+    static var drainEarly: Bool {
+        UserDefaults.standard.object(forKey: drainEarlyKey) as? Bool ?? true
+    }
+
+    /// The early-drain window in hours, kept in 1–72. Unset reads as 24.
+    static var drainWithinHours: Double {
+        guard let stored = UserDefaults.standard.object(forKey: drainWithinHoursKey) as? Double, stored.isFinite else {
+            return fallbackDrainWithinHours
+        }
+        return min(max(stored, drainHoursRange.lowerBound), drainHoursRange.upperBound)
+    }
+
+    /// `value` kept within 50–100; a value that is not a number reads as 90.
+    static func clampedThreshold(_ value: Double) -> Double {
+        guard value.isFinite else { return fallbackThreshold }
+        return min(max(value, thresholdRange.lowerBound), thresholdRange.upperBound)
+    }
+
+    /// What a per-account threshold is stored as: nil (use the default) for
+    /// nil or a value that is not a number, else the value kept within 50–100.
+    static func normalizedAccountThreshold(_ value: Double?) -> Double? {
+        guard let value, value.isFinite else { return nil }
+        return clampedThreshold(value)
+    }
+
+    /// The threshold that applies to an account: its own when set, else the
+    /// default, always within 50–100.
+    static func effectiveThreshold(own: Double?, defaultThreshold: Double) -> Double {
+        normalizedAccountThreshold(own) ?? clampedThreshold(defaultThreshold)
     }
 }
