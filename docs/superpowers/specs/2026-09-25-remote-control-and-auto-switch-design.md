@@ -459,3 +459,15 @@ func startSignIn(_ purpose: SignInPurpose) throws -> SignInSession   // throws S
 - The `pixelswitch` CLI target, including MCP mode.
 
 C relies only on the names above from A and B.
+
+## 10. Changes made while writing the plans (2026-09-25)
+
+None of these changes behaviour the founder approved. Each is also listed, with its reason, in the plan that makes it.
+
+- **Part B:** the `BROWSER` helper is written per sign-in into a private temporary folder, not shipped in the app bundle. That means no bundle resource and no signing change, and nothing is left behind. `loginNewAccount()` and `reauthenticateAccount(_:)` are no longer `async`, and `SignInSession` also publishes `notice` and `codeSubmitted`.
+- **Part C:** the protocol file is `PixelSwitch/Control/ControlProtocol.swift`, not `Shared/ControlProtocol.swift`, because `Shared/` is also compiled into the widget.
+  - Accounts can also be named by position (1, 2, …).
+  - There is an extra `pixelswitch accounts sign-in status` command.
+  - MCP mode speaks both the modern 2026-07-28 revision (stateless, `server/discover`) and the legacy `initialize` handshake.
+  - Two test-only environment variables (`PIXELSWITCH_CONTROL_SOCKET`, `PIXELSWITCH_NO_LAUNCH`) keep the integration checks away from the real app.
+- **All parts:** built one at a time, in a single lane with no subagents (founder, 2026-09-25: "limit the utilization on this laptop").
