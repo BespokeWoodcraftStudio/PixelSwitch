@@ -113,46 +113,13 @@ enum AutoSwitchEngine {
         return resets < now ? nil : util
     }
 
-    /// Which limit to act on and where to go, or nil to stay put. Session and
-    /// weekly are checked first; Fable only when they have not triggered a
-    /// switch, since a Fable target must have session and weekly room anyway.
+    /// Which limit to act on, by which rule, and where to go; nil to stay put.
+    /// Session and weekly are checked first; Fable only when they have not
+    /// triggered a switch, since a Fable target must have session and weekly
+    /// room anyway. Each account is judged against its OWN threshold.
     ///
     /// `watchFable` is the user's setting: off means Fable is shown but never
     /// moves anyone, while session and weekly keep working exactly as before.
-    static func plan(
-        active: Account,
-        candidates: [Account],
-        usageByAccount: [UUID: UsageAPIResponse],
-        isSwitchable: (Account) -> Bool,
-        activeSampledThisCycle: Bool,
-        threshold: Double,
-        hysteresisPct: Double,
-        watchFable: Bool = true,
-        asOf now: Date = Date()
-    ) -> (limit: Limit, targets: [Account])? {
-        for limit in (watchFable ? [Limit.windows, .fable] : [Limit.windows]) {
-            let targets = rankedTargets(
-                active: active,
-                candidates: candidates,
-                usageByAccount: usageByAccount,
-                isSwitchable: isSwitchable,
-                activeSampledThisCycle: activeSampledThisCycle,
-                threshold: threshold,
-                hysteresisPct: hysteresisPct,
-                limit: limit,
-                asOf: now
-            )
-            if !targets.isEmpty { return (limit, targets) }
-        }
-        return nil
-    }
-
-    /// Rank the accounts worth switching to, best first (most headroom).
-    ///
-    /// The result is a list of *proposals*, not decisions: it is computed from
-    /// whatever samples the caller happens to hold, which round-robin polling can
-    /// leave several cycles old. `AppState` verifies a candidate's usage before
-    /// committing to a switch, and falls through the list when one fails.
     ///
     /// - Parameters:
     ///   - active: the currently active account.
@@ -162,62 +129,92 @@ enum AutoSwitchEngine {
     ///     (has a stored backup token and isn't flagged expired).
     ///   - activeSampledThisCycle: whether the active account's sample was taken
     ///     by the refresh cycle that is asking. Fresh readings are trusted even
-    ///     without a parseable `resets_at` (the number is current by
-    ///     construction); only RETAINED readings need the strict expiry check,
-    ///     because they are the ones that can describe a window that has since
-    ///     reset.
-    ///   - threshold: switch when the active binding utilization is >= this (e.g. 90).
-    ///   - hysteresisPct: a candidate must sit at least this far below the threshold
-    ///     to be eligible (e.g. 10 -> candidate must be <= threshold - 10).
-    ///   - limit: the limit that triggers and ranks (see `eligibleUtilization`).
+    ///     without a parseable `resets_at`; only RETAINED readings need the
+    ///     strict expiry check.
+    ///   - threshold: each account's effective switch threshold (its own, else
+    ///     the default), 50–100.
+    ///   - hysteresisPct: a candidate must sit at least this far below its own
+    ///     threshold (e.g. 10).
     ///   - now: injected clock, for window-expiry checks and testability.
-    /// - Returns: eligible accounts ordered best-first; empty means stay put.
-    static func rankedTargets(
+    static func plan(
         active: Account,
         candidates: [Account],
         usageByAccount: [UUID: UsageAPIResponse],
         isSwitchable: (Account) -> Bool,
         activeSampledThisCycle: Bool,
-        threshold: Double,
+        threshold: (Account) -> Double,
         hysteresisPct: Double,
-        limit: Limit = .windows,
+        watchFable: Bool = true,
+        asOf now: Date = Date()
+    ) -> (limit: Limit, trigger: Trigger, targets: [Account])? {
+        let activeThreshold = threshold(active)
+        for limit in (watchFable ? [Limit.windows, .fable] : [Limit.windows]) {
+            // Only act once the active account has reached its threshold on a
+            // limit we watch. Unknown active usage -> do nothing (can't decide).
+            // The trigger must never rest on a RETAINED reading whose expiry we
+            // cannot establish — but a reading this very cycle fetched is
+            // current whether or not the endpoint sent a parseable resets_at.
+            guard let activeUtil = utilization(usageByAccount[active.id], limit: limit, asOf: now,
+                                               requireKnownWindow: !activeSampledThisCycle),
+                  activeUtil >= activeThreshold else { continue }
+            let targets = rankedTargets(
+                active: active, candidates: candidates, usageByAccount: usageByAccount,
+                isSwitchable: isSwitchable, threshold: threshold, hysteresisPct: hysteresisPct,
+                limit: limit, asOf: now
+            )
+            if !targets.isEmpty { return (limit, .threshold, targets) }
+        }
+        return nil
+    }
+
+    /// Rank the accounts worth switching to for one limit, best first.
+    ///
+    /// The result is a list of *proposals*, not decisions: it is computed from
+    /// whatever samples the caller happens to hold, which round-robin polling can
+    /// leave several cycles old. `AppState` verifies a candidate's usage before
+    /// committing to a switch, and falls through the list when one fails.
+    ///
+    /// A candidate is eligible when it sits at or below ITS OWN threshold minus
+    /// `hysteresisPct`. A candidate with no usable reading is NOT eligible:
+    /// accounts are polled round-robin, so "no sample" usually means "not
+    /// reached yet" rather than "idle" — treating it as a fallback let an
+    /// automatic switch land on an account that was itself maxed out.
+    static func rankedTargets(
+        active: Account,
+        candidates: [Account],
+        usageByAccount: [UUID: UsageAPIResponse],
+        isSwitchable: (Account) -> Bool,
+        threshold: (Account) -> Double,
+        hysteresisPct: Double,
+        limit: Limit,
         asOf now: Date = Date()
     ) -> [Account] {
-        // 1) Only act once the active account has reached the threshold on a
-        //    window we watch. Unknown active usage -> do nothing (can't decide).
-        //    The trigger to move the user off an account must never rest on a
-        //    RETAINED reading whose expiry we cannot establish — but a reading
-        //    this very cycle fetched is current whether or not the endpoint
-        //    sent a parseable resets_at.
-        guard let activeUtil = utilization(usageByAccount[active.id], limit: limit, asOf: now, requireKnownWindow: !activeSampledThisCycle),
-              activeUtil >= threshold else {
-            return []
-        }
-
-        // 2) Keep only switchable candidates KNOWN to sit safely below the
-        //    threshold. A candidate with no usable reading is NOT eligible:
-        //    accounts are polled round-robin, so "no sample" usually means "not
-        //    reached yet" rather than "idle" — treating it as a failover fallback
-        //    let an automatic switch land on an account that was itself maxed
-        //    out, which is the exact failure this feature exists to prevent.
-        let ceiling = threshold - hysteresisPct
-        return candidates
+        candidates
             .compactMap { candidate -> (account: Account, util: Double, keepsFable: Bool)? in
+                let usage = usageByAccount[candidate.id]
+                let ceiling = threshold(candidate) - hysteresisPct
                 // The usage check comes first: `isSwitchable` reads the Keychain.
                 guard candidate.id != active.id,
-                      let util = eligibleUtilization(usageByAccount[candidate.id], limit: limit, ceiling: ceiling, asOf: now),
+                      let util = eligibleUtilization(usage, limit: limit, ceiling: ceiling, asOf: now),
                       isSwitchable(candidate) else { return nil }
-                let keepsFable = utilization(usageByAccount[candidate.id], limit: .fable, asOf: now).map { $0 <= ceiling } ?? false
+                let keepsFable = utilization(usage, limit: .fable, asOf: now).map { $0 <= ceiling } ?? false
                 return (candidate, util, keepsFable)
             }
-            // 3) Accounts with Fable to spare first, so a session/weekly switch
-            //    does not land on an account that is out of Fable and force a
-            //    second switch minutes later; then most headroom first (lowest
-            //    known utilization). Every `.fable` candidate keeps Fable, so
-            //    those rank purely by Fable headroom.
+            // Accounts with Fable to spare first, so a session/weekly switch
+            // does not land on an account that is out of Fable and force a
+            // second switch minutes later; then most headroom first (lowest
+            // known utilization). Every `.fable` candidate keeps Fable, so
+            // those rank purely by Fable headroom.
             .sorted { ($0.keepsFable ? 0 : 1, $0.util) < ($1.keepsFable ? 0 : 1, $1.util) }
             .map(\.account)
     }
+}
+
+extension AutoSwitchEngine {
+    /// The rule that produced a plan: the active account reached its
+    /// threshold, or (Resets soonest only) another account's weekly quota is
+    /// about to reset unused.
+    enum Trigger: String, Sendable { case threshold, drainEarly }
 }
 
 /// Whether auto-switch also acts on the weekly Fable allowance. On by default;

@@ -751,13 +751,16 @@ final class AppState: ObservableObject {
         // Only consider same-provider accounts (a Claude switch never touches Codex/Gemini).
         let candidates = accounts.filter { $0.provider == active.provider && $0.id != active.id }
         let activeSampledThisCycle = (accountUsageSampledAt[active.id] ?? .distantPast) >= lastCycleStart
+        // Every account on the one global threshold until per-account
+        // thresholds are wired in (Part A, Task 6).
+        let globalThreshold = autoSwitchThreshold
         guard let plan = AutoSwitchEngine.plan(
             active: active,
             candidates: candidates,
             usageByAccount: accountUsage,
             isSwitchable: { [unowned self] in self.isSwitchable($0) },
             activeSampledThisCycle: activeSampledThisCycle,
-            threshold: autoSwitchThreshold,
+            threshold: { _ in globalThreshold },
             hysteresisPct: autoSwitchHysteresis,
             watchFable: autoSwitchOnFable
         ) else { return }

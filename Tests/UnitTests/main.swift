@@ -312,12 +312,12 @@ do {
     let c = Account(email: "c@x.com", displayName: "C")
     let d = Account(email: "d@x.com", displayName: "D")
     let e = Account(email: "e@x.com", displayName: "E")
-    func plan(_ byAccount: [UUID: UsageAPIResponse], candidates: [Account]? = nil, switchable: @escaping (Account) -> Bool = { _ in true }, sampled: Bool = true, watchFable: Bool = true) -> (limit: AutoSwitchEngine.Limit, targets: [Account])? {
+    func plan(_ byAccount: [UUID: UsageAPIResponse], candidates: [Account]? = nil, switchable: @escaping (Account) -> Bool = { _ in true }, sampled: Bool = true, watchFable: Bool = true) -> (limit: AutoSwitchEngine.Limit, trigger: AutoSwitchEngine.Trigger, targets: [Account])? {
         AutoSwitchEngine.plan(active: active, candidates: candidates ?? [b, c, d, e], usageByAccount: byAccount,
                               isSwitchable: switchable, activeSampledThisCycle: sampled,
-                              threshold: 98, hysteresisPct: 10, watchFable: watchFable, asOf: now)
+                              threshold: { _ in 98 }, hysteresisPct: 10, watchFable: watchFable, asOf: now)
     }
-    func names(_ p: (limit: AutoSwitchEngine.Limit, targets: [Account])?) -> String {
+    func names(_ p: (limit: AutoSwitchEngine.Limit, trigger: AutoSwitchEngine.Trigger, targets: [Account])?) -> String {
         guard let p else { return "stay" }
         return "\(p.limit.rawValue): " + p.targets.map(\.displayName).joined(separator: ",")
     }
