@@ -92,24 +92,19 @@ final class AppState: ObservableObject {
 
     /// Whether proactive auto-switch is on (written by SettingsView via @AppStorage).
     private var autoSwitchEnabled: Bool {
-        UserDefaults.standard.bool(forKey: "autoSwitchEnabled")
+        UserDefaults.standard.bool(forKey: AutoSwitchSettings.enabledKey)
     }
 
-    /// Utilization percentage at which we switch. Defaults to 90 when unset.
     /// Settings → Auto-switch. On (the default) means the weekly Fable
     /// allowance can move the user too; off leaves session and weekly untouched
     /// and Fable purely informational.
     private var autoSwitchOnFable: Bool {
-        UserDefaults.standard.object(forKey: AutoSwitchFableSetting.key) as? Bool ?? true
+        AutoSwitchFableSetting.isOn
     }
 
-    private var autoSwitchThreshold: Double {
-        let stored = UserDefaults.standard.double(forKey: "autoSwitchThreshold")
-        return stored == 0 ? 90 : stored
-    }
-
-    /// A candidate must sit at least this far below the threshold to be eligible,
-    /// so two accounts hovering at the line never ping-pong.
+    /// A threshold-triggered candidate must sit at least this far below its
+    /// own threshold to be eligible, so two accounts hovering at the line
+    /// never ping-pong. (An early drain uses `AutoSwitchEngine.drainMinimumRoom`.)
     private let autoSwitchHysteresis: Double = 10
 
     /// Minimum gap between two automatic switches, to avoid rapid flip-flopping.
@@ -117,6 +112,11 @@ final class AppState: ObservableObject {
 
     private var lastAutoSwitchAt: Date?
     private var isEvaluatingAutoSwitch = false
+
+    /// The most recent automatic switch that completed in this launch, with
+    /// the limit and the rule that fired. Nil until one happens. The control
+    /// API (Part C) streams it as an event.
+    @Published private(set) var lastAutoSwitch: AutoSwitchRecord?
 
     // MARK: - Initialization
 
@@ -783,18 +783,23 @@ final class AppState: ObservableObject {
         return true
     }
 
-    /// Evaluate whether the active account has reached the threshold on a watched
-    /// limit (session/weekly, then Fable) and, if so, switch to the same-provider
-    /// account with the most room left on that limit.
+    /// Evaluate whether auto-switch should move the user, and if so where.
     /// Called after every completed refresh. Safe to call repeatedly.
     ///
+    /// Two rules can fire (`AutoSwitchEngine.plan`): the active account
+    /// reaching ITS OWN threshold on a watched limit (session/weekly, then
+    /// Fable), or, with "Resets soonest" and early switching on, another
+    /// account's weekly quota about to reset unused. Candidates are ordered by
+    /// the user's strategy.
+    ///
     /// Candidates are ranked from whatever samples we hold, then the chosen one
-    /// is VERIFIED before committing: round-robin polling can leave a candidate's
-    /// sample several cycles old, and quota may have been consumed on it from
-    /// another device meanwhile. A sample taken by this very cycle counts as
-    /// verified; otherwise one fresh reading is taken — a single request per
-    /// (rare, threshold-gated, cooldown-gated) switch attempt, not the per-cycle
-    /// burst the round-robin exists to prevent.
+    /// is VERIFIED before committing, with the same rule that ranked it:
+    /// round-robin polling can leave a candidate's sample several cycles old,
+    /// and quota may have been consumed on it from another device meanwhile. A
+    /// sample taken by this very cycle counts as verified; otherwise one fresh
+    /// reading is taken — a single request per (rare, rule-gated,
+    /// cooldown-gated) switch attempt, not the per-cycle burst the round-robin
+    /// exists to prevent.
     private func evaluateAutoSwitch() async {
         guard autoSwitchEnabled, !isEvaluatingAutoSwitch else { return }
         guard !isLoggingIn, !isSwitching, let active = activeAccount else { return }
@@ -804,31 +809,40 @@ final class AppState: ObservableObject {
             return
         }
 
-        // Only consider same-provider accounts (a Claude switch never touches Codex/Gemini).
+        // Only consider same-provider accounts (a Claude switch never touches
+        // Codex/Gemini), in the accounts list's order: "My order" ranks by it.
         let candidates = accounts.filter { $0.provider == active.provider && $0.id != active.id }
         let activeSampledThisCycle = (accountUsageSampledAt[active.id] ?? .distantPast) >= lastCycleStart
-        // Every account on the one global threshold until per-account
-        // thresholds are wired in (Part A, Task 6).
-        let globalThreshold = autoSwitchThreshold
+        let strategy = AutoSwitchSettings.strategy
+        let drainEarly = AutoSwitchSettings.drainEarly
+        let drainWithin = AutoSwitchSettings.drainWithinHours * 3600
+        let watchFable = autoSwitchOnFable
         guard let plan = AutoSwitchEngine.plan(
             active: active,
             candidates: candidates,
             usageByAccount: accountUsage,
             isSwitchable: { [unowned self] in self.isSwitchable($0) },
             activeSampledThisCycle: activeSampledThisCycle,
-            threshold: { _ in globalThreshold },
+            threshold: { [unowned self] in self.effectiveSwitchThreshold(for: $0) },
             hysteresisPct: autoSwitchHysteresis,
-            watchFable: autoSwitchOnFable
+            watchFable: watchFable,
+            strategy: strategy,
+            drainEarly: drainEarly,
+            drainWithin: drainWithin
         ) else { return }
         let limit = plan.limit
+        let trigger = plan.trigger
         let ranked = plan.targets
+        // The active account's weekly reset as the plan saw it. A drain target
+        // must still reset before it when its fresh reading is checked.
+        let activeWeeklyReset = AutoSwitchEngine.weeklyReset(accountUsage[active.id], limit: .windows)
 
         isEvaluatingAutoSwitch = true
         defer { isEvaluatingAutoSwitch = false }
 
         let activeUtil = AutoSwitchEngine.utilization(accountUsage[active.id], limit: limit) ?? -1
-        let ceiling = autoSwitchThreshold - autoSwitchHysteresis
-        log.info("[autoSwitch] Active \(active.id) at \(String(format: "%.0f", activeUtil))% on \(limit.rawValue) (threshold \(String(format: "%.0f", self.autoSwitchThreshold))%); \(ranked.count) candidate(s)")
+        let activeThreshold = effectiveSwitchThreshold(for: active)
+        log.info("[autoSwitch] Rule \(trigger.rawValue), strategy \(strategy.rawValue): active \(active.id) at \(String(format: "%.0f", activeUtil))% on \(limit.rawValue) (its threshold \(String(format: "%.0f", activeThreshold))%); \(ranked.count) candidate(s)")
 
         // At most ONE fresh verification request per evaluation. Later ranked
         // candidates only qualify via samples this cycle already took.
@@ -850,10 +864,16 @@ final class AppState: ObservableObject {
                 continue
             }
 
-            guard let verifiedUtil = AutoSwitchEngine.eligibleUtilization(usage, limit: limit, ceiling: ceiling) else {
+            // The same rule, with the same per-account threshold, that ranked it.
+            let targetThreshold = effectiveSwitchThreshold(for: target)
+            guard let verifiedUtil = AutoSwitchEngine.eligibleUtilization(
+                usage, limit: limit, trigger: trigger,
+                threshold: targetThreshold, hysteresisPct: autoSwitchHysteresis,
+                activeWeeklyReset: activeWeeklyReset, drainWithin: drainWithin, watchFable: watchFable
+            ) else {
                 let onLimit = AutoSwitchEngine.utilization(usage, limit: limit).map { String(format: "%.0f%%", $0) } ?? "no reading"
                 let onWindows = AutoSwitchEngine.bindingUtilization(usage).map { String(format: "%.0f%%", $0) } ?? "no reading"
-                log.info("[autoSwitch] Candidate \(target.id) failed verification (\(limit.rawValue) \(onLimit), windows \(onWindows)); trying next")
+                log.info("[autoSwitch] Candidate \(target.id) failed verification for \(trigger.rawValue) (\(limit.rawValue) \(onLimit), windows \(onWindows), its threshold \(String(format: "%.0f", targetThreshold))%); trying next")
                 continue
             }
 
@@ -866,15 +886,23 @@ final class AppState: ObservableObject {
                 return
             }
 
-            log.info("[autoSwitch] Switching to \(target.id) for \(limit.rawValue), verified at \(String(format: "%.0f", verifiedUtil))%")
+            log.info("[autoSwitch] Switching to \(target.id) by rule \(trigger.rawValue) on \(limit.rawValue), verified at \(String(format: "%.0f", verifiedUtil))%")
             lastAutoSwitchAt = Date()
             // switchTo() calls refresh() -> evaluateAutoSwitch() again, but the
             // re-entrancy flag + the freshly-set cooldown make that a no-op.
             // The active account visibly changes in the menu bar as feedback.
             await switchTo(target)
+            if activeAccount?.id == target.id {
+                lastAutoSwitch = AutoSwitchRecord(from: active.id, to: target.id, limit: limit, trigger: trigger, at: Date())
+            } else {
+                log.warning("[autoSwitch] Switch to \(target.id) did not complete")
+            }
             return
         }
-        log.info("[autoSwitch] Threshold reached but no candidate verified; staying put")
+        switch trigger {
+        case .threshold: log.info("[autoSwitch] Threshold reached but no candidate verified; staying put")
+        case .drainEarly: log.info("[autoSwitch] Early drain found no verified candidate; staying put")
+        }
     }
 
     /// Take one fresh usage reading for an account right now, refreshing its
@@ -1466,4 +1494,12 @@ final class AppState: ObservableObject {
             log.info("[updateActiveAccount] Logged-in account not in our list (might be new)")
         }
     }
+}
+
+/// One automatic switch that completed: from which account to which, on which
+/// limit, by which rule, and when. Published as `AppState.lastAutoSwitch`.
+struct AutoSwitchRecord: Equatable, Sendable {
+    let from: UUID; let to: UUID
+    let limit: AutoSwitchEngine.Limit; let trigger: AutoSwitchEngine.Trigger
+    let at: Date
 }
