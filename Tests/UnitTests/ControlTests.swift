@@ -11,6 +11,8 @@ import Foundation
     runControlAPITests()
     runControlNoTokenTests()
     runControlSocketTests()
+    runControlCLIParserTests()
+    runControlCLIOutputTests()
 }
 
 /// Shared helpers, in one namespace so nothing collides with other test files.
@@ -550,5 +552,114 @@ extension ControlTestKit {
         check(true, "socket: with the app not running, the client says it is unreachable")
     } else {
         check(false, "socket: with the app not running, the client says it is unreachable", "\(String(describing: unreachable))")
+    }
+}
+
+// MARK: - Command-line parser
+
+@MainActor func runControlCLIParserTests() {
+    func parsed(_ line: String) -> CLICommand? { try? CLIParser.parse(line.split(separator: " ").map(String.init)).command }
+    func refused(_ line: String) -> String? {
+        do { _ = try CLIParser.parse(line.split(separator: " ").map(String.init)); return nil } catch let e as CLIUsageError { return e.message } catch { return "?" }
+    }
+    check((try? CLIParser.parse([]))?.command == .help, "cli: no arguments shows help")
+    check(parsed("status") == .status && parsed("accounts") == .listAccounts && parsed("accounts list") == .listAccounts, "cli: status and the account list")
+    check(parsed("switch 2") == .switchAccount("2") && refused("switch") != nil, "cli: switch needs exactly one account")
+    check(parsed("accounts add-current") == .addCurrent, "cli: add-current")
+    check(parsed("accounts sign-in") == .signIn(account: nil, open: .none, wait: false), "cli: a plain sign-in opens nothing")
+    check(parsed("accounts sign-in --open --wait") == .signIn(account: nil, open: .defaultBrowser, wait: true), "cli: sign-in can open the default browser and wait")
+    check(parsed("accounts sign-in --open-in Firefox") == .signIn(account: nil, open: .browser("Firefox"), wait: false), "cli: sign-in can open a named browser")
+    check(refused("accounts sign-in --open-in") != nil, "cli: --open-in needs a browser")
+    check(parsed("accounts reauth bob@home.com --open-in Safari") == .signIn(account: "bob@home.com", open: .browser("Safari"), wait: false), "cli: reauth names the account")
+    check(parsed("accounts sign-in code abc#def") == .signInCode("abc#def") && parsed("accounts sign-in cancel") == .signInCancel
+          && parsed("accounts sign-in status") == .signInStatus, "cli: sign-in code, cancel and status")
+    check(parsed("accounts remove 2 --yes") == .remove("2") && refused("accounts remove 2")?.contains("--yes") == true,
+          "cli: remove refuses without --yes, and says so")
+    check(parsed("accounts label 2 Side project") == .label("2", "Side project") && parsed("accounts label 2 --clear") == .label("2", nil),
+          "cli: a label can have spaces, and --clear clears it")
+    check(parsed("accounts threshold 2 75%") == .threshold("2", 75) && parsed("accounts threshold 2 default") == .threshold("2", nil)
+          && refused("accounts threshold 2 high") != nil, "cli: a threshold is a number or default")
+    check(parsed("accounts order 1 4 2") == .order(["1", "4", "2"]) && refused("accounts order") != nil, "cli: order lists the accounts")
+    check(parsed("usage") == .usage(nil) && parsed("usage 2") == .usage("2"), "cli: usage for all or one")
+    check(parsed("settings") == .settingsGet(nil) && parsed("settings autoSwitch.enabled") == .settingsGet("autoSwitch.enabled")
+          && parsed("settings set menuBar.modules account weeklyBar") == .settingsSet("menuBar.modules", "account weeklyBar"),
+          "cli: settings get and set")
+    check(parsed("refresh") == .refresh && parsed("watch") == .watch && parsed("update-check") == .updateCheck && parsed("quit") == .quit && parsed("mcp") == .mcp,
+          "cli: refresh, watch, update-check, quit and mcp")
+    let invocation = try? CLIParser.parse(["--json", "usage", "--timeout", "90"])
+    check(invocation == CLIInvocation(command: .usage(nil), json: true, timeout: 90), "cli: --json and --timeout work anywhere")
+    check(refused("usage --timeout soon") != nil && refused("teleport") != nil, "cli: a bad timeout and an unknown command are refused")
+    check((try? CLIParser.parse(["status", "--help"]))?.command == .help, "cli: --help anywhere shows help")
+    check(CLIRunner.value(from: "true") == .bool(true) && CLIRunner.value(from: "90") == .number(90)
+          && CLIRunner.value(from: #"["account","weeklyBar"]"#) == .array([.string("account"), .string("weeklyBar")])
+          && CLIRunner.value(from: "resetsSoonest") == .string("resetsSoonest"),
+          "cli: a setting value is read as JSON when it is JSON, otherwise as text")
+}
+
+// MARK: - Command-line output
+
+@MainActor func runControlCLIOutputTests() {
+    let usage = UsageInfo(session: WindowInfo(utilization: 42.4, resetsAt: nil), weekly: WindowInfo(utilization: 61, resetsAt: nil),
+                          fable: nil, extraUsage: nil, sampledAt: nil, error: nil)
+    let accounts = [
+        AccountInfo(id: "1", email: "alice@work.com", label: "Work", subscription: "Max", isActive: true, isSwitchable: true, position: 1,
+                    threshold: nil, effectiveThreshold: 90, usage: usage),
+        AccountInfo(id: "2", email: "bob@home.com", label: nil, subscription: nil, isActive: false, isSwitchable: false, position: 2,
+                    threshold: 70, effectiveThreshold: 70, usage: nil)
+    ]
+    let table = CLIOutput.accounts(accounts)
+    let lines = table.split(separator: "\n").map(String.init)
+    check(lines.count == 4 && lines[1].hasPrefix("*  1  alice@work.com (Work)") && lines[1].contains("42%") && lines[1].contains("90% (default)"),
+          "cli output: the active account is starred, with its usage and default threshold", table)
+    check(lines[2].hasPrefix("!  2  bob@home.com") && lines[2].contains("70%") && !lines[2].contains("default"),
+          "cli output: an account that cannot be switched to is marked, with its own threshold", table)
+    check(CLIOutput.accounts([]).contains("add-current"), "cli output: no accounts says how to add one")
+    check(CLIOutput.percent(99.6) == "100%" && CLIOutput.percent(nil) == "—", "cli output: percentages are whole numbers")
+    let status = StatusInfo(appVersion: "1.2", protocolVersion: 1, activeAccountId: "1", activeAccountEmail: "alice@work.com", accountCount: 2,
+                            claudeAvailable: true, lastRefresh: nil,
+                            autoSwitch: AutoSwitchInfo(enabled: true, defaultThreshold: 90, onFable: false, strategy: "resetsSoonest", drainEarly: true, drainWithinHours: 12),
+                            signIn: nil)
+    let text = CLIOutput.status(status)
+    check(text.contains("Active:        alice@work.com") && text.contains("on, default 90%, next by resets soonest, Fable ignored, switches early within 12 h"),
+          "cli output: status spells out auto-switch", text)
+    let signIn = SignInInfo(id: "S", purpose: "reauthenticate", accountId: "2", email: "bob@home.com", state: "waitingForUser", message: nil,
+                            resultAccountId: nil, automaticLink: "https://a", manualLink: "https://m", notice: nil, codeSubmitted: false, startedAt: Date())
+    let signInText = CLIOutput.signIn(signIn)
+    check(signInText.hasPrefix("Re-sign bob@home.com: waiting for someone to sign in in a browser") && signInText.contains("  https://a")
+          && signInText.contains("pixelswitch accounts sign-in code <code>"), "cli output: a sign-in shows both links and what to do with the code", signInText)
+    check(CLIOutput.settings(.object(["refreshInterval": .number(300), "autoSwitch.enabled": .bool(true)])) == "refreshInterval = 300\nautoSwitch.enabled = true",
+          "cli output: settings print in the window's order")
+    check(CLIExit.code(for: .busy) == 3 && CLIExit.code(for: .ambiguous) == 4 && CLIExit.code(for: .notFound) == 4
+          && CLIExit.code(for: .invalidValue) == 2 && CLIExit.code(for: .failed) == 1, "cli output: exit codes match the help text")
+    check(SettingKeyNames.all == SettingKey.allCases.map(\.rawValue), "cli output: the command-line tool's list of keys matches the app's")
+
+    // An old app still running after an update speaks another protocol version.
+    let dir = ControlTestKit.makeTempDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let path = dir.appendingPathComponent("old.sock").path
+    let oldApp = ControlServer(path: path, handler: { line, _ in
+        let id = (try? ControlCoding.decoder.decode(RPCRequest.self, from: Data(line.utf8)))?.id
+        let old = StatusInfo(appVersion: "1.1", protocolVersion: 99, activeAccountId: nil, activeAccountEmail: nil, accountCount: 0,
+                             claudeAvailable: true, lastRefresh: nil,
+                             autoSwitch: AutoSwitchInfo(enabled: false, defaultThreshold: 90, onFable: true, strategy: "mostRoom", drainEarly: true, drainWithinHours: 24),
+                             signIn: nil)
+        return RPCResponse.success(id, (try? JSONValue.encode(old)) ?? .null).line
+    })
+    if (try? oldApp.start()) != nil {
+        defer { oldApp.stop() }
+        let outcome = ControlTestKit.offMain { () throws -> String in
+            let client = ControlClient(path: path)
+            try client.connect(launch: false)
+            try CLIRunner.checkProtocol(client, timeout: 5)
+            return "accepted"
+        }
+        if case .failure(let error as ControlError)? = outcome {
+            check(error.kind == .protocolMismatch && error.message.contains("PixelSwitch 1.1 speaks remote-control protocol 99") && error.message.contains("Quit and reopen PixelSwitch"),
+                  "cli output: an app speaking another protocol version is refused with what to do", error.message)
+        } else {
+            check(false, "cli output: an app speaking another protocol version is refused with what to do", "\(String(describing: outcome))")
+        }
+    } else {
+        check(false, "cli output: a stand-in old app starts for the protocol check")
     }
 }
