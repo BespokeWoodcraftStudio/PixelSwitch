@@ -759,7 +759,8 @@ final class ClaudeService: @unchecked Sendable {
     // MARK: - CLI Runner
 
     /// `timeout` ends the process and throws `.timedOut` if it runs longer; nil
-    /// waits forever (interactive logins take as long as the user does).
+    /// waits forever. Sign-in does not come through here: it needs its output
+    /// while the process is still running (see `SignInSession`).
     private func runClaude(args: [String], timeout: TimeInterval? = nil) async throws -> String {
         let claudePath = self.claudePath
         log.debug("[runClaude] Running: \(claudePath) \(args.joined(separator: " "))")
@@ -776,28 +777,11 @@ final class ClaudeService: @unchecked Sendable {
                 process.standardOutput = pipe
                 process.standardError = pipe
 
-                var env = ProcessInfo.processInfo.environment
-                let homeDir = NSHomeDirectory()
-                // Include the parent directory of the discovered claude binary
-                // so that `node` is on PATH for NVM-installed scripts.
-                // Only add it when claudePath is absolute (skip the bare "claude" fallback).
-                var extraPaths = [
-                    "/opt/homebrew/bin",
-                    "/usr/local/bin",
-                    "\(homeDir)/.local/bin",
-                    "\(homeDir)/.npm-global/bin"
-                ]
-                if claudePath.contains("/") {
-                    // Resolve symlinks so that e.g. /usr/local/bin/claude -> ~/.nvm/.../bin/claude
-                    // yields the NVM bin dir where `node` actually lives
-                    let resolved = URL(fileURLWithPath: claudePath).resolvingSymlinksInPath().path
-                    let resolvedBinDir = URL(fileURLWithPath: resolved).deletingLastPathComponent().path
-                    extraPaths.insert(resolvedBinDir, at: 0)
-                }
-                let existingPath = env["PATH"] ?? "/usr/bin:/bin"
-                env["PATH"] = (extraPaths + [existingPath]).joined(separator: ":")
-                env["HOME"] = homeDir
-                process.environment = env
+                process.environment = ClaudeProcessEnvironment.make(
+                    claudePath: claudePath,
+                    base: ProcessInfo.processInfo.environment,
+                    homeDirectory: NSHomeDirectory()
+                )
 
                 let command = "claude \(args.joined(separator: " "))"
                 do {

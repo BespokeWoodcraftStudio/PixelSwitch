@@ -6,6 +6,8 @@ import Foundation
 @MainActor func runSignInTests() {
     runSignInParserTests()
     runSignInRulesTests()
+    runSignInEnvironmentTests()
+    runSignInCaptureTests()
 }
 
 /// Shared test data and helpers, in one namespace so nothing here collides
@@ -131,4 +133,116 @@ enum SignInTestKit {
           "sign-in result: re-authentication that did not log in")
     check(SignInResult.reauthentication(status: status(true, nil, method: "oauthToken"), expectedEmail: "a@x.com") == .noIdentity,
           "sign-in result: re-authentication hidden by a shadowing credential source")
+}
+
+// MARK: - The environment every claude subprocess gets
+
+extension SignInTestKit {
+    static func makeTempDirectory() -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("pixelswitch-signin-tests-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// Writes an executable /bin/sh script.
+    static func writeScript(in directory: URL, named name: String, _ body: String) -> URL {
+        let url = directory.appendingPathComponent(name)
+        try? Data(body.utf8).write(to: url)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url
+    }
+}
+
+@MainActor func runSignInEnvironmentTests() {
+    let base = ["PATH": "/usr/bin:/bin", "HOME": "/wrong", "KEEP": "1"]
+    let bare = ClaudeProcessEnvironment.make(claudePath: "claude", base: base, homeDirectory: "/Users/me")
+    check(bare["PATH"] == "/opt/homebrew/bin:/usr/local/bin:/Users/me/.local/bin:/Users/me/.npm-global/bin:/usr/bin:/bin",
+          "claude environment: the usual install folders go in front of the inherited PATH", bare["PATH"] ?? "nil")
+    check(bare["HOME"] == "/Users/me" && bare["KEEP"] == "1", "claude environment: HOME is set and everything else is kept")
+    check(ClaudeProcessEnvironment.make(claudePath: "claude", base: [:], homeDirectory: "/Users/me")["PATH"]?.hasSuffix(":/usr/bin:/bin") == true,
+          "claude environment: no inherited PATH falls back to /usr/bin:/bin")
+
+    let dir = SignInTestKit.makeTempDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let realBin = dir.appendingPathComponent("node-bin", isDirectory: true)
+    let linkBin = dir.appendingPathComponent("links", isDirectory: true)
+    try? FileManager.default.createDirectory(at: realBin, withIntermediateDirectories: true)
+    try? FileManager.default.createDirectory(at: linkBin, withIntermediateDirectories: true)
+    let realClaude = SignInTestKit.writeScript(in: realBin, named: "claude", "#!/bin/sh\nexit 0\n")
+    let linkedClaude = linkBin.appendingPathComponent("claude")
+    try? FileManager.default.createSymbolicLink(at: linkedClaude, withDestinationURL: realClaude)
+    let linked = ClaudeProcessEnvironment.make(claudePath: linkedClaude.path, base: base, homeDirectory: "/Users/me")
+    let first = linked["PATH"]?.split(separator: ":").first.map(String.init) ?? ""
+    check(first.hasSuffix("/node-bin"), "claude environment: a symlinked claude puts its real folder first, so an NVM claude finds node", first)
+}
+
+// MARK: - The link-capture helper
+
+extension SignInTestKit {
+    static func permissions(_ url: URL) -> Int {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.posixPermissions] as? NSNumber)?.intValue ?? -1
+    }
+
+    /// Runs a program to completion and returns its exit status.
+    static func run(_ executable: URL, arguments: [String], environment: [String: String]) -> Int32 {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.environment = environment
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return -1 }
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+}
+
+@MainActor func runSignInCaptureTests() {
+    let automatic = SignInTestKit.automaticURLString
+    let parent = SignInTestKit.makeTempDirectory()
+    defer { try? FileManager.default.removeItem(at: parent) }
+    let id = UUID()
+    do {
+        let capture = try SignInLinkCapture.create(in: parent, id: id)
+        check(capture.directory.lastPathComponent == "pixelswitch-signin-\(id.uuidString)", "capture: one folder per sign-in, named by its id")
+        check(SignInTestKit.permissions(capture.directory) == 0o700, "capture: the folder is private (0700)",
+              String(SignInTestKit.permissions(capture.directory), radix: 8))
+        check(SignInTestKit.permissions(capture.helperURL) == 0o700, "capture: the helper is private and executable (0700)",
+              String(SignInTestKit.permissions(capture.helperURL), radix: 8))
+        check(SignInTestKit.permissions(capture.captureFileURL) == 0o600, "capture: the capture file is private (0600)",
+              String(SignInTestKit.permissions(capture.captureFileURL), radix: 8))
+        check(capture.readCaptured() == "", "capture: the capture file starts empty")
+        check(capture.environmentOverrides == ["BROWSER": capture.helperURL.path, SignInLinkCapture.captureFileVariable: capture.captureFileURL.path],
+              "capture: Claude Code is given BROWSER and the capture file's name")
+        check(SignInLinkCapture.helperScript().hasPrefix("#!/bin/sh\n"), "capture: the helper is a /bin/sh script")
+
+        // Run the helper exactly as Claude Code does: `$BROWSER <link>`, with its environment.
+        let environment = capture.environmentOverrides.merging(["PATH": "/usr/bin:/bin"]) { _, new in new }
+        check(SignInTestKit.run(capture.helperURL, arguments: [automatic], environment: environment) == 0,
+              "capture: the helper exits 0, so Claude Code thinks the browser opened")
+        check(capture.readCaptured() == automatic + "\n", "capture: the helper records the link on its own line")
+        _ = SignInTestKit.run(capture.helperURL, arguments: ["https://example.com/second"], environment: environment)
+        check(capture.readCaptured() == automatic + "\nhttps://example.com/second\n", "capture: a second call appends")
+        check(SignInTestKit.permissions(capture.captureFileURL) == 0o600, "capture: the file stays 0600 after the helper wrote to it")
+        _ = SignInTestKit.run(capture.helperURL, arguments: ["https://example.com/third"], environment: ["PATH": "/usr/bin:/bin"])
+        check(capture.readCaptured().hasSuffix("https://example.com/third\n"), "capture: without the variable the helper still writes beside itself")
+
+        capture.remove()
+        check(!FileManager.default.fileExists(atPath: capture.directory.path), "capture: removing it leaves nothing behind")
+
+        let stale = parent.appendingPathComponent(SignInLinkCapture.folderPrefix + "stale", isDirectory: true)
+        let recent = parent.appendingPathComponent(SignInLinkCapture.folderPrefix + "recent", isDirectory: true)
+        let unrelated = parent.appendingPathComponent("not-a-sign-in", isDirectory: true)
+        for folder in [stale, recent, unrelated] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        let twoHoursAgo = Date().addingTimeInterval(-2 * 3600)
+        try FileManager.default.setAttributes([.modificationDate: twoHoursAgo], ofItemAtPath: stale.path)
+        try FileManager.default.setAttributes([.modificationDate: twoHoursAgo], ofItemAtPath: unrelated.path)
+        let next = try SignInLinkCapture.create(in: parent, id: UUID())
+        check(!FileManager.default.fileExists(atPath: stale.path), "capture: a leftover sign-in folder over an hour old is removed")
+        check(FileManager.default.fileExists(atPath: recent.path) && FileManager.default.fileExists(atPath: unrelated.path),
+              "capture: a recent sign-in folder and unrelated folders are kept")
+        next.remove()
+    } catch {
+        check(false, "capture: set up", "\(error)")
+    }
 }
