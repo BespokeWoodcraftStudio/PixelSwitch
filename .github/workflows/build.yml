@@ -44,6 +44,9 @@ jobs:
       - name: Install Build Tools
         run: brew install xcodegen create-dmg
 
+      - name: Check target names (case-insensitive disk)
+        run: bash scripts/check-target-names.sh
+
       - name: Generate Xcode Project
         run: xcodegen generate
 

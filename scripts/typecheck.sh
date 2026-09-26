@@ -29,3 +29,7 @@ if [ -d PixelSwitchCLI ]; then
     swiftc "${COMMON[@]}" "${CLI_SOURCES[@]}"
     echo "cli: type-check OK (${#CLI_SOURCES[@]} files)"
 fi
+
+if command -v xcodegen >/dev/null; then
+    bash scripts/check-target-names.sh
+fi

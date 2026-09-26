@@ -77,7 +77,7 @@ targets:
         codeSign: true
       # The `pixelswitch` command-line tool, copied to Contents/Helpers.
       # Not linked; CI signs it (see .github/workflows/build.yml).
-      - target: pixelswitch
+      - target: PixelSwitchCLI
         embed: true
         link: false
         codeSign: false
@@ -122,8 +122,12 @@ targets:
           - $(TeamIdentifierPrefix)ai.pixelventures.pixelswitch
 
   # `pixelswitch`: remote control from the command line or an AI (MCP).
-  pixelswitch:
+  # The target and module are PixelSwitchCLI, never `pixelswitch`: CI's disk
+  # ignores case, so a name differing from the app's only by case shares its
+  # build folder (scripts/check-target-names.sh guards this).
+  PixelSwitchCLI:
     type: tool
+    productName: pixelswitch
     platform: macOS
     sources:
       - path: PixelSwitchCLI
@@ -131,6 +135,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: pixelswitch
+        PRODUCT_MODULE_NAME: PixelSwitchCLI
         PRODUCT_BUNDLE_IDENTIFIER: ai.pixelventures.pixelswitch.cli
         MARKETING_VERSION: "1.1"
         CURRENT_PROJECT_VERSION: "22"
