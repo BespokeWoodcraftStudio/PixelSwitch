@@ -7,7 +7,7 @@
 - Releases are Developer ID signed and notarized by CI (`.github/workflows/build.yml`, Team LM3P28DNVQ). The signing secrets live in GitHub repo secrets; the identity's only durable copy is the founder's login keychain and password manager.
 
 **App**: Minimalist macOS menu bar app for managing/switching Claude Code accounts.
-**Features**: Terminal-free login (Process/Pipe interception), zero-interaction token refresh (`security` CLI workaround), API usage tracking.
+**Features**: Sign-in links you control (PixelSwitch runs `claude auth login` with `BROWSER` pointed at a per-sign-in capture helper and shows both links with Open / Open in / Copy; nothing opens by itself; `SignInSession`, `SignInWindowController`), zero-interaction token refresh (`security` CLI workaround), API usage tracking.
 
 **Architecture & Files**:
 - **Docs**: `ARCHITECTURE.md` (token flow), `BUILD_GUIDE.md`, `project.yml` (Xcode config).

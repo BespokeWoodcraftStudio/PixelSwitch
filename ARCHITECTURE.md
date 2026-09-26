@@ -252,6 +252,15 @@ Step 5: POST-SWITCH diagnostics
 
 ---
 
+## Sign-in links (1.2)
+
+`claude auth login` produces two links. PixelSwitch shows both and opens neither on its own:
+
+- **Automatic link** (`redirect_uri=http://localhost:<port>/callback`, served by the CLI itself). Claude Code hands it to `$BROWSER`; PixelSwitch sets `BROWSER` to a helper script written into `$TMPDIR/pixelswitch-signin-<uuid>/` (folder 0700, helper 0700, capture file 0600) that appends the link to a file and exits 0. It finishes by itself in any browser on this Mac.
+- **Manual link** (`redirect_uri=https://platform.claude.com/oauth/code/callback`), read from the `If the browser didn't open, visit:` line. Its page shows `code#state`, which PixelSwitch writes to the CLI's stdin.
+
+`SignInSession` owns the process: starting → waitingForUser (first link known) → completing (exit 0; `AppState` captures the account) → succeeded, failed or cancelled. Cancel sends SIGTERM, then SIGKILL after 2 s. A sign-in is stopped after 15 minutes. If neither link appears within 10 s, it reruns `claude auth login` without the helper (today's default-browser behaviour). The temporary folder is deleted when the session ends. Link query values (`state`, `code_challenge`) are never logged.
+
 ## Login New Account — Complete Token Flow
 
 **Precondition:** App has Account-A (active). LIVE keychain = T-A.
@@ -282,9 +291,11 @@ Step 1: VERIFY CLI, then conditionally back up current account
     │   → A's existing backup (from when it was first added) remains intact. │
     └─────────────────────────────────────────────────────────────────────────┘
 
-Step 2: Run `claude auth login` (opens browser, blocks until complete)
+Step 2: Run `claude auth login` with BROWSER pointed at the sign-in link
+        capture helper (see "Sign-in links" below). Nothing opens by itself.
 
-    Claude CLI starts local HTTP server → opens browser → user logs in.
+    Claude CLI starts local HTTP server → hands the link to the helper →
+    the user opens it in the browser of their choice → user logs in.
 
     ┌─────────────────────────────────────────────────────────────────────────┐
     │ SCENARIO A: User logs in as DIFFERENT account (B)                      │
@@ -402,7 +413,7 @@ Step 1: Back up current active account (if different from target)
     Run `claude auth status` → email == B.email?
       YES → Read LIVE (T-B) → Write to Backup UUID-B (refresh B's backup)
 
-Step 2: Run `claude auth login` (opens browser)
+Step 2: Run `claude auth login --email A@...` (the same sign-in window)
 
     User must log in as A@... in the browser.
     CLI writes T-A' (fresh token for A) → LIVE
@@ -509,7 +520,7 @@ diagnoseTokenHealth()
 ┌─────────────────────────────┐
 │      Claude CLI             │
 │  `claude auth status` ──────┼──► ClaudeService ──► AuthStatus
-│  `claude auth login`  ──────┼──► ClaudeService (opens browser)
+│  `claude auth login`  ──────┼──► SignInSession (shows links; opens nothing)
 └─────────────────────────────┘
 
 ┌─────────────────────────────┐

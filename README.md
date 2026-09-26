@@ -128,9 +128,10 @@ Claude accounts have three limits worth watching: the 5-hour session window, the
 
 Unlike tools that build complex pseudoterminals (PTYs) to handle CLI login states, PixelSwitch uses a minimalist approach to add new accounts:
 
-- We rely on native `Process` and standard `Pipe()` redirection.
-- When `claude auth login` is executed silently in the background, the Claude CLI detects the non-interactive environment and automatically launches the system's default browser to handle the OAuth loop.
-- Once the user authorizes in the browser, the background CLI process terminates with exit code 0. PixelSwitch then captures the newly-generated keychain credentials and `oauthAccount` block — the user never opens a terminal.
+- PixelSwitch runs `claude auth login` itself, with native `Process` and `Pipe`, and reads its output as it streams.
+- Claude Code opens a browser by running `$BROWSER <link>` when `BROWSER` is set, so PixelSwitch points it at a tiny helper, written into a private temporary folder for that one sign-in, that records the link instead. Nothing opens by itself.
+- A small window shows the link with **Open in default browser**, **Open in** (every browser installed on the Mac) and **Copy link**. It finishes by itself in any browser on the same Mac, so the right already-signed-in browser can finish it. **Signing in on another device?** gives a second link whose page shows a code to paste back.
+- Once Claude Code exits 0, PixelSwitch captures the new keychain credentials and `oauthAccount` block, as before. If a future Claude Code prints something PixelSwitch cannot read within 10 seconds, it falls back to letting Claude Code open the default browser.
 
 ### 4. Delegated Token Refresh (A Different Path Than CodexBar)
 
