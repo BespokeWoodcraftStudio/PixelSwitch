@@ -7,6 +7,7 @@ import Foundation
     autoSwitchSettingsTests()
     perAccountThresholdTests()
     strategyTests()
+    earlyDrainTests()
 }
 
 /// Fixtures shared by every case in this file.
@@ -24,13 +25,14 @@ private enum Rules {
     /// The engine as AppState calls it, with each account's effective threshold.
     static func plan(active: Account, candidates: [Account], _ usage: [UUID: UsageAPIResponse],
                      defaultThreshold: Double = 90, strategy: AutoSwitchStrategy = .mostRoom,
-                     watchFable: Bool = true,
+                     drainEarly: Bool = false, drainWithinHours: Double = 24, watchFable: Bool = true,
                      switchable: (Account) -> Bool = { _ in true }, sampled: Bool = true) -> Plan? {
         AutoSwitchEngine.plan(
             active: active, candidates: candidates, usageByAccount: usage,
             isSwitchable: switchable, activeSampledThisCycle: sampled,
             threshold: { AutoSwitchSettings.effectiveThreshold(own: $0.switchThreshold, defaultThreshold: defaultThreshold) },
-            hysteresisPct: 10, watchFable: watchFable, strategy: strategy, asOf: now)
+            hysteresisPct: 10, watchFable: watchFable, strategy: strategy,
+            drainEarly: drainEarly, drainWithin: drainWithinHours * 3600, asOf: now)
     }
 
     /// "stay", or "<limit>/<trigger>: <targets in order>".
@@ -264,4 +266,93 @@ private func sample(_ session: Double?, _ weekly: Double?,
     // Most room: equal use keeps the list's order, so the result never flickers.
     let equal: [UUID: UsageAPIResponse] = [a.id: sample(95, 40), b.id: sample(10, 30), c.id: sample(10, 30)]
     check(plan(equal, .mostRoom, candidates: [c, b]) == "windows/threshold: C,B", "rules: most room left breaks a tie by the list's order")
+}
+
+// MARK: - Switching early to use quota before it resets
+
+@MainActor private func earlyDrainTests() {
+    let a = Account(email: "a@x.com", displayName: "A", isActive: true)
+    let y = Account(email: "y@x.com", displayName: "Y")
+    let y100 = Account(email: "y@x.com", displayName: "Y", switchThreshold: 100)
+    let z = Account(email: "z@x.com", displayName: "Z")
+    func drain(_ usage: [UUID: UsageAPIResponse], active: Account? = nil, candidates: [Account]? = nil,
+               strategy: AutoSwitchStrategy = .resetsSoonest, drainEarly: Bool = true, within: Double = 24,
+               watchFable: Bool = true, switchable: (Account) -> Bool = { _ in true }) -> String {
+        Rules.describe(Rules.plan(active: active ?? a, candidates: candidates ?? [y], usage, strategy: strategy,
+                                  drainEarly: drainEarly, drainWithinHours: within, watchFable: watchFable, switchable: switchable))
+    }
+    // A is well under its threshold and resets in 100 h.
+    let activeA = sample(30, 40)
+
+    // The founder's example: resets in 12 hours with 5% left.
+    check(drain([a.id: activeA, y100.id: sample(10, 95, weeklyResetsIn: 12)], candidates: [y100]) == "windows/drainEarly: Y",
+          "rules: drain: an account on 100% with 5% left that resets in 12 h is used first")
+    check(drain([a.id: activeA, y.id: sample(10, 95, weeklyResetsIn: 12)]) == "stay",
+          "rules: drain: the same 95% is past a 90% threshold, so it is not a target")
+
+    let yIn12 = sample(10, 80, weeklyResetsIn: 12)
+    check(drain([a.id: activeA, y.id: yIn12]) == "windows/drainEarly: Y", "rules: drain fires for an account resetting in 12 h with room")
+    check(drain([a.id: activeA, y.id: sample(10, 80, weeklyResetsIn: 30)]) == "stay", "rules: drain: a reset 30 h away is outside a 24 h window")
+    check(drain([a.id: activeA, y.id: sample(10, 80, weeklyResetsIn: 30)], within: 48) == "windows/drainEarly: Y", "rules: drain: ...and inside a 48 h one")
+    check(drain([a.id: sample(30, 40, weeklyResetsIn: 10), y.id: yIn12]) == "stay", "rules: drain: never to an account that resets later than the active one")
+    check(drain([a.id: sample(30, 40, weeklyResetsIn: 12), y.id: yIn12]) == "stay", "rules: drain: never to one that resets at the same time")
+    check(drain([a.id: activeA, y.id: sample(10, 89.5, weeklyResetsIn: 12)]) == "stay", "rules: drain: 89.5% under a 90% threshold is less than 1 point of room")
+    check(drain([a.id: activeA, y.id: sample(10, 89, weeklyResetsIn: 12)]) == "windows/drainEarly: Y", "rules: drain: 89% under a 90% threshold is enough room")
+    check(drain([a.id: activeA, y.id: sample(95, 20, weeklyResetsIn: 12)]) == "stay", "rules: drain: no room on the 5-hour window means no drain")
+    check(drain([a.id: activeA, y.id: yIn12], strategy: .mostRoom) == "stay", "rules: drain: never under most room left")
+    check(drain([a.id: activeA, y.id: yIn12], strategy: .myOrder) == "stay", "rules: drain: never under my order")
+    check(drain([a.id: activeA, y.id: yIn12], drainEarly: false) == "stay", "rules: drain: never with the switch off")
+    check(drain([a.id: activeA, y.id: yIn12], switchable: { $0.id != y.id }) == "stay", "rules: drain: never to an account that cannot be switched to")
+    check(drain([a.id: sample(30, 40, weeklyResetsIn: nil), y.id: yIn12]) == "stay", "rules: drain: never when the active account's weekly reset is unknown")
+    check(drain([a.id: sample(30, 40, weeklyResetsIn: -1), y.id: yIn12]) == "stay", "rules: drain: never when the active account's sample is from a week that has ended")
+    check(drain([a.id: activeA, y.id: sample(10, 5, weeklyResetsIn: -1)]) == "stay", "rules: drain: never to an account whose weekly sample is from a week that has ended")
+    check(drain([a.id: activeA]) == "stay", "rules: drain: never to an account with no usage sample yet")
+
+    // Never on Fable: the drain looks at the 7-day window only.
+    check(drain([a.id: activeA, y.id: sample(10, 20, fable: 10, fableResetsIn: 5)]) == "stay", "rules: drain: a Fable reset coming up soon never drains")
+    // ...but a drain target must not be at its Fable threshold, or the Fable
+    // trigger would move you off it and the drain would bring you back.
+    check(drain([a.id: activeA, y.id: sample(10, 20, weeklyResetsIn: 12, fable: 95)]) == "stay", "rules: drain: not to an account out of Fable while Fable switching is on")
+    check(drain([a.id: activeA, y.id: sample(10, 20, weeklyResetsIn: 12, fable: 95)], watchFable: false) == "windows/drainEarly: Y", "rules: drain: ...but yes with Fable switching off")
+
+    // Two targets: the one that resets first.
+    check(drain([a.id: activeA, y.id: yIn12, z.id: sample(10, 50, weeklyResetsIn: 6)], candidates: [y, z]) == "windows/drainEarly: Z,Y",
+          "rules: drain ranks targets by the soonest reset")
+
+    // Review focus: a threshold reached with nowhere to go is still "reached": the drain stays out of it.
+    check(drain([a.id: sample(92, 40), y.id: sample(10, 85, weeklyResetsIn: 12)]) == "stay",
+          "rules: drain never fires once the active account has reached its threshold")
+    check(drain([a.id: sample(92, 40), y.id: sample(10, 85, weeklyResetsIn: 12), z.id: sample(10, 70, weeklyResetsIn: 50)], candidates: [y, z]) == "windows/threshold: Z",
+          "rules: at the threshold the threshold rule, with its hysteresis, decides")
+
+    // Ping-pong. Drained onto Y; Y reaches its threshold; the threshold rule moves you on...
+    let yFull: [UUID: UsageAPIResponse] = [y.id: sample(10, 90, weeklyResetsIn: 12), a.id: activeA]
+    let yActive = Account(id: y.id, email: "y@x.com", displayName: "Y", isActive: true)
+    let aIdle = Account(id: a.id, email: "a@x.com", displayName: "A")
+    check(drain(yFull, active: yActive, candidates: [aIdle]) == "windows/threshold: A",
+          "rules: ping-pong: the drained account reaching its threshold moves you on")
+    // ...and the drain cannot move you straight back: Y has no room left.
+    check(drain(yFull, active: a, candidates: [y]) == "stay",
+          "rules: ping-pong: the drain does not bring you back to an account at its threshold")
+    // Once Y's 5-hour window resets, its weekly quota still expires first, so
+    // using it again is the point of the feature, not a ping-pong.
+    let ySessionReset: [UUID: UsageAPIResponse] = [y.id: sample(90, 50, weeklyResetsIn: 12, sessionResetsIn: -0.1), a.id: activeA]
+    check(drain(ySessionReset, active: a, candidates: [y]) == "windows/drainEarly: Y",
+          "rules: drain uses an account again once the 5-hour window that stopped it has reset")
+
+    // The shared rule AppState verifies with.
+    let fresh = sample(10, 85, weeklyResetsIn: 12)
+    let reset = Rules.now.addingTimeInterval(100 * 3600)
+    let asDrain = AutoSwitchEngine.eligibleUtilization(fresh, limit: .windows, trigger: .drainEarly, threshold: 90, hysteresisPct: 10,
+                                                       activeWeeklyReset: reset, drainWithin: 24 * 3600, watchFable: true, asOf: Rules.now)
+    let asThreshold = AutoSwitchEngine.eligibleUtilization(fresh, limit: .windows, trigger: .threshold, threshold: 90, hysteresisPct: 10,
+                                                           activeWeeklyReset: nil, drainWithin: 24 * 3600, watchFable: true, asOf: Rules.now)
+    let noActiveReset = AutoSwitchEngine.eligibleUtilization(fresh, limit: .windows, trigger: .drainEarly, threshold: 90, hysteresisPct: 10,
+                                                             activeWeeklyReset: nil, drainWithin: 24 * 3600, watchFable: true, asOf: Rules.now)
+    let onFable = AutoSwitchEngine.eligibleUtilization(fresh, limit: .fable, trigger: .drainEarly, threshold: 90, hysteresisPct: 10,
+                                                       activeWeeklyReset: reset, drainWithin: 24 * 3600, watchFable: true, asOf: Rules.now)
+    check(asDrain == 85 && asThreshold == nil && noActiveReset == nil && onFable == nil,
+          "rules: verification: 85% passes as a drain (1-point room) but not as a threshold switch (10-point), and a drain needs the active reset and the windows limit",
+          "\(String(describing: asDrain)) \(String(describing: asThreshold)) \(String(describing: noActiveReset)) \(String(describing: onFable))")
+    check(AutoSwitchEngine.drainMinimumRoom == 1.0, "rules: the drain's minimum room is 1 percentage point")
 }
