@@ -319,16 +319,18 @@ This follows the founder's answers. The channel never leaves this Mac, and anyth
 - **Integration:** a script builds the app, starts it, and drives the CLI through status, list, usage, settings get/set round-trips, a sign-in start and cancel, and `watch`.
 - **Manual:** one run from the other Mac over SSH in MCP mode.
 
-## 6. Build order and lanes
+## 6. Build order
 
-1. **Part A (auto-switch rules) and Part B (sign-in links) in parallel.**
-   - Part A owns: `AutoSwitchEngine.swift`, the auto-switch section of `AppState.swift`, `Account.swift`, the new Settings → Accounts tab, and the General auto-switch section.
-   - Part B owns: `ClaudeService.swift` (the sign-in session), the sign-in section of `AppState.swift`, the sign-in sheet view, and the helper script.
-   - They share `AppState.swift` in different functions, so the second to merge rebases.
-2. **Part C (remote control)** after both, because it exposes everything they add. It owns: `AppController`, `SettingsStore`, `ControlServer`, `ControlAPI`, `Shared/ControlProtocol.swift`, the CLI target, the `project.yml` changes, and the CI signing change.
-3. **Release as 1.2** once all three pass their tests and the manual checks.
+The parts are built one after another: **A, then B, then C**, each on its own branch and merged before the next starts.
 
-Each part gets its own implementation plan.
+This replaces the earlier "A and B in parallel". Both A and B change `AppState.swift`, `Tests/run-unit-tests.sh`, `Tests/UnitTests/main.swift` and the Settings → Accounts tab. The founder's standing rule is that two writing agents never touch the same file. Changed 2026-09-25, before any code existed.
+
+1. **Part A: auto-switch rules.**
+2. **Part B: sign-in links.** It adds its buttons to the Settings → Accounts tab that A creates.
+3. **Part C: remote control.** It exposes everything A and B add.
+4. **Release as 1.2** once all three pass their tests and the manual checks.
+
+Each part has its own implementation plan in `docs/superpowers/plans/`.
 
 ## 7. Out of scope
 
@@ -344,3 +346,116 @@ Each part gets its own implementation plan.
 - **Early draining switches accounts while you work.** A3 limits it to the drain window, the cooldown and verified room. The founder decides whether to have it at all.
 - **A 15-minute sign-in blocks auto-switch for its duration.** That is today's behaviour, now bounded by the timeout.
 - **`AppState` is 1,410 lines, and Part C touches many of its actions.** The throwing-version approach keeps each change local, and the GUI's behaviour is unchanged by construction.
+
+## 9. Interfaces between the parts
+
+These names and types are fixed here so the three plans agree. A later part relies on exactly these. Implementation details not listed are each plan's own.
+
+### Tests: the convention all three parts follow
+
+- Each part adds pure-logic tests in its own file, `Tests/UnitTests/<Name>Tests.swift`, that defines `@MainActor func run<Name>Tests()`. It calls the existing global `check(_:_:_:)` from `main.swift`.
+- `main.swift` gets one call line per file, placed immediately before the final `print("\n\(passed) passed, \(failed) failed")`.
+- Every new source or test file is added to the `swiftc` list in `Tests/run-unit-tests.sh`.
+- The files are: A `AutoSwitchRulesTests.swift` (`runAutoSwitchRulesTests()`), B `SignInTests.swift` (`runSignInTests()`), C `ControlTests.swift` (`runControlTests()`).
+
+### Produced by Part A
+
+In `PixelSwitch/Models/Account.swift`:
+```swift
+var switchThreshold: Double?   // 50...100; nil = use the default (global) threshold
+```
+
+In `PixelSwitch/Services/AutoSwitchEngine.swift`, pure and in the test harness:
+```swift
+enum AutoSwitchStrategy: String, CaseIterable, Codable, Sendable { case mostRoom, myOrder, resetsSoonest }
+extension AutoSwitchEngine {
+    enum Trigger: String, Sendable { case threshold, drainEarly }
+}
+// plan(...) returns (limit: Limit, trigger: Trigger, targets: [Account])?
+```
+
+UserDefaults keys and defaults:
+
+| Key | Type | Default | Range |
+|---|---|---|---|
+| `autoSwitchEnabled` | Bool | false | existing |
+| `autoSwitchThreshold` | Double | 90 | widened to 50–100 |
+| `autoSwitchOnFable` | Bool | true | existing |
+| `autoSwitchStrategy` | String | `mostRoom` | an `AutoSwitchStrategy` rawValue |
+| `autoSwitchDrainEarly` | Bool | true | |
+| `autoSwitchDrainWithinHours` | Double | 24 | 1–72 |
+
+`enum AutoSwitchSettings` (in `AutoSwitchEngine.swift`) holds these keys as `static let` constants plus typed readers:
+- `strategy`, `drainEarly`, `drainWithinHours`, `defaultThreshold`
+- `thresholdRange = 50.0...100.0` and `drainHoursRange = 1.0...72.0`
+
+The existing `AutoSwitchFableSetting` stays.
+
+On `AppState`, all `@MainActor` and internal:
+```swift
+func effectiveSwitchThreshold(for account: Account) -> Double          // own threshold, else the default
+func setSwitchThreshold(_ threshold: Double?, for account: Account)     // clamps to 50...100; nil clears; saves
+@discardableResult func setAccountOrder(_ orderedIds: [UUID]) -> Bool  // false (and no change) unless a permutation of current ids
+func moveAccounts(fromOffsets source: IndexSet, toOffset destination: Int)  // for SwiftUI onMove; saves
+@Published private(set) var lastAutoSwitch: AutoSwitchRecord?
+struct AutoSwitchRecord: Equatable, Sendable {           // top-level type in AppState.swift
+    let from: UUID; let to: UUID
+    let limit: AutoSwitchEngine.Limit; let trigger: AutoSwitchEngine.Trigger
+    let at: Date
+}
+```
+
+Settings → Accounts is a new tab in `PixelSwitch/Views/SettingsAccountsTab.swift` (`struct SettingsAccountsTab: View`), added to `SettingsView`'s `TabView` after General.
+
+### Produced by Part B
+
+In `PixelSwitch/Services/SignInSession.swift`:
+```swift
+enum SignInPurpose: Equatable, Sendable { case newAccount, reauthenticate(accountId: UUID, email: String) }
+enum SignInState: Equatable, Sendable {
+    case starting, waitingForUser, completing
+    case succeeded(accountId: UUID), failed(message: String), cancelled
+    var isFinished: Bool { get }   // succeeded, failed or cancelled
+}
+@MainActor final class SignInSession: ObservableObject, Identifiable {
+    let id: UUID; let purpose: SignInPurpose; let startedAt: Date
+    @Published private(set) var state: SignInState
+    @Published private(set) var automaticLink: URL?   // localhost redirect: finishes by itself in any browser on this Mac
+    @Published private(set) var manualLink: URL?      // code-callback redirect: the page shows a code to paste back
+    @discardableResult func submitCode(_ code: String) -> Bool   // false unless waitingForUser and the code has the "code#state" shape
+    func cancel()
+}
+```
+
+In `PixelSwitch/Services/SignInOutputParser.swift`, pure and in the test harness:
+```swift
+enum SignInOutputParser {
+    static func manualLink(in output: String) -> URL?
+    static func automaticLink(inCaptureFile contents: String) -> URL?
+}
+```
+
+In `PixelSwitch/Services/BrowserOpener.swift`:
+```swift
+struct BrowserApp: Identifiable, Hashable, Sendable { let id: String /* bundle id */; let name: String; let appURL: URL; let isDefault: Bool }
+@MainActor enum BrowserOpener {
+    static func installedBrowsers() -> [BrowserApp]            // default first
+    @discardableResult static func open(_ url: URL, in browser: BrowserApp?) -> Bool   // nil = default browser
+}
+```
+
+On `AppState`:
+```swift
+@Published private(set) var currentSignIn: SignInSession?
+enum SignInStartError: Error, Equatable { case busy, claudeUnavailable }   // nested in AppState
+func startSignIn(_ purpose: SignInPurpose) throws -> SignInSession   // throws SignInStartError
+```
+
+`loginNewAccount()` and `reauthenticateAccount(_:)` remain, as wrappers that call `startSignIn` and set `errorMessage` on a thrown error.
+
+### Produced by Part C
+
+- `AppController`, `SettingsStore`, `ControlServer`, `ControlAPI` and `Shared/ControlProtocol.swift`.
+- The `pixelswitch` CLI target, including MCP mode.
+
+C relies only on the names above from A and B.
