@@ -29,6 +29,8 @@ swiftc -swift-version 6 \
   PixelSwitch/Services/ClaudeProcessEnvironment.swift \
   PixelSwitch/Services/SignInLinkCapture.swift \
   Tests/UnitTests/SignInTests.swift \
+  PixelSwitch/Control/ControlProtocol.swift \
+  Tests/UnitTests/ControlTests.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
 "$OUT/pixelswitch-unit-tests"
