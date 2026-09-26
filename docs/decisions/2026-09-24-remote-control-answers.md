@@ -38,3 +38,22 @@ Some additional features I want to add to the product:
 
 - Answer 2 overrides the recommendation: no master switch and no permission levels. Anything that can run a command as this Mac's user can do everything, including removing accounts. The control channel still never leaves this Mac (answer 1) and never returns login tokens.
 - Every new feature above is reachable from both the GUI and the CLI/MCP.
+
+## Design review, answered 2026-09-25
+
+Page: [pixelswitch-design-review-2026-09-25.html](pixelswitch-design-review-2026-09-25.html). Recorded verbatim.
+
+```
+PIXELSWITCH: FOUNDER QUESTIONS, DESIGN REVIEW (2026-09-25)
+
+1. Approve the design [approve-design]
+   ANSWER: Approve as written (the recommended one)
+
+2. Should PixelSwitch switch early to use quota that is about to reset? [switch-early]
+   ANSWER: Yes, switch early under that rule, only when "Resets soonest" is chosen (the recommended one)
+   COMMENT: Feature that should be enabled or disabled Via s switch in the configuration settings
+
+(2 of 2 answered)
+```
+
+What follows: the design at docs/superpowers/specs/2026-09-25-remote-control-and-auto-switch-design.md is APPROVED. Early switching (A3) is option (a), with its own on/off switch in Settings → General → Auto-switch, shown whenever "Resets soonest" is picked, on by default, and also settable from the CLI/MCP as `autoSwitch.drainEarly`.

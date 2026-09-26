@@ -1,6 +1,6 @@
 # Remote control, smarter auto-switch, and sign-in links: design
 
-Author: Claude (Opus 5.5), for the founder. Date: 2026-09-25. Status: DRAFT, awaiting the founder's approval.
+Author: Claude (Opus 5.5), for the founder. Date: 2026-09-25. Status: APPROVED by the founder, 2026-09-25 ("Approve as written"). A3 resolved as option (a) with its own Settings switch.
 Founder's requirements and answers, verbatim: [docs/decisions/2026-09-24-remote-control-answers.md](../../decisions/2026-09-24-remote-control-answers.md).
 
 ## In plain words
@@ -101,7 +101,7 @@ There is a new setting `autoSwitchStrategy` with three values:
 - **"Resets soonest" uses the weekly window**, the 7-day window, and the Fable weekly window for a Fable-triggered switch. It never uses the 5-hour window, which resets every few hours and would make the choice meaningless.
 - **Fable preference.** "Most room left" keeps today's preference for accounts with Fable to spare. The other two strategies honour the user's intent strictly. The eligibility rules still apply: a Fable-triggered switch must land on an account with Fable room.
 
-### A3. Switching early to use expiring quota (R7). Pending one founder decision
+### A3. Switching early to use expiring quota (R7). Decided: option (a), with its own switch
 
 The founder's example is an account whose weekly quota resets in 12 hours with some quota left, which should be used first so that quota is not wasted. Waiting for the current account to hit its threshold does not achieve that, so this mode can switch early.
 
@@ -114,10 +114,7 @@ The founder's example is an account whose weekly quota resets in 12 hours with s
 
 After it drains, the normal threshold trigger moves the user on.
 
-The founder chooses on the review page between:
-- **(a) This rule.** Recommended.
-- **(b) Never switch early.** "Resets soonest" only decides where to go at the threshold.
-- **(c) This rule, plus "My order" also switching back early** to a higher account once it has room again.
+**Decided 2026-09-25: option (a).** The founder's words: "Feature that should be enabled or disabled Via s switch in the configuration settings." So `autoSwitchDrainEarly` is a visible on/off switch in Settings → General → Auto-switch. It is shown whenever "Resets soonest" is picked, it is on by default, and it is settable from the CLI/MCP as `autoSwitch.drainEarly`. "My order" never switches early (option (c) was not chosen).
 
 ### A4. Engine changes
 
@@ -136,7 +133,7 @@ The founder chooses on the review page between:
 
   New:
   - a "Choose the next account by" picker
-  - when "Resets soonest" is picked, "Switch early to use quota that resets within [24] hours", subject to A3's decision
+  - when "Resets soonest" is picked, an on/off switch "Switch early to use quota before it resets" (A3) and, while it is on, "within [24] hours"
 - **New Settings → Accounts tab.** It lists every account in priority order, with drag to reorder. Each row shows:
   - the label or email
   - its weekly reset time
