@@ -30,6 +30,9 @@ swiftc -swift-version 6 \
   PixelSwitch/Services/SignInLinkCapture.swift \
   Tests/UnitTests/SignInTests.swift \
   PixelSwitch/Control/ControlProtocol.swift \
+  PixelSwitch/Models/MenuBarModule.swift \
+  PixelSwitch/Control/AccountResolver.swift \
+  PixelSwitch/Control/SettingsCatalog.swift \
   Tests/UnitTests/ControlTests.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
