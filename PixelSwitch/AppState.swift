@@ -3,6 +3,7 @@ import Combine
 import WidgetKit
 
 private let log = FileLog("AppState")
+private let signInLog = FileLog("SignIn")
 
 /// Central app state managing accounts, usage data, and active sessions.
 @MainActor
@@ -23,6 +24,9 @@ final class AppState: ObservableObject {
     @Published var activeSessions: [SessionInfo] = []
     @Published var isLoading = false
     @Published var isLoggingIn = false
+    /// The sign-in in progress, or the last one until it is dismissed or
+    /// replaced, so its outcome stays readable (Part C's status call reads it).
+    @Published private(set) var currentSignIn: SignInSession?
     @Published var errorMessage: String?
     @Published var claudeAvailable = false
     @Published var lastUsageRefresh: Date?
@@ -285,27 +289,99 @@ final class AppState: ObservableObject {
         }
     }
 
-    func loginNewAccount() async {
-        log.info("[loginNewAccount] ===== Starting login new account flow =====")
-        guard claudeAvailable else {
-            errorMessage = String(localized: "Claude CLI not found", bundle: L10n.bundle)
-            log.error("[loginNewAccount] Aborted: Claude CLI not found")
-            return
+    // MARK: - Sign-in
+
+    enum SignInStartError: Error, Equatable { case busy, claudeUnavailable }
+
+    /// Starts a sign-in and returns its session at once. The current account
+    /// is backed up first (before `claude auth login` can overwrite it), then
+    /// the CLI runs; `isLoggingIn` stays true until the session finishes, on
+    /// every path. When Claude Code exits 0, the same capture steps as always
+    /// run (see `finishNewAccountSignIn` and `finishReauthentication`).
+    /// Throws `SignInStartError`.
+    func startSignIn(_ purpose: SignInPurpose) throws -> SignInSession {
+        switch SignInGate.decide(claudeAvailable: claudeAvailable, isSwitching: isSwitching,
+                                 isLoggingIn: isLoggingIn, current: currentSignIn?.state) {
+        case .claudeUnavailable: throw SignInStartError.claudeUnavailable
+        case .busy: throw SignInStartError.busy
+        case .allowed: break
         }
         // One credential mutation at a time (same guard as switchTo). A login
         // entering while a switch is suspended mid-swap would back up the
         // WRONG live credential under the old active account's id — quietly
         // destroying that account's usable backup. Also blocks double-clicks.
-        guard !isSwitching, !isLoggingIn else {
-            log.warning("[loginNewAccount] Skipped: a switch or another login is in progress")
-            return
-        }
-
         isLoggingIn = true
         errorMessage = nil
 
+        let session = SignInSession(
+            purpose: purpose,
+            launch: claudeService.signInLaunch(),
+            runner: ProcessSignInRunner(),
+            scheduler: MainQueueSignInScheduler(),
+            log: { signInLog.info($0) },
+            complete: { [weak self] session in
+                guard let self else { return .failed(message: String(localized: "Login did not complete", bundle: L10n.bundle)) }
+                return await self.completeSignIn(session)
+            },
+            onFinish: { [weak self] session in self?.signInFinished(session) }
+        )
+        currentSignIn = session
+        Task {
+            await self.backUpBeforeSignIn(for: purpose)
+            session.start()
+        }
+        return session
+    }
+
+    /// The popover's "Login New Account" and Settings' "Sign In New Account".
+    func loginNewAccount() {
+        log.info("[loginNewAccount] ===== Starting login new account flow =====")
         do {
-            // 1. Back up current account (token + oauthAccount) before login overwrites them
+            _ = try startSignIn(.newAccount)
+        } catch {
+            reportSignInStartError(error, context: "loginNewAccount")
+        }
+    }
+
+    /// Re-authenticate an account: a sign-in pre-filled with its email, whose
+    /// fresh credentials are captured for it.
+    func reauthenticateAccount(_ account: Account) {
+        log.info("[reauth] ===== Re-authenticating account \(account.id) (\(account.email)) =====")
+        do {
+            _ = try startSignIn(.reauthenticate(accountId: account.id, email: account.email))
+        } catch {
+            reportSignInStartError(error, context: "reauth")
+        }
+    }
+
+    /// Forgets a finished sign-in (its window's Close button). A running one is kept.
+    func dismissSignIn() {
+        if currentSignIn?.state.isFinished == true { currentSignIn = nil }
+    }
+
+    private func reportSignInStartError(_ error: Error, context: String) {
+        switch error as? SignInStartError {
+        case .claudeUnavailable?:
+            errorMessage = String(localized: "Claude CLI not found", bundle: L10n.bundle)
+            log.error("[\(context)] Aborted: Claude CLI not found")
+        case .busy?:
+            log.warning("[\(context)] Skipped: a switch or another login is in progress")
+            if let running = currentSignIn, !running.state.isFinished {
+                errorMessage = String(localized: "A sign-in is already in progress.", bundle: L10n.bundle)
+                NotificationCenter.default.post(name: .pixelswitchShowSignIn, object: nil)
+            } else {
+                errorMessage = String(localized: "A switch is in progress. Try again in a moment.", bundle: L10n.bundle)
+            }
+        case nil:
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Step 1: back up the current account (token + oauthAccount) before the
+    /// login overwrites them.
+    private func backUpBeforeSignIn(for purpose: SignInPurpose) async {
+        switch purpose {
+        case .newAccount:
             if let current = activeAccount {
                 log.info("[loginNewAccount] Step 1: Backing up current account (\(current.email))...")
                 let backed = await claudeService.captureCurrentCredentials(for: current)
@@ -313,58 +389,102 @@ final class AppState: ObservableObject {
             } else {
                 log.info("[loginNewAccount] Step 1: No active account, skipping backup")
             }
-
-            // 2. Run `claude auth login` — this overwrites both keychain and ~/.claude.json
             log.info("[loginNewAccount] Step 2: Running `claude auth login`...")
-            try await claudeService.login()
-            log.info("[loginNewAccount] Step 2: Login process completed")
+        case .reauthenticate(let accountId, _):
+            if let current = activeAccount, current.id != accountId {
+                log.info("[reauth] Backing up current account before login...")
+                _ = await claudeService.captureCurrentCredentials(for: current)
+            }
+            log.info("[reauth] Running `claude auth login`...")
+        }
+    }
 
-            // 3. Read the new identity from ~/.claude.json
-            log.info("[loginNewAccount] Step 3: Reading post-login state...")
-            let status = try await claudeService.getAuthStatus()
-            guard status.loggedIn else {
-                errorMessage = String(localized: "Login did not complete", bundle: L10n.bundle)
-                log.error("[loginNewAccount] Step 3: Not logged in after login!")
+    /// Runs after Claude Code exited 0. Returns the sign-in's final state.
+    private func completeSignIn(_ session: SignInSession) async -> SignInState {
+        // Give keychain a moment to sync after CLI writes.
+        try? await Task.sleep(for: .seconds(1))
+        switch session.purpose {
+        case .newAccount:
+            return await finishNewAccountSignIn()
+        case .reauthenticate(let accountId, let email):
+            return await finishReauthentication(accountId: accountId, expectedEmail: email)
+        }
+    }
+
+    /// Steps 3 to 6 of adding an account, unchanged from the run-to-exit login.
+    private func finishNewAccountSignIn() async -> SignInState {
+        log.info("[loginNewAccount] Step 2: Login process completed")
+
+        // 3. Read the new identity from ~/.claude.json
+        log.info("[loginNewAccount] Step 3: Reading post-login state...")
+        let status: AuthStatus
+        do {
+            status = try await claudeService.getAuthStatus()
+        } catch {
+            errorMessage = error.localizedDescription
+            isLoggingIn = false
+            log.error("[loginNewAccount] Error: \(error.localizedDescription)")
+            return .failed(message: error.localizedDescription)
+        }
+
+        switch SignInResult.newAccount(status: status, accounts: accounts) {
+        case .notLoggedIn:
+            let message = String(localized: "Login did not complete", bundle: L10n.bundle)
+            errorMessage = message
+            log.error("[loginNewAccount] Step 3: Not logged in after login!")
+            isLoggingIn = false
+            return .failed(message: message)
+
+        case .noIdentity:
+            let message = shadowedIdentityMessage(status)
+            errorMessage = message
+            log.error("[loginNewAccount] Step 3: CLI reports authMethod=\(status.authMethod ?? "nil") without an account identity")
+            isLoggingIn = false
+            return .failed(message: message)
+
+        case .existing(let existingId):
+            log.info("[loginNewAccount] Step 3: Logged in as \(status.email ?? "?")")
+            // 4. Duplicate — refresh its backup and make it the active account.
+            // The login DID change what the CLI is authenticated as; returning
+            // without updating our model left the menu bar and switcher
+            // presenting an account the CLI was no longer using. The capture
+            // CAN also fail (e.g. the backup store refuses writes while
+            // unreadable); claiming "credentials refreshed" then would leave a
+            // stale backup behind an explicit success message.
+            log.info("[loginNewAccount] Step 4: Account already exists, refreshing backup and marking it active")
+            guard let target = accounts.first(where: { $0.id == existingId }) else {
                 isLoggingIn = false
-                return
+                return .failed(message: String(localized: "Login did not complete", bundle: L10n.bundle))
             }
-            guard let email = status.email else {
-                errorMessage = shadowedIdentityMessage(status)
-                log.error("[loginNewAccount] Step 3: CLI reports authMethod=\(status.authMethod ?? "nil") without an account identity")
+            let captured = await claudeService.captureCurrentCredentials(for: target)
+            // Looked up again: the capture awaited, and the list may have changed.
+            guard let existing = accounts.firstIndex(where: { $0.id == existingId }) else {
+                let message = String(localized: "That account was removed during the sign-in, so nothing was saved.", bundle: L10n.bundle)
+                errorMessage = message
                 isLoggingIn = false
-                return
+                return .failed(message: message)
             }
+            for i in accounts.indices {
+                accounts[i].isActive = (i == existing)
+            }
+            accounts[existing].lastUsed = Date()
+            activeAccount = accounts[existing]
+            // A login is a deliberate account choice; grant it the same
+            // auto-switch grace period a manual switch gets.
+            lastAutoSwitchAt = Date()
+            saveAccounts()
+            isLoggingIn = false
+            if captured {
+                errorMessage = String(localized: "Account already exists - credentials refreshed", bundle: L10n.bundle)
+                return .succeeded(accountId: existingId)
+            }
+            log.error("[loginNewAccount] Step 4: Backup capture FAILED for existing account")
+            let message = String(localized: "Could not capture credentials", bundle: L10n.bundle)
+            errorMessage = message
+            return .failed(message: message)
+
+        case .new(let email):
             log.info("[loginNewAccount] Step 3: Logged in as \(email)")
-
-            // 4. Check for duplicate — if exists, refresh its backup and make it
-            // the active account. The login DID change what the CLI is
-            // authenticated as; returning without updating our model left the
-            // menu bar and switcher presenting an account the CLI was no longer
-            // using. The capture CAN also fail (e.g. the backup store refuses
-            // writes while unreadable); claiming "credentials refreshed" then
-            // would leave a stale backup behind an explicit success message.
-            if let existing = accounts.firstIndex(where: { $0.email == email }) {
-                log.info("[loginNewAccount] Step 4: Account already exists, refreshing backup and marking it active")
-                let captured = await claudeService.captureCurrentCredentials(for: accounts[existing])
-                for i in accounts.indices {
-                    accounts[i].isActive = (i == existing)
-                }
-                accounts[existing].lastUsed = Date()
-                activeAccount = accounts[existing]
-                // A login is a deliberate account choice; grant it the same
-                // auto-switch grace period a manual switch gets.
-                lastAutoSwitchAt = Date()
-                saveAccounts()
-                if captured {
-                    errorMessage = String(localized: "Account already exists - credentials refreshed", bundle: L10n.bundle)
-                } else {
-                    log.error("[loginNewAccount] Step 4: Backup capture FAILED for existing account")
-                    errorMessage = String(localized: "Could not capture credentials", bundle: L10n.bundle)
-                }
-                isLoggingIn = false
-                return
-            }
-
             // 5. Create new account and capture credentials (token + oauthAccount)
             let account = Account(
                 email: email,
@@ -378,10 +498,11 @@ final class AppState: ObservableObject {
 
             let captured = await claudeService.captureCurrentCredentials(for: account)
             if !captured {
-                errorMessage = String(localized: "Could not capture credentials", bundle: L10n.bundle)
+                let message = String(localized: "Could not capture credentials", bundle: L10n.bundle)
+                errorMessage = message
                 log.error("[loginNewAccount] Step 5: Capture failed!")
                 isLoggingIn = false
-                return
+                return .failed(message: message)
             }
 
             // 6. Mark new account as active
@@ -396,13 +517,107 @@ final class AppState: ObservableObject {
             saveAccounts()
             log.info("[loginNewAccount] Step 6: New account active. Total: \(self.accounts.count)")
 
+            // refresh() skips while isLoggingIn is true; the session is still
+            // `completing`, which keeps a second sign-in out meanwhile.
             isLoggingIn = false
             await refresh()
             log.info("[loginNewAccount] ===== Login completed =====")
+            return .succeeded(accountId: account.id)
+        }
+    }
+
+    /// Steps 3 to 5 of re-authenticating, unchanged from the run-to-exit login.
+    private func finishReauthentication(accountId: UUID, expectedEmail: String) async -> SignInState {
+        // 3. Verify the login result matches the target account
+        let status: AuthStatus
+        do {
+            status = try await claudeService.getAuthStatus()
         } catch {
             errorMessage = error.localizedDescription
             isLoggingIn = false
-            log.error("[loginNewAccount] Error: \(error.localizedDescription)")
+            log.error("[reauth] Error: \(error.localizedDescription)")
+            return .failed(message: error.localizedDescription)
+        }
+
+        switch SignInResult.reauthentication(status: status, expectedEmail: expectedEmail) {
+        case .notLoggedIn:
+            let message = String(localized: "Login did not complete", bundle: L10n.bundle)
+            errorMessage = message
+            isLoggingIn = false
+            return .failed(message: message)
+
+        case .noIdentity:
+            let message = shadowedIdentityMessage(status)
+            errorMessage = message
+            log.error("[reauth] CLI reports authMethod=\(status.authMethod ?? "nil") without an account identity")
+            isLoggingIn = false
+            return .failed(message: message)
+
+        case .wrongAccount(let email):
+            let message = String(localized: "Logged in as \(email), but expected \(expectedEmail). Credentials not updated.", bundle: L10n.bundle)
+            errorMessage = message
+            log.error("[reauth] Email mismatch: got \(email), expected \(expectedEmail)")
+            isLoggingIn = false
+            return .failed(message: message)
+
+        case .matches:
+            guard let account = accounts.first(where: { $0.id == accountId }) else {
+                let message = String(localized: "That account was removed during the sign-in, so nothing was saved.", bundle: L10n.bundle)
+                errorMessage = message
+                log.error("[reauth] Account \(accountId) was removed during the sign-in; nothing captured")
+                isLoggingIn = false
+                return .failed(message: message)
+            }
+
+            // 4. Capture the fresh token
+            let captured = await claudeService.captureCurrentCredentials(for: account)
+            log.info("[reauth] Token capture result: \(captured)")
+
+            // 5. Update account metadata. Done even when the capture failed —
+            // the CLI really is on this account now — but a failed capture must
+            // be surfaced, not folded into "completed": the stored backup is
+            // still the OLD credential, so a later switch away and back would
+            // fail while the UI claimed everything was refreshed.
+            if let index = accounts.firstIndex(where: { $0.id == account.id }) {
+                accounts[index].orgName = status.orgName
+                accounts[index].subscriptionType = status.subscriptionType
+
+                // Mark this account as active (it's what the CLI is now using)
+                for i in accounts.indices {
+                    accounts[i].isActive = (i == index)
+                }
+                activeAccount = accounts[index]
+                // A re-authentication is a deliberate account choice; grant it
+                // the same auto-switch grace period a manual switch gets.
+                lastAutoSwitchAt = Date()
+                saveAccounts()
+            }
+
+            isLoggingIn = false
+            await refresh()
+            if captured {
+                log.info("[reauth] ===== Re-authentication completed =====")
+                return .succeeded(accountId: account.id)
+            }
+            // Set AFTER refresh() — refresh clears errorMessage.
+            let message = String(localized: "Could not capture credentials", bundle: L10n.bundle)
+            errorMessage = message
+            log.error("[reauth] ===== Re-authentication finished, but the backup capture FAILED =====")
+            return .failed(message: message)
+        }
+    }
+
+    /// Runs once per sign-in, on every path: success, failure, cancel, timeout.
+    private func signInFinished(_ session: SignInSession) {
+        isLoggingIn = false
+        switch session.state {
+        case .failed(let message):
+            // The popover footer shows it too, as it always did.
+            errorMessage = message
+        case .cancelled:
+            log.info("[signIn] Cancelled; nothing was changed")
+        case .succeeded, .starting, .waitingForUser, .completing:
+            break
         }
     }
 
@@ -954,95 +1169,6 @@ final class AppState: ObservableObject {
         } catch {
             log.warning("[fetchUsageNow] \(account.id): \(error.localizedDescription)")
             return nil
-        }
-    }
-
-    /// Re-authenticate an account by running `claude auth login` and capturing fresh credentials.
-    func reauthenticateAccount(_ account: Account) async {
-        log.info("[reauth] ===== Re-authenticating account \(account.id) (\(account.email)) =====")
-        guard claudeAvailable else {
-            errorMessage = String(localized: "Claude CLI not found", bundle: L10n.bundle)
-            return
-        }
-        // One credential mutation at a time — see loginNewAccount for why a
-        // login during a suspended switch destroys a backup.
-        guard !isSwitching, !isLoggingIn else {
-            log.warning("[reauth] Skipped: a switch or another login is in progress")
-            return
-        }
-
-        isLoggingIn = true
-        errorMessage = nil
-
-        do {
-            // 1. Back up current active account before login overwrites it
-            if let current = activeAccount, current.id != account.id {
-                log.info("[reauth] Backing up current account before login...")
-                _ = await claudeService.captureCurrentCredentials(for: current)
-            }
-
-            // 2. Run login
-            log.info("[reauth] Running `claude auth login`...")
-            try await claudeService.login()
-
-            // 3. Verify the login result matches the target account
-            let status = try await claudeService.getAuthStatus()
-            guard status.loggedIn else {
-                errorMessage = String(localized: "Login did not complete", bundle: L10n.bundle)
-                isLoggingIn = false
-                return
-            }
-            guard let email = status.email else {
-                errorMessage = shadowedIdentityMessage(status)
-                log.error("[reauth] CLI reports authMethod=\(status.authMethod ?? "nil") without an account identity")
-                isLoggingIn = false
-                return
-            }
-
-            guard email == account.email else {
-                errorMessage = String(localized: "Logged in as \(email), but expected \(account.email). Credentials not updated.", bundle: L10n.bundle)
-                log.error("[reauth] Email mismatch: got \(email), expected \(account.email)")
-                isLoggingIn = false
-                return
-            }
-
-            // 4. Capture the fresh token
-            let captured = await claudeService.captureCurrentCredentials(for: account)
-            log.info("[reauth] Token capture result: \(captured)")
-
-            // 5. Update account metadata. Done even when the capture failed —
-            // the CLI really is on this account now — but a failed capture must
-            // be surfaced, not folded into "completed": the stored backup is
-            // still the OLD credential, so a later switch away and back would
-            // fail while the UI claimed everything was refreshed.
-            if let index = accounts.firstIndex(where: { $0.id == account.id }) {
-                accounts[index].orgName = status.orgName
-                accounts[index].subscriptionType = status.subscriptionType
-
-                // Mark this account as active (it's what the CLI is now using)
-                for i in accounts.indices {
-                    accounts[i].isActive = (i == index)
-                }
-                activeAccount = accounts[index]
-                // A re-authentication is a deliberate account choice; grant it
-                // the same auto-switch grace period a manual switch gets.
-                lastAutoSwitchAt = Date()
-                saveAccounts()
-            }
-
-            isLoggingIn = false
-            await refresh()
-            if captured {
-                log.info("[reauth] ===== Re-authentication completed =====")
-            } else {
-                // Set AFTER refresh() — refresh clears errorMessage.
-                errorMessage = String(localized: "Could not capture credentials", bundle: L10n.bundle)
-                log.error("[reauth] ===== Re-authentication finished, but the backup capture FAILED =====")
-            }
-        } catch {
-            errorMessage = error.localizedDescription
-            isLoggingIn = false
-            log.error("[reauth] Error: \(error.localizedDescription)")
         }
     }
 

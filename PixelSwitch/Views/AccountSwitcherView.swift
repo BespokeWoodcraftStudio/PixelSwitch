@@ -194,7 +194,7 @@ struct AccountSwitcherView: View {
             }
 
             Button {
-                Task { await appState.reauthenticateAccount(account) }
+                appState.reauthenticateAccount(account)
             } label: {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.caption)
@@ -244,17 +244,22 @@ struct AccountSwitcherView: View {
     @ViewBuilder
     private var addAccountButtons: some View {
         if appState.isLoggingIn {
-            // Logging in state
+            // A sign-in is running in its own window, which survives this
+            // popover closing; this brings it back if it went behind.
             VStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Waiting for browser login...")
+                Text("Signing in…")
                     .font(.caption)
                     .foregroundStyle(.textSecondary)
-                Text("Complete the login in your browser, then return here.")
+                Text("Finish in the sign-in window.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
+                Button("Show sign-in window") {
+                    NotificationCenter.default.post(name: .pixelswitchShowSignIn, object: nil)
+                }
+                .controlSize(.small)
             }
             .frame(maxWidth: .infinity)
             .padding(12)
@@ -299,7 +304,7 @@ struct AccountSwitcherView: View {
             VStack(spacing: 8) {
                 // Primary: Login new account via browser
                 Button {
-                    Task { await appState.loginNewAccount() }
+                    appState.loginNewAccount()
                 } label: {
                     Label("Login New Account", systemImage: "person.badge.plus")
                         .font(.subheadline.weight(.medium))

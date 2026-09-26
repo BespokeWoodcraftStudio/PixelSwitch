@@ -625,15 +625,18 @@ final class ClaudeService: @unchecked Sendable {
         return result
     }
 
-    /// Run `claude auth login` which opens browser for OAuth.
-    func login() async throws {
-        log.info("[login] Starting `claude auth login`... (will open browser)")
-        _ = try await runClaude(args: ["auth", "login"])
-        log.info("[login] `claude auth login` process exited")
-
-        // Give keychain a moment to sync after CLI writes
-        try await Task.sleep(for: .seconds(1))
-        log.info("[login] Post-login delay complete, ready for token capture")
+    /// What a `SignInSession` runs: this claude binary, with the same PATH
+    /// and HOME as every other CLI call. The session adds `BROWSER`.
+    func signInLaunch() -> SignInLaunch {
+        let path = claudePath
+        return SignInLaunch(
+            executable: URL(fileURLWithPath: path),
+            environment: ClaudeProcessEnvironment.make(
+                claudePath: path,
+                base: ProcessInfo.processInfo.environment,
+                homeDirectory: NSHomeDirectory()
+            )
+        )
     }
 
     /// Run `claude auth logout`

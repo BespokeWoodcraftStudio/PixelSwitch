@@ -2,6 +2,8 @@ import SwiftUI
 
 extension Notification.Name {
     static let pixelswitchOpenSettings = Notification.Name("pixelswitchOpenSettings")
+    /// Brings the running sign-in's window to the front (`SignInWindowController`).
+    static let pixelswitchShowSignIn = Notification.Name("pixelswitchShowSignIn")
 }
 
 struct HiddenWindowView: View {
