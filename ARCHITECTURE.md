@@ -572,7 +572,7 @@ other Mac ──ssh──▶ pixelswitch mcp ───────┤  ~/Library
               PixelSwitch.app: ControlServer ─▶ ControlAPI ─▶ AppController ─▶ AppState / SettingsStore
 ```
 
-- **Transport.** A Unix-domain socket, newline-delimited JSON-RPC 2.0 (`PixelSwitch/Control/ControlProtocol.swift`, compiled into the app and the tool, protocol version 1). `ControlServer` refuses a peer whose uid is not this user's, replaces a socket file left by a crash, and will not take over one another copy of the app still answers on. There is no TCP listener.
+- **Transport.** A Unix-domain socket, newline-delimited JSON-RPC 2.0 (`PixelSwitch/Control/ControlProtocol.swift`, compiled into the app and the tool, protocol version 2 since 1.5, when accounts gained `manualOnly`). `ControlServer` refuses a peer whose uid is not this user's, replaces a socket file left by a crash, and will not take over one another copy of the app still answers on. There is no TCP listener.
 - **API.** `ControlAPI` maps the 19 methods (`status.get`, `accounts.*`, `usage.*`, `settings.*`, `events.subscribe`, `app.*`) onto `AppControlling`, which `AppController` implements with the same `AppState` methods the GUI uses. It never touches `KeychainService` or `ClaudeService` credential methods, and a unit test scans every result for token fields. Accounts are named by id, email, label or position (`AccountResolver`).
 - **Settings.** `SettingKey` (pure) knows every setting's shape; `SettingsStore` reads and writes the real values and owns their side effects, which the Settings window's `onChange` handlers also call.
 - **Events.** `ControlEventHub` pushes `activeAccountChanged`, `usageUpdated`, `autoSwitched`, `signInChanged` and `error` to subscribed connections (`pixelswitch watch`).

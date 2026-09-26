@@ -44,7 +44,7 @@ trap restore EXIT
 
 # 1. Status and protocol
 if status=$("$CLI" --json status); then
-    [ "$(echo "$status" | field protocolVersion)" = "1" ] && ok "status answers, protocol 1" || bad "status protocol" "$status"
+    [ "$(echo "$status" | field protocolVersion)" = "2" ] && ok "status answers, protocol 2" || bad "status protocol" "$status"
 else
     bad "status" "exit $?"
 fi

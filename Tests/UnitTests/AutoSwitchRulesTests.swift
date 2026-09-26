@@ -11,6 +11,7 @@ import Foundation
     accountOrderTests()
     manualOnlySettingsTests()
     ceilingTests()
+    tooltipNumbersTests()
     manualOnlyEngineTests()
     lowThresholdTests()
     thresholdStringsTests()
@@ -451,6 +452,20 @@ private func sample(_ session: Double?, _ weekly: Double?,
           "order: removing the active account falls back to the first account that is not Manual only")
 }
 
+@MainActor private func tooltipNumbersTests() {
+    let e = AutoSwitchSettings.explanation
+    let dflt = e(nil, 90, .mostRoom, true)
+    check(dflt?.leaveAt == 90 && dflt?.arriveAt == 80 && dflt?.drainArriveAt == nil,
+          "tooltip: a default account is left at 90% and taken at 80% or less")
+    let low = e(10, 90, .resetsSoonest, true)
+    check(low?.leaveAt == 10 && low?.arriveAt == 5 && low?.drainArriveAt == 9,
+          "tooltip: with Resets soonest and early switching on, it also states the early-switch number")
+    check(e(90, 90, .resetsSoonest, false)?.drainArriveAt == nil && e(90, 90, .myOrder, true)?.drainArriveAt == nil,
+          "tooltip: no early-switch number when early switching is off or another strategy is chosen")
+    check(e(0, 90, .resetsSoonest, true) == nil && e(nil, 30, .mostRoom, true)?.leaveAt == 50,
+          "tooltip: Manual only has no numbers, and an out-of-range default reads as the engine reads it")
+}
+
 @MainActor private func ceilingTests() {
     let ceiling = AutoSwitchEngine.ceiling
     check(AutoSwitchEngine.hysteresis == 10, "rules: the hysteresis is 10 points")
@@ -600,6 +615,7 @@ private func sample(_ session: Double?, _ weekly: Double?,
         "Manual only (%lld%%)",
         "Manual only",
         "Auto-switch moves you off this account at %@, and moves you to it only while it is at %@ or less.",
+        "Auto-switch moves you off this account at %@, and moves you to it only while it is at %@ or less (%@ or less when it switches early before this account's weekly quota resets).",
         "Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default threshold (%@).",
         "You're using it now. Auto-switch moves you off it at %@ and won't move you back to it.",
         "Every account except the one you're using is Manual only, so auto-switch has nowhere to move you.",

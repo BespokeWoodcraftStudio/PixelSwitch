@@ -115,3 +115,33 @@ In chat, after 1.3 shipped with the box unticked by default. Verbatim:
 What follows:
 - `SUAutomaticallyUpdate: true` is in the app's Info.plist (project.yml). Sparkle uses it until someone unticks the box, which saves NO in user defaults, and that wins.
 - Released as 1.4. His own Mac already had the box ticked (SUAutomaticallyUpdate = 1 in his defaults, read 2026-09-26), so his 1.3 should install 1.4 by itself within about 6 hours. That is the first end-to-end proof of automatic updates.
+
+## Per-account thresholds down to 0% ("Manual only"), 2026-09-26
+
+In chat, verbatim:
+
+> okay, another update: I want to make it so the amount that you can set for the limit per account can go below 50%. I want it to be able to go all the way down to 0%, and at 0%, it's disabled from being switched to.  And maybe sometimes you don't want accounts to be used, so you want them disabled. Changing it to 0% would basically do that.  A quick way to do it would be to have a checkbox next to it or something that says "Disable auto switch," but something like that. Come up with a better idea.
+
+How the design was chosen:
+- A design workflow ran three independent designs (clarity first, engine correctness first, smallest change), two judges (founder lens, engine lens) and one synthesis. Run wf_4927df27-02c.
+- Both judges picked the clarity design; the synthesis grafted the engine design's single exclusion rule and the minimal design's label reuse.
+
+What was built (release 1.5):
+- **"Manual only (0%)"** is the named last item of each account's threshold menu. There is no checkbox: one control, one stored value (`switchThreshold == 0`).
+  - Auto-switch never moves you to it. `AutoSwitchEngine.ceiling` returns nil for 0, inside the one rule that ranking and verification share.
+  - You can still switch to it by hand.
+  - While it is active, auto-switch moves you off only at the default threshold and never early-drains it.
+  - Nothing brings you back to it.
+- **1–100%** per account. The stepper stops at 1, so nobody slides into Manual only by accident.
+  - Below 20%, the room a target needs is half its threshold, so 5% is not a hidden second "never".
+  - It is identical to 1.4 for 20–100% (pinned by loop tests).
+- The global default stays 50–100.
+
+Decisions NOT to do something (so a later session does not "fix" them):
+- **No "Disable auto switch" checkbox.** It means two controls for one decision, allows a contradictory state ("disabled" but "Switch at 70%"), and the words could equally mean "never switch away from it".
+- **Setting Manual only on the account you are using does not move you off it.** A settings change should not pull a live login out from under running sessions. The Settings row and the CLI say when you will be moved.
+- **A deliberate manual switch to a Manual only account is not undone after the 5-minute cooldown.** The rejected alternative ("0 is reached at any reading") would rewrite the live login about 5 minutes after every manual pick.
+- **No remembered previous threshold** when choosing Manual only. A hidden value would come back into force later; one click on Default or a number turns it back on.
+- **No CLI aliases "off", "never" or "disable".** They read as "never switch away". Only `manual` and `0`.
+- **No "Manual only" badge beside the name in the popover.** The address already truncates there (recorded in AccountSwitcherView and UsageDashboardView); a separate quiet line is used instead.
+- **The global default cannot go below 50.** A 0% default would make every account Manual only.

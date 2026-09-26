@@ -14,6 +14,8 @@ struct SettingsAccountsTab: View {
     @AppStorage(EmailDisplay.key) private var maskEmails = false
     @AppStorage(AutoSwitchSettings.thresholdKey) private var defaultThreshold = AutoSwitchSettings.fallbackThreshold
     @AppStorage(AutoSwitchSettings.enabledKey) private var autoSwitchEnabled = false
+    @AppStorage(AutoSwitchSettings.strategyKey) private var strategyName = AutoSwitchStrategy.mostRoom.rawValue
+    @AppStorage(AutoSwitchSettings.drainEarlyKey) private var drainEarly = true
 
     /// The thresholds the menu offers: 10–40 in 10s, then 50–100 in 5s; the
     /// stepper beside a custom value reaches every whole number from 1 to 100.
@@ -195,9 +197,13 @@ struct SettingsAccountsTab: View {
         if own == AutoSwitchSettings.manualOnlyThreshold {
             return Text("Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default threshold (\(Self.percent(shownDefault))).")
         }
-        let leaveAt = own ?? shownDefault
-        let arriveAt = AutoSwitchEngine.ceiling(threshold: leaveAt, room: AutoSwitchEngine.hysteresis) ?? 0
-        return Text("Auto-switch moves you off this account at \(Self.percent(leaveAt)), and moves you to it only while it is at \(Self.percent(arriveAt)) or less.")
+        let strategy = AutoSwitchStrategy(rawValue: strategyName) ?? .mostRoom
+        guard let numbers = AutoSwitchSettings.explanation(own: own, defaultThreshold: shownDefault,
+                                                           strategy: strategy, drainEarly: drainEarly) else { return Text(verbatim: "") }
+        if let drainAt = numbers.drainArriveAt {
+            return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt)), and moves you to it only while it is at \(Self.percent(numbers.arriveAt)) or less (\(Self.percent(drainAt)) or less when it switches early before this account's weekly quota resets).")
+        }
+        return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt)), and moves you to it only while it is at \(Self.percent(numbers.arriveAt)) or less.")
     }
 
     /// The stepper's binding: the account's own threshold, saved on change.

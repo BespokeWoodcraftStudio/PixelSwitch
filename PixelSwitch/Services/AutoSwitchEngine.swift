@@ -501,4 +501,18 @@ enum AutoSwitchSettings {
     static func leaveAtThreshold(rule: Double, defaultThreshold: Double) -> Double {
         rule > manualOnlyThreshold ? rule : clampedThreshold(defaultThreshold)
     }
+
+    /// The numbers Settings → Accounts states for an account, from the
+    /// engine's own rules: where auto-switch leaves it, the highest use at
+    /// which it moves you to it (threshold rule), and, with Resets soonest and
+    /// early switching on, the higher ceiling the early switch allows. Nil for
+    /// Manual only.
+    static func explanation(own: Double?, defaultThreshold: Double, strategy: AutoSwitchStrategy,
+                            drainEarly: Bool) -> (leaveAt: Double, arriveAt: Double, drainArriveAt: Double?)? {
+        let rule = effectiveThreshold(own: own, defaultThreshold: defaultThreshold)
+        guard let arriveAt = AutoSwitchEngine.ceiling(threshold: rule, room: AutoSwitchEngine.hysteresis) else { return nil }
+        let drain = strategy == .resetsSoonest && drainEarly
+            ? AutoSwitchEngine.ceiling(threshold: rule, room: AutoSwitchEngine.drainMinimumRoom) : nil
+        return (rule, arriveAt, drain)
+    }
 }
