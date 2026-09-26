@@ -21,3 +21,4 @@ that file for the full entry. Start here to get up to speed on the project.
 ## 2026-09-25
 - [WL-2026-09-25-001](./2026-09-25.md) — Design written: remote control, per-account thresholds, next-account strategy, sign-in links — _design/wip_
 - [WL-2026-09-25-002](./2026-09-25.md) — Design approved; three build plans being written; no Xcode on this Mac — _decision/wip_
+- [WL-2026-09-25-003](./2026-09-25.md) — Single lane: plans A and B done and verified; Part C plan in progress — _docs/wip_
