@@ -21,6 +21,8 @@ swiftc -swift-version 6 \
   PixelSwitch/Models/EmailDisplay.swift \
   PixelSwitch/Services/AutoSwitchEngine.swift \
   Tests/UnitTests/AutoSwitchRulesTests.swift \
+  PixelSwitch/Services/SignInOutputParser.swift \
+  Tests/UnitTests/SignInTests.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
 "$OUT/pixelswitch-unit-tests"
