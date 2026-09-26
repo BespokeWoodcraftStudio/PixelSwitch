@@ -270,3 +270,20 @@
 "Finish in the sign-in window." = "Terminez dans la fenêtre de connexion.";
 "Show sign-in window" = "Afficher la fenêtre de connexion";
 "Sign In New Account" = "Connecter un nouveau compte";
+
+/* Remote control (1.2) */
+"Command line & AI" = "Ligne de commande et IA";
+"Command-line tool" = "Outil en ligne de commande";
+"Install" = "Installer";
+"Reinstall" = "Réinstaller";
+"Copy" = "Copier";
+"Installed at %@." = "Installé dans %@.";
+"Not installed. Install puts `pixelswitch` at %@." = "Non installé. « Installer » place `pixelswitch` dans %@.";
+"%@ points to another copy of PixelSwitch. Install points it here." = "%@ pointe vers une autre copie de PixelSwitch. « Installer » le fait pointer ici.";
+"Something else is already at %@, so it was left alone." = "Un autre élément se trouve déjà dans %@ ; il a été laissé tel quel.";
+"Remote control is on. Only this Mac's user can connect; nothing is open to the network." = "Le contrôle à distance est activé. Seul l’utilisateur de ce Mac peut s’y connecter ; rien n’est ouvert sur le réseau.";
+"Remote control is not running." = "Le contrôle à distance n’est pas actif.";
+"Remote control could not start: %@" = "Le contrôle à distance n’a pas pu démarrer : %@";
+"To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH." = "Pour que Claude sur un autre Mac puisse contrôler PixelSwitch, ajoutez ceci à ses réglages MCP. Ce Mac doit pouvoir joindre celui-ci en SSH.";
+"No account is active yet, so there is nothing to switch from. Add the current account first." = "Aucun compte n’est encore actif, il n’y a donc rien à changer. Ajoutez d’abord le compte actuel.";
+"A switch or sign-in is in progress. Try again in a moment." = "Un changement ou une connexion est en cours. Réessayez dans un instant.";

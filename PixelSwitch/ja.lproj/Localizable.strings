@@ -270,3 +270,20 @@
 "Finish in the sign-in window." = "サインインウィンドウで完了してください。";
 "Show sign-in window" = "サインインウィンドウを表示";
 "Sign In New Account" = "新しいアカウントでサインイン";
+
+/* Remote control (1.2) */
+"Command line & AI" = "コマンドラインと AI";
+"Command-line tool" = "コマンドラインツール";
+"Install" = "インストール";
+"Reinstall" = "再インストール";
+"Copy" = "コピー";
+"Installed at %@." = "%@ にインストール済みです。";
+"Not installed. Install puts `pixelswitch` at %@." = "インストールされていません。「インストール」で `pixelswitch` を %@ に配置します。";
+"%@ points to another copy of PixelSwitch. Install points it here." = "%@ は別の PixelSwitch を指しています。「インストール」でこちらを指すようにします。";
+"Something else is already at %@, so it was left alone." = "%@ には別のものがあるため、そのままにしました。";
+"Remote control is on. Only this Mac's user can connect; nothing is open to the network." = "リモート操作はオンです。この Mac のユーザーだけが接続でき、ネットワークには何も公開していません。";
+"Remote control is not running." = "リモート操作は実行されていません。";
+"Remote control could not start: %@" = "リモート操作を開始できませんでした: %@";
+"To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH." = "別の Mac の Claude から PixelSwitch を操作するには、その MCP 設定にこれを追加してください。その Mac から SSH でこの Mac に接続できる必要があります。";
+"No account is active yet, so there is nothing to switch from. Add the current account first." = "まだアクティブなアカウントがないため、切り替え元がありません。先に現在のアカウントを追加してください。";
+"A switch or sign-in is in progress. Try again in a moment." = "切り替えまたはサインインの処理中です。しばらくしてからもう一度お試しください。";

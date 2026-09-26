@@ -270,3 +270,20 @@
 "Finish in the sign-in window." = "请在登录窗口中完成。";
 "Show sign-in window" = "显示登录窗口";
 "Sign In New Account" = "登录新账户";
+
+/* Remote control (1.2) */
+"Command line & AI" = "命令行与 AI";
+"Command-line tool" = "命令行工具";
+"Install" = "安装";
+"Reinstall" = "重新安装";
+"Copy" = "复制";
+"Installed at %@." = "已安装在 %@。";
+"Not installed. Install puts `pixelswitch` at %@." = "未安装。“安装”会将 `pixelswitch` 放在 %@。";
+"%@ points to another copy of PixelSwitch. Install points it here." = "%@ 指向另一份 PixelSwitch。“安装”会将其指向这里。";
+"Something else is already at %@, so it was left alone." = "%@ 已有其他文件，因此未作改动。";
+"Remote control is on. Only this Mac's user can connect; nothing is open to the network." = "远程控制已开启。只有这台 Mac 的用户可以连接，没有任何端口向网络开放。";
+"Remote control is not running." = "远程控制未在运行。";
+"Remote control could not start: %@" = "远程控制无法启动：%@";
+"To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH." = "若要让另一台 Mac 上的 Claude 控制 PixelSwitch，请将此内容添加到它的 MCP 设置中。那台 Mac 必须能通过 SSH 连接到这台 Mac。";
+"No account is active yet, so there is nothing to switch from. Add the current account first." = "尚无活跃账户，因此无从切换。请先添加当前账户。";
+"A switch or sign-in is in progress. Try again in a moment." = "正在切换或登录。请稍后再试。";

@@ -99,6 +99,8 @@ struct ClaudeCLITabView: View {
                 }
                 .disabled(isLoading)
             }
+
+            RemoteControlSection()
         }
         .formStyle(.grouped)
         .padding()

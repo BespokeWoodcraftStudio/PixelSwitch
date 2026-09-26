@@ -272,3 +272,20 @@
 "Finish in the sign-in window." = "Finish in the sign-in window.";
 "Show sign-in window" = "Show sign-in window";
 "Sign In New Account" = "Sign In New Account";
+
+/* Remote control (1.2) */
+"Command line & AI" = "Command line & AI";
+"Command-line tool" = "Command-line tool";
+"Install" = "Install";
+"Reinstall" = "Reinstall";
+"Copy" = "Copy";
+"Installed at %@." = "Installed at %@.";
+"Not installed. Install puts `pixelswitch` at %@." = "Not installed. Install puts `pixelswitch` at %@.";
+"%@ points to another copy of PixelSwitch. Install points it here." = "%@ points to another copy of PixelSwitch. Install points it here.";
+"Something else is already at %@, so it was left alone." = "Something else is already at %@, so it was left alone.";
+"Remote control is on. Only this Mac's user can connect; nothing is open to the network." = "Remote control is on. Only this Mac's user can connect; nothing is open to the network.";
+"Remote control is not running." = "Remote control is not running.";
+"Remote control could not start: %@" = "Remote control could not start: %@";
+"To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH." = "To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH.";
+"No account is active yet, so there is nothing to switch from. Add the current account first." = "No account is active yet, so there is nothing to switch from. Add the current account first.";
+"A switch or sign-in is in progress. Try again in a moment." = "A switch or sign-in is in progress. Try again in a moment.";
