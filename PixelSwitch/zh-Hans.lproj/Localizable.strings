@@ -222,3 +222,12 @@
 "Within %lld hours" = "%lld 小时内";
 "Switches before the active account reaches its threshold when another account's weekly quota resets within this many hours, sooner than the active account's, and that account still has room." = "当另一个账户的每周额度在这段时间内重置、早于当前账户，且该账户仍有余量时，会在当前账户达到阈值之前切换过去。";
 "When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping." = "当活跃账户的 5 小时、每周或 Fable 用量达到其阈值时，PixelSwitch 会切换到另一个比其自身阈值至少低 10 个百分点的账户。关闭上方的 Fable 开关后，Fable 仅作为显示，5 小时与每周限额仍会触发切换。每次刷新时检查；5 分钟冷却时间可防止频繁来回切换。";
+
+/* Settings → Accounts (1.2) */
+"Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only." = "拖动账户即可调整顺序。设置 → 通用中的“我的顺序”会从上到下依次尝试账户，所有账户列表也都按此顺序显示。非默认的阈值只对该账户生效。";
+"Weekly resets %@" = "每周：%@ 重置";
+"Weekly resets in %@" = "每周：%@ 后重置";
+"Weekly reset not known yet" = "尚不知道每周重置时间";
+"Default (%lld%%)" = "默认（%lld%%）";
+"Switch at %lld%%" = "%lld%% 时切换";
+"When this account's usage reaches this level, auto-switch moves you to another account." = "当此账户的用量达到该水平时，自动切换会把你转到另一个账户。";

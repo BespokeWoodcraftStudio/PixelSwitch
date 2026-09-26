@@ -27,6 +27,11 @@ struct SettingsView: View {
                     Label("General", systemImage: "gear")
                 }
 
+            SettingsAccountsTab()
+                .tabItem {
+                    Label("Accounts", systemImage: "person.2")
+                }
+
             menuBarTab
                 .tabItem {
                     Label("Menu Bar", systemImage: "menubar.rectangle")
