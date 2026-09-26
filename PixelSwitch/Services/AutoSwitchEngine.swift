@@ -104,6 +104,26 @@ enum AutoSwitchEngine {
         return util
     }
 
+    /// The weekly reset "Resets soonest" ranks by: the 7-day window for
+    /// `.windows`, the Fable weekly allowance for `.fable`. Never the 5-hour
+    /// window, which resets every few hours and would make the choice
+    /// meaningless.
+    ///
+    /// Nil unless that window has a reading AND a reset time still in the
+    /// future. A reset in the past means the sample describes a week that has
+    /// already ended (round-robin polling keeps old samples), so when the NEXT
+    /// week ends is unknown.
+    static func weeklyReset(_ usage: UsageAPIResponse?, limit: Limit, asOf now: Date = Date()) -> Date? {
+        let window: UsageWindow?
+        switch limit {
+        case .windows: window = usage?.sevenDay
+        case .fable: window = usage?.modelWeeklyLimit(named: fableModelName)?.window
+        }
+        guard let window, window.utilization != nil,
+              let resets = window.resetsAtDate, resets > now else { return nil }
+        return resets
+    }
+
     /// One window's utilization, or nil if it has none or its window has reset.
     private static func reading(_ window: UsageWindow?, asOf now: Date, requireKnownWindow: Bool) -> Double? {
         guard let window, let util = window.utilization else { return nil }
@@ -116,14 +136,16 @@ enum AutoSwitchEngine {
     /// Which limit to act on, by which rule, and where to go; nil to stay put.
     /// Session and weekly are checked first; Fable only when they have not
     /// triggered a switch, since a Fable target must have session and weekly
-    /// room anyway. Each account is judged against its OWN threshold.
+    /// room anyway. Each account is judged against its OWN threshold, and the
+    /// eligible ones are ordered by `strategy`.
     ///
     /// `watchFable` is the user's setting: off means Fable is shown but never
     /// moves anyone, while session and weekly keep working exactly as before.
     ///
     /// - Parameters:
     ///   - active: the currently active account.
-    ///   - candidates: every other account (already filtered to the same provider).
+    ///   - candidates: every other account (already filtered to the same
+    ///     provider), IN THE ACCOUNTS LIST'S ORDER: `.myOrder` ranks by it.
     ///   - usageByAccount: latest usage sample per account id.
     ///   - isSwitchable: whether an account can actually be switched to right now
     ///     (has a stored backup token and isn't flagged expired).
@@ -135,6 +157,8 @@ enum AutoSwitchEngine {
     ///     the default), 50–100.
     ///   - hysteresisPct: a candidate must sit at least this far below its own
     ///     threshold (e.g. 10).
+    ///   - strategy: how eligible candidates are ordered. The default is
+    ///     today's behaviour.
     ///   - now: injected clock, for window-expiry checks and testability.
     static func plan(
         active: Account,
@@ -145,6 +169,7 @@ enum AutoSwitchEngine {
         threshold: (Account) -> Double,
         hysteresisPct: Double,
         watchFable: Bool = true,
+        strategy: AutoSwitchStrategy = .mostRoom,
         asOf now: Date = Date()
     ) -> (limit: Limit, trigger: Trigger, targets: [Account])? {
         let activeThreshold = threshold(active)
@@ -160,7 +185,7 @@ enum AutoSwitchEngine {
             let targets = rankedTargets(
                 active: active, candidates: candidates, usageByAccount: usageByAccount,
                 isSwitchable: isSwitchable, threshold: threshold, hysteresisPct: hysteresisPct,
-                limit: limit, asOf: now
+                limit: limit, strategy: strategy, asOf: now
             )
             if !targets.isEmpty { return (limit, .threshold, targets) }
         }
@@ -187,26 +212,60 @@ enum AutoSwitchEngine {
         threshold: (Account) -> Double,
         hysteresisPct: Double,
         limit: Limit,
+        strategy: AutoSwitchStrategy,
         asOf now: Date = Date()
     ) -> [Account] {
-        candidates
-            .compactMap { candidate -> (account: Account, util: Double, keepsFable: Bool)? in
-                let usage = usageByAccount[candidate.id]
-                let ceiling = threshold(candidate) - hysteresisPct
-                // The usage check comes first: `isSwitchable` reads the Keychain.
-                guard candidate.id != active.id,
-                      let util = eligibleUtilization(usage, limit: limit, ceiling: ceiling, asOf: now),
-                      isSwitchable(candidate) else { return nil }
-                let keepsFable = utilization(usage, limit: .fable, asOf: now).map { $0 <= ceiling } ?? false
-                return (candidate, util, keepsFable)
-            }
+        struct Ranked {
+            let account: Account
+            /// Position in `candidates`, i.e. in the user's order.
+            let position: Int
+            let util: Double
+            let keepsFable: Bool
+            /// The weekly reset in whole minutes since 1970, or nil when unknown.
+            /// Whole minutes because the API stamps each reading with the
+            /// fetch's own microseconds, so two accounts on the same weekly
+            /// schedule never compare exactly equal.
+            let resetMinute: Double?
+        }
+
+        let eligible = candidates.enumerated().compactMap { position, candidate -> Ranked? in
+            let usage = usageByAccount[candidate.id]
+            let ceiling = threshold(candidate) - hysteresisPct
+            // The usage check comes first: `isSwitchable` reads the Keychain.
+            guard candidate.id != active.id,
+                  let util = eligibleUtilization(usage, limit: limit, ceiling: ceiling, asOf: now),
+                  isSwitchable(candidate) else { return nil }
+            let keepsFable = utilization(usage, limit: .fable, asOf: now).map { $0 <= ceiling } ?? false
+            let resetMinute = weeklyReset(usage, limit: limit, asOf: now)
+                .map { ($0.timeIntervalSince1970 / 60).rounded(.down) }
+            return Ranked(account: candidate, position: position, util: util,
+                          keepsFable: keepsFable, resetMinute: resetMinute)
+        }
+
+        let ordered: [Ranked]
+        switch strategy {
+        case .mostRoom:
             // Accounts with Fable to spare first, so a session/weekly switch
             // does not land on an account that is out of Fable and force a
             // second switch minutes later; then most headroom first (lowest
-            // known utilization). Every `.fable` candidate keeps Fable, so
-            // those rank purely by Fable headroom.
-            .sorted { ($0.keepsFable ? 0 : 1, $0.util) < ($1.keepsFable ? 0 : 1, $1.util) }
-            .map(\.account)
+            // known utilization); then the user's order, so a tie is stable.
+            ordered = eligible.sorted {
+                ($0.keepsFable ? 0 : 1, $0.util, $0.position) < ($1.keepsFable ? 0 : 1, $1.util, $1.position)
+            }
+        case .myOrder:
+            // Already in the user's order: always from the top.
+            ordered = eligible
+        case .resetsSoonest:
+            ordered = eligible.sorted { a, b in
+                switch (a.resetMinute, b.resetMinute) {
+                case let (x?, y?) where x != y: return x < y
+                case (.some, nil): return true
+                case (nil, .some): return false
+                default: return (a.util, a.position) < (b.util, b.position)
+                }
+            }
+        }
+        return ordered.map(\.account)
     }
 }
 

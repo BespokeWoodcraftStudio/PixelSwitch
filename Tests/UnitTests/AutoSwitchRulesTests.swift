@@ -6,6 +6,7 @@ import Foundation
 @MainActor func runAutoSwitchRulesTests() {
     autoSwitchSettingsTests()
     perAccountThresholdTests()
+    strategyTests()
 }
 
 /// Fixtures shared by every case in this file.
@@ -22,13 +23,14 @@ private enum Rules {
 
     /// The engine as AppState calls it, with each account's effective threshold.
     static func plan(active: Account, candidates: [Account], _ usage: [UUID: UsageAPIResponse],
-                     defaultThreshold: Double = 90, watchFable: Bool = true,
+                     defaultThreshold: Double = 90, strategy: AutoSwitchStrategy = .mostRoom,
+                     watchFable: Bool = true,
                      switchable: (Account) -> Bool = { _ in true }, sampled: Bool = true) -> Plan? {
         AutoSwitchEngine.plan(
             active: active, candidates: candidates, usageByAccount: usage,
             isSwitchable: switchable, activeSampledThisCycle: sampled,
             threshold: { AutoSwitchSettings.effectiveThreshold(own: $0.switchThreshold, defaultThreshold: defaultThreshold) },
-            hysteresisPct: 10, watchFable: watchFable, asOf: now)
+            hysteresisPct: 10, watchFable: watchFable, strategy: strategy, asOf: now)
     }
 
     /// "stay", or "<limit>/<trigger>: <targets in order>".
@@ -191,4 +193,75 @@ private func sample(_ session: Double?, _ weekly: Double?,
     let nobody: [UUID: UsageAPIResponse] = [aDefault.id: sample(95, 40), b70.id: sample(61, 20), c.id: sample(81, 20)]
     check(Rules.plan(active: aDefault, candidates: [b70, c], nobody) == nil,
           "rules: when no candidate is eligible the plan is to stay put")
+}
+
+// MARK: - Choosing the next account
+
+@MainActor private func strategyTests() {
+    let a = Account(email: "a@x.com", displayName: "A", isActive: true)
+    let b = Account(email: "b@x.com", displayName: "B")
+    let c = Account(email: "c@x.com", displayName: "C")
+    let d = Account(email: "d@x.com", displayName: "D")
+    let e = Account(email: "e@x.com", displayName: "E")
+    func plan(_ usage: [UUID: UsageAPIResponse], _ strategy: AutoSwitchStrategy, active: Account? = nil, candidates: [Account]? = nil) -> String {
+        Rules.describe(Rules.plan(active: active ?? a, candidates: candidates ?? [b, c, d], usage, strategy: strategy))
+    }
+
+    // Review focus: an account with no usage sample yet is never chosen, whatever the strategy.
+    let fresh = Account(email: "f@x.com", displayName: "F")
+    for strategy in AutoSwitchStrategy.allCases {
+        check(plan([a.id: sample(95, 40)], strategy, candidates: [fresh]) == "stay",
+              "rules: an account with no usage sample yet is never chosen (\(strategy.rawValue))")
+    }
+
+    // Three eligible accounts, listed B, C, D.
+    let three: [UUID: UsageAPIResponse] = [
+        a.id: sample(95, 40),
+        b.id: sample(10, 50),   // binding 50, weekly resets in 100 h
+        c.id: sample(10, 20, weeklyResetsIn: 30),    // binding 20, resets in 30 h
+        d.id: sample(10, 40, weeklyResetsIn: 10),    // binding 40, resets in 10 h
+    ]
+    check(plan(three, .mostRoom) == "windows/threshold: C,D,B", "rules: most room left ranks by lowest use", plan(three, .mostRoom))
+    check(plan(three, .myOrder) == "windows/threshold: B,C,D", "rules: my order keeps the list's order", plan(three, .myOrder))
+    check(plan(three, .resetsSoonest) == "windows/threshold: D,C,B", "rules: resets soonest ranks by the weekly reset", plan(three, .resetsSoonest))
+
+    // Resets soonest: a tie (same minute) goes to most room; an unknown reset ranks last.
+    let ties: [UUID: UsageAPIResponse] = [
+        a.id: sample(95, 40),
+        b.id: sample(10, 60, weeklyResetsIn: 30),
+        c.id: sample(10, 30, weeklyResetsIn: 30 + 20.0 / 3600),   // 20 seconds later: same minute
+        d.id: sample(5, 5, weeklyResetsIn: nil),                  // no weekly reset time at all
+        e.id: sample(5, 5, weeklyResetsIn: -3),                   // retained from a week that has ended
+    ]
+    let tied = plan(ties, .resetsSoonest, candidates: [b, c, d, e])
+    check(tied == "windows/threshold: C,B,D,E", "rules: resets soonest breaks a tie by most room, and puts unknown resets last", tied)
+    check(AutoSwitchEngine.weeklyReset(ties[e.id], limit: .windows, asOf: Rules.now) == nil,
+          "rules: a weekly reset in the past counts as unknown, not as soonest")
+
+    // My order: always from the top, never "the next one after the active account".
+    let fromTop: [UUID: UsageAPIResponse] = [a.id: sample(10, 10), c.id: sample(95, 40), b.id: sample(10, 10), d.id: sample(10, 5)]
+    check(plan(fromTop, .myOrder, active: c, candidates: [a, b, d]) == "windows/threshold: A,B,D",
+          "rules: my order starts from the top of the list, not after the active account", plan(fromTop, .myOrder, active: c, candidates: [a, b, d]))
+    let freedUp: [UUID: UsageAPIResponse] = [d.id: sample(95, 40), a.id: sample(99, 99), b.id: sample(30, 30), c.id: sample(5, 5)]
+    check(plan(freedUp, .myOrder, active: d, candidates: [a, b, c]) == "windows/threshold: B,C",
+          "rules: a higher account that has freed up again comes before the next one down", plan(freedUp, .myOrder, active: d, candidates: [a, b, c]))
+
+    // Fable: most room keeps preferring Fable room; the other two honour the user strictly.
+    let fableSpare: [UUID: UsageAPIResponse] = [a.id: sample(95, 40, fable: 50), b.id: sample(10, 10, fable: 100), c.id: sample(20, 20, fable: 10)]
+    check(plan(fableSpare, .mostRoom, candidates: [b, c]) == "windows/threshold: C,B", "rules: most room left still prefers an account with Fable to spare")
+    check(plan(fableSpare, .myOrder, candidates: [b, c]) == "windows/threshold: B,C", "rules: my order keeps its order even when the first account is out of Fable")
+
+    // A Fable switch under resets soonest ranks by the FABLE weekly reset.
+    let fableReset: [UUID: UsageAPIResponse] = [
+        a.id: sample(10, 20, fable: 95),
+        b.id: sample(5, 10, weeklyResetsIn: 5, fable: 10, fableResetsIn: 50),     // weekly resets in 5 h, Fable in 50 h
+        c.id: sample(5, 10, fable: 30, fableResetsIn: 20),   // weekly in 100 h, Fable in 20 h
+    ]
+    check(plan(fableReset, .resetsSoonest, candidates: [b, c]) == "fable/threshold: C,B",
+          "rules: a Fable switch under resets soonest uses the Fable weekly reset", plan(fableReset, .resetsSoonest, candidates: [b, c]))
+    check(plan(fableReset, .mostRoom, candidates: [b, c]) == "fable/threshold: B,C", "rules: the same Fable switch under most room left ranks by Fable room")
+
+    // Most room: equal use keeps the list's order, so the result never flickers.
+    let equal: [UUID: UsageAPIResponse] = [a.id: sample(95, 40), b.id: sample(10, 30), c.id: sample(10, 30)]
+    check(plan(equal, .mostRoom, candidates: [c, b]) == "windows/threshold: C,B", "rules: most room left breaks a tie by the list's order")
 }
