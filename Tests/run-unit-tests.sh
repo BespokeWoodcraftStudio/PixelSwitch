@@ -33,6 +33,7 @@ swiftc -swift-version 6 \
   PixelSwitch/Models/MenuBarModule.swift \
   PixelSwitch/Control/AccountResolver.swift \
   PixelSwitch/Control/SettingsCatalog.swift \
+  PixelSwitch/Control/ControlAPI.swift \
   Tests/UnitTests/ControlTests.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
