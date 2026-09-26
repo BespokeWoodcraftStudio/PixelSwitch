@@ -207,3 +207,18 @@
 "Give each account its own color" = "为每个账户分配专属颜色";
 "Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "在用量和账户标签页中，每个账户都有彩色边条和图标，便于分辨这是谁的数据。关闭后显示朴素卡片。";
 "Also switch when Fable runs out" = "Fable 用尽时也切换账户";
+
+/* Auto-switch rules: Settings → General (1.2) */
+"Default threshold" = "默认阈值";
+"Any account can have its own threshold in Settings → Accounts. 100% uses an account until it is empty." = "每个账户都可以在设置 → 账户中设置自己的阈值。设为 100% 表示用完为止。";
+"Choose the next account by" = "下一个账户的选择方式";
+"Most room left" = "剩余额度最多";
+"My order" = "我的顺序";
+"Resets soonest (use quota before it expires)" = "最早重置（在额度过期前用完）";
+"Moves you to the account with the most room left, preferring one that still has Fable to spare." = "切换到剩余额度最多的账户，并优先选择仍有 Fable 余量的账户。";
+"Moves you to the highest account in your order (Settings → Accounts) that has room. It always starts from the top." = "切换到你的顺序（设置 → 账户）中排在最前且有余量的账户。始终从顶部开始查找。";
+"Moves you to the account whose weekly quota resets soonest, so quota about to expire is used before it is lost." = "切换到每周额度最早重置的账户，让即将过期的额度在失效前用掉。";
+"Switch early to use quota before it resets" = "提前切换，在重置前用完额度";
+"Within %lld hours" = "%lld 小时内";
+"Switches before the active account reaches its threshold when another account's weekly quota resets within this many hours, sooner than the active account's, and that account still has room." = "当另一个账户的每周额度在这段时间内重置、早于当前账户，且该账户仍有余量时，会在当前账户达到阈值之前切换过去。";
+"When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping." = "当活跃账户的 5 小时、每周或 Fable 用量达到其阈值时，PixelSwitch 会切换到另一个比其自身阈值至少低 10 个百分点的账户。关闭上方的 Fable 开关后，Fable 仅作为显示，5 小时与每周限额仍会触发切换。每次刷新时检查；5 分钟冷却时间可防止频繁来回切换。";

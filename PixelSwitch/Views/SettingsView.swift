@@ -11,9 +11,12 @@ struct SettingsView: View {
     @AppStorage(AccountColorCoding.key) private var colorCodeAccounts = true
     @AppStorage("showInDock") private var showInDock = false
     @AppStorage("appLanguage") private var appLanguage = "auto"
-    @AppStorage("autoSwitchEnabled") private var autoSwitchEnabled = false
-    @AppStorage("autoSwitchThreshold") private var autoSwitchThreshold = 90.0
-    @AppStorage(AutoSwitchFableSetting.key) private var autoSwitchOnFable = true
+    @AppStorage(AutoSwitchSettings.enabledKey) private var autoSwitchEnabled = false
+    @AppStorage(AutoSwitchSettings.thresholdKey) private var autoSwitchThreshold = AutoSwitchSettings.fallbackThreshold
+    @AppStorage(AutoSwitchSettings.onFableKey) private var autoSwitchOnFable = true
+    @AppStorage(AutoSwitchSettings.strategyKey) private var autoSwitchStrategy: AutoSwitchStrategy = .mostRoom
+    @AppStorage(AutoSwitchSettings.drainEarlyKey) private var autoSwitchDrainEarly = true
+    @AppStorage(AutoSwitchSettings.drainWithinHoursKey) private var autoSwitchDrainWithinHours = AutoSwitchSettings.fallbackDrainWithinHours
     @AppStorage("transcriptLookbackHours") private var transcriptLookbackHours = 24
     @State private var launchAtLogin = false
 
@@ -80,16 +83,39 @@ struct SettingsView: View {
                 if autoSwitchEnabled {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text("Switch at")
+                            Text("Default threshold")
                             Spacer()
                             Text("\(Int(autoSwitchThreshold))%")
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
                         }
-                        Slider(value: $autoSwitchThreshold, in: 50...99, step: 1)
+                        Slider(value: $autoSwitchThreshold, in: AutoSwitchSettings.thresholdRange, step: 1)
+                        Text("Any account can have its own threshold in Settings → Accounts. 100% uses an account until it is empty.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     Toggle("Also switch when Fable runs out", isOn: $autoSwitchOnFable)
-                    Text("When the active account's 5-hour, weekly or Fable usage reaches this level, PixelSwitch switches to the account with the most room left on that limit. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.")
+                    Picker("Choose the next account by", selection: $autoSwitchStrategy) {
+                        Text("Most room left").tag(AutoSwitchStrategy.mostRoom)
+                        Text("My order").tag(AutoSwitchStrategy.myOrder)
+                        Text("Resets soonest (use quota before it expires)").tag(AutoSwitchStrategy.resetsSoonest)
+                    }
+                    Text(strategyExplanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if autoSwitchStrategy == .resetsSoonest {
+                        Toggle("Switch early to use quota before it resets", isOn: $autoSwitchDrainEarly)
+                        if autoSwitchDrainEarly {
+                            Stepper(value: $autoSwitchDrainWithinHours, in: AutoSwitchSettings.drainHoursRange, step: 1) {
+                                Text("Within \(Int(autoSwitchDrainWithinHours)) hours")
+                                    .monospacedDigit()
+                            }
+                            Text("Switches before the active account reaches its threshold when another account's weekly quota resets within this many hours, sooner than the active account's, and that account still has room.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -273,6 +299,18 @@ struct SettingsView: View {
     }
 
     // MARK: - Helpers
+
+    /// One line under the strategy picker saying what the chosen strategy does.
+    private var strategyExplanation: LocalizedStringKey {
+        switch autoSwitchStrategy {
+        case .mostRoom:
+            return "Moves you to the account with the most room left, preferring one that still has Fable to spare."
+        case .myOrder:
+            return "Moves you to the highest account in your order (Settings → Accounts) that has room. It always starts from the top."
+        case .resetsSoonest:
+            return "Moves you to the account whose weekly quota resets soonest, so quota about to expire is used before it is lost."
+        }
+    }
 
     private func applyLanguage(_ lang: String) {
         // Set AppleLanguages for next launch; .environment(\.locale) handles live update
