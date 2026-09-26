@@ -34,3 +34,4 @@ that file for the full entry. Start here to get up to speed on the project.
 - [WL-2026-09-26-001](./2026-09-26.md) — 1.3: Update automatically (Settings → About), released and verified — _feature/done_
 - [WL-2026-09-26-002](./2026-09-26.md) — 1.4: Update automatically is on by default (founder); released and verified — _feature/done_
 - [WL-2026-09-26-003](./2026-09-26.md) — 1.5: Manual only (0%) and per-account thresholds 1–100%, designed by workflow, reviewed, released — _feature/done_
+- [WL-2026-09-26-004](./2026-09-26.md) — Handover before compaction: SESSION-HANDOVER.md, session tools and evidence moved into the repo — _docs/done_

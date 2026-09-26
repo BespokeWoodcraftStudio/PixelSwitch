@@ -1,5 +1,7 @@
 # PixelSwitch Agent Guidelines
 
+**Start here:** `docs/SESSION-HANDOVER.md` (current state, what is waiting, deferred defects, gotchas), then `docs/worklog/INDEX.md`.
+
 **Rules**:
 - `project.yml` is the ONLY source of truth. NEVER edit `.pbxproj` or `Info.plist` directly. Run `xcodegen generate` after changes.
 - `PixelSwitch.xcodeproj` is disposable (git-ignored).

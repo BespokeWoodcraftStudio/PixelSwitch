@@ -1,0 +1,123 @@
+# Builds docs/decisions/pixelswitch-hand-checks-2026-09-25.html from the founder
+# template (~/.claude/templates/founder-questions-template.html), changing only
+# PAGE and <title>. Edit the cards below, run it, then render with
+# render-hand-checks.cjs and look at both themes before committing.
+import json, pathlib
+REPO = pathlib.Path(__file__).resolve().parents[2]
+t = open('/Users/ahamade/.claude/templates/founder-questions-template.html').read()
+def card(id, title, what, why, steps, nothing, recommend="Do it and tell me what you saw", optional=False):
+    opts = [
+        {"label": "Passed: everything looked as described", "note": "Pick this only if every step matched. (The template marks the first option; it is not a hint.)"},
+        {"label": "Something was wrong", "note": "Say which step and what you saw in the comment box (a screenshot path helps)."},
+        {"label": "Skipped for now", "note": "Fine for optional checks; I will ask again about the required ones."},
+    ]
+    return {"id": id, "title": title, "what": what, "why": why, "steps": steps,
+            "nothing": nothing, "recommend": ("Optional: " if optional else "") + recommend, "options": opts}
+REQUIRED = "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself."
+OPTIONAL = "Counted as skipped. This one is optional."
+cards = [
+ card("install", "Update with the updater",
+  "You have done this one already: you updated with <b>Check for Updates</b> (to 1.3, then to 1.4).",
+  "Every other check needs 1.4 or later running. Your accounts, settings and saved logins carried over.",
+  ["Settings → About reads <b>Version 1.4</b> (or <b>Version 1.5</b>, once card 2 has happened).",
+   "Paste your answers (at least this card) so I can start the command-line checks on my side."],
+  REQUIRED),
+ card("autoupdate", "Update automatically is on",
+  "New in 1.3: a checkbox under <b>Check for Updates</b> in Settings → About.",
+  "With it on you never install PixelSwitch by hand again. It is on by default from 1.4; yours is on. 1.4 you installed by hand, so this is still unproven: 1.5 is the test.",
+  ["Settings → About: under <b>Check for Updates</b>, <b>Update automatically</b> is ticked, with a line explaining it (every 6 hours; restarts only when no switch or sign-in is running).",
+   "Leave it ticked, and do <b>not</b> click Check for Updates. 1.5 is out now: at PixelSwitch's next scheduled check (about 5:35 PM on 26 September), it should restart into 1.5 by itself, with no window and no click.",
+   "Afterwards, Settings → About reads <b>Version 1.5</b>. That is the proof that automatic updates work; tell me when you see it (or if it has not happened by the next morning)."],
+  REQUIRED),
+ card("manualonly", "Manual only, and thresholds below 50%",
+  "New in 1.5: each account's threshold menu in Settings → Accounts goes down to 1% and ends in <b>Manual only (0%)</b>, your better idea than a checkbox.",
+  "Checks the new menu, the stepper floor, the exact numbers in the tooltip, and that Manual only never pulls you off the account you are on.",
+  ["Settings → Accounts, open any account's threshold menu: <b>Default (90%)</b>, then <b>Manual only (0%)</b>, then <b>10%</b>, <b>20%</b>, <b>30%</b>, <b>40%</b>, <b>50%</b> … <b>100%</b>.",
+   "Pick <b>10%</b>: the row reads <b>Switch at 10%</b> with a stepper. Step down: it stops at <b>1%</b> and never turns into Manual only. Hover the menu: <b>Auto-switch moves you off this account at 10%, and moves you to it only while it is at 5% or less.</b>",
+   "Pick <b>Manual only (0%)</b>: the row reads <b>Manual only</b>, the stepper is gone, and hovering says auto-switch never moves you to it. With auto-switch on, the popover's Accounts tab shows a small <b>Manual only</b> line under that account.",
+   "Set the account you are using to Manual only: you are <b>not</b> moved off it, and its row says <b>You're using it now. Auto-switch moves you off it at 90% and won't move you back to it.</b>",
+   "If every other account is Manual only (auto-switch on), an orange line under the list says auto-switch has nowhere to move you.",
+   "Optional, once the command is installed (card on remote control): <code>pixelswitch accounts threshold 2 manual</code>, then <code>pixelswitch accounts</code> shows <b>90% (manual only)</b> for it. Put every account back how you like it afterwards."],
+  REQUIRED),
+ card("autoswitch", "Auto-switch settings",
+  "Settings → General → Auto-switch. Turn <b>Switch account before hitting the limit</b> on first.",
+  "Checks the new default threshold, the next-account choice and the early-switch switch.",
+  ["The first control reads <b>Default threshold</b>; fully right shows <b>100%</b>, fully left <b>50%</b>.",
+   "<b>Choose the next account by</b> offers Most room left, My order, and Resets soonest; the line under it changes with each.",
+   "Pick <b>Resets soonest</b>: <b>Switch early to use quota before it resets</b> appears, already on, with <b>Within 24 hours</b> below; the stepper stops at 1 and 72.",
+   "Turn that switch off: the hours control hides. Pick Most room left or My order: both hide.",
+   "Quit and reopen PixelSwitch: every choice is still there. (Put them back how you like them.)"],
+  REQUIRED),
+ card("accounts", "Settings → Accounts: order and per-account thresholds",
+  "The new <b>Accounts</b> tab, right after General.",
+  "Checks the priority order, each account's own threshold, and the sign-in buttons.",
+  ["It lists every account in the popover's order; the active one has the green <b>Active</b> badge.",
+   "Drag the bottom account to the top. The popover's Accounts and Usage tabs show the new order; quit and reopen, and it is kept. (Drag it back if you like.)",
+   "Each row shows its weekly reset (<b>Weekly resets in …</b>) or <b>Weekly reset not known yet</b>.",
+   "The threshold menu reads <b>Default (90%)</b>. Pick 70%: it reads <b>Switch at 70%</b> with a stepper; step up once: <b>71%</b>. Pick Default: back to Default, stepper gone.",
+   "Under the list are <b>Add Current Account</b> and <b>Sign In New Account</b>.",
+   "Optional: set Language to Deutsch: the tab reads <b>Konten</b> and the new controls are German. Set it back."],
+  REQUIRED),
+ card("signin", "Sign in with Open in, and nothing opens by itself",
+  "Popover → Accounts → <b>Login New Account</b> (or Settings → Accounts → Sign In New Account).",
+  "What you asked for in the sign-in part: no browser pops open; you choose where the link goes.",
+  ["A <b>Sign in to Claude</b> window appears and <b>no browser opens by itself</b>. Within a couple of seconds it shows <b>Open in default browser</b>, <b>Open in</b> and <b>Copy link</b>.",
+   "<b>Open in</b> lists your installed browsers, default first.",
+   "If you have an account to add: pick a browser already signed in to it. It finishes by itself; the window closes and the account appears, active. If not, click <b>Cancel</b>: the window closes and nothing changed."],
+  REQUIRED),
+ card("copylink", "Copy the link into a different browser",
+  "Your multi-browser case: the link pasted into another browser that is signed in to a different Claude account.",
+  "This is the exact scenario you asked for; only a person can do it.",
+  ["Start <b>Sign In New Account</b> again and click <b>Copy link</b>.",
+   "Paste it into a DIFFERENT browser that is signed in to another Claude account.",
+   "It finishes by itself in that browser, and that account is added (or, if it already exists, its sign-in is refreshed)."],
+  REQUIRED),
+ card("window", "The sign-in window's behaviour",
+  "What happens when you close it, click away, or start a second one.",
+  "A sign-in must never be left running out of sight.",
+  ["Start a sign-in and close the window with its red button: the sign-in is cancelled, and a new one can start straight away.",
+   "Start a sign-in, click away so the popover closes, reopen the popover: it says <b>Signing in…</b> with <b>Show sign-in window</b>, which brings the window back.",
+   "With a sign-in running, press <b>Sign In New Account</b> in Settings: it is refused with <b>A sign-in is already in progress.</b> and the running window comes to the front. Cancel it afterwards."],
+  REQUIRED),
+ card("remoteinstall", "Remote control: install the command",
+  "Settings → <b>Claude CLI</b> → <b>Command line & AI</b>.",
+  "Turns on the command your other Mac's AI will use.",
+  ["It says <b>Remote control is on</b> with a green tick.",
+   "Click <b>Install</b>: the row reads <b>Installed at ~/.local/bin/pixelswitch</b>.",
+   "The MCP snippet below shows this Mac's name ending in <b>.local</b>. After this, I run the safe command-line checks myself (status, accounts, usage, settings round trips, a sign-in started and cancelled, MCP)."],
+  REQUIRED),
+ card("othermac", "From your other Mac: SSH, then Claude",
+  "The point of the whole feature: your other Mac drives PixelSwitch.",
+  "Only you can do this one; it needs the other Mac.",
+  ["On the other Mac, in Terminal: <code>ssh &lt;this-mac&gt;.local ~/.local/bin/pixelswitch status</code> (use the name shown in the snippet). It prints the active account and auto-switch settings.",
+   "Copy the MCP snippet from Settings → Claude CLI → Command line & AI into that Mac's Claude MCP settings.",
+   "Ask that Claude: <i>List my PixelSwitch accounts and their weekly usage.</i> It uses the PixelSwitch tools and answers."],
+  REQUIRED),
+ card("cliswitch", "Switch accounts from the command line",
+  "This really switches your live Claude login, so do it when a switch will not interrupt your work.",
+  "Proves the most important remote action end to end.",
+  ["In Terminal: <code>~/.local/bin/pixelswitch accounts</code>, then <code>~/.local/bin/pixelswitch switch 2</code> (or another account's position or email).",
+   "The menu bar changes to that account, and <code>pixelswitch status</code> agrees.",
+   "Switch back the same way."],
+  OPTIONAL, optional=True),
+ card("optionalsignin", "Optional sign-in checks",
+  "Two rarer paths.",
+  "Useful, but not needed for the release.",
+  ["Re-authenticate (↻) an account and sign in as a DIFFERENT account in the browser: it ends with <b>Logged in as X, but expected Y. Credentials not updated.</b>",
+   "<b>Signing in on another device?</b>: copy that link, open it on a phone, sign in, paste the code the page shows, <b>Submit</b>: the account is saved."],
+  OPTIONAL, optional=True),
+]
+page = {
+ "key": "pixelswitch-hand-checks-1-5-2026-09-26",
+ "heading": "PIXELSWITCH: HAND CHECKS FOR 1.5 (2026-09-26)",
+ "eyebrow": "PixelSwitch · hand checks · version 1.5",
+ "title": "One round of hand checks on 1.5",
+ "lede": "<strong>You are on 1.4 (card 1), and 1.5 should reach you by itself this evening (card 2).</strong> 1.5 adds Manual only and thresholds below 50% (card 3). Everything that can be checked automatically already passed (576 checks, and GitHub built, signed and notarized it). These are the things only a person can see; anything they find is fixed in the next version. On each card, do the steps, then pick what happened. Start with card 1 and paste your answers after it, so I can run the command-line checks while you do the rest.",
+ "questions": cards,
+}
+js = "var PAGE = " + json.dumps(page, ensure_ascii=False, indent=2) + ";\n\n"
+start = t.index("var PAGE = {"); end = t.index("/* ================================== the page, rendered")
+t = t[:start] + js + t[end:]
+t = t.replace("<title>PROJECT: your decisions, round N</title>", "<title>PixelSwitch: hand checks</title>")
+(REPO / "docs/decisions/pixelswitch-hand-checks-2026-09-25.html").write_text(t)
+print("page written", len(cards), "cards")
