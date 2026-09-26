@@ -57,3 +57,32 @@ PIXELSWITCH: FOUNDER QUESTIONS, DESIGN REVIEW (2026-09-25)
 ```
 
 What follows: the design at docs/superpowers/specs/2026-09-25-remote-control-and-auto-switch-design.md is APPROVED. Early switching (A3) is option (a), with its own on/off switch in Settings → General → Auto-switch, shown whenever "Resets soonest" is picked, on by default, and also settable from the CLI/MCP as `autoSwitch.drainEarly`.
+
+## Build plans A, B and C, answered 2026-09-25
+
+Page: [pixelswitch-plans-abc-2026-09-25.html](pixelswitch-plans-abc-2026-09-25.html). Recorded verbatim.
+
+```
+PIXELSWITCH: FOUNDER QUESTIONS, BUILD PLANS A, B AND C (2026-09-25)
+
+1. Approve the plans for Parts A, B and C [approve-plans]
+   ANSWER: Approve; build A, then B, then C, in this session (the recommended one)
+
+2. What should "Most room left" mean once accounts have their own thresholds? [most-room]
+   ANSWER: Rank by the room left under each account's own threshold (the recommended one)
+
+3. When do you want to test by hand? [manual-checks]
+   ANSWER: Once, on one build with all three parts (the recommended one)
+
+4. Install Xcode on this Mac? [xcode]
+   ANSWER: Not needed; keep building on GitHub (the recommended one)
+   COMMENT: We can revisit Xcode in the future. Right now, if it's slower, it's okay. I'm not in a hurry on this app.
+
+(4 of 4 answered)
+```
+
+What follows:
+- Build A, then B, then C, in this session, single lane.
+- "Most room left" ranks by the room left under each account's own threshold (a change to Plan A Task 3, made with a test).
+- One round of hand checks, on one build with all three parts, after Part C.
+- No Xcode for now; GitHub builds the app. Revisit later.
