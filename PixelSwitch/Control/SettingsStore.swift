@@ -11,6 +11,8 @@ final class SettingsStore {
 
     /// Set once at launch (`RemoteControlService.start`).
     weak var appState: AppState?
+    /// Set once at launch; owns "Update automatically" (Sparkle keeps the value).
+    weak var updateChecker: UpdateChecker?
 
     private let defaults = UserDefaults.standard
 
@@ -63,6 +65,8 @@ final class SettingsStore {
             return .number(menuBar.lowRemainingWarningThreshold)
         case .claudeBinaryPath:
             return .string(defaults.string(forKey: kClaudeBinaryPathPreferenceKey) ?? "")
+        case .autoUpdate:
+            return .bool(updateChecker?.installsAutomatically ?? defaults.bool(forKey: "SUAutomaticallyUpdate"))
         }
     }
 
@@ -130,6 +134,12 @@ final class SettingsStore {
                 throw ControlError(.invalidValue, "No executable file at \(path).")
             }
             applyClaudeBinaryPath(path)
+        case .autoUpdate:
+            let on = try bool(value, key)
+            guard let updateChecker else {
+                throw ControlError(.failed, "The updater is not running yet. Try again in a moment.")
+            }
+            updateChecker.setInstallsAutomatically(on)
         }
     }
 

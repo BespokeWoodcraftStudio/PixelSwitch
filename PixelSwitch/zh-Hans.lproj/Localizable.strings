@@ -34,6 +34,8 @@
 "Version %@" = "版本 %@";
 "Checking..." = "检查中...";
 "Check for Updates" = "检查更新";
+"Update automatically" = "自动更新";
+"Checks every 6 hours and installs new versions by itself, restarting PixelSwitch when no switch or sign-in is running. Off: it asks before installing." = "每 6 小时检查一次并自动安装新版本，在没有切换账户或登录进行时重新启动 PixelSwitch。关闭：安装前先询问。";
 "Switch Claude Code accounts from the menu bar in one click." = "在菜单栏一键切换 Claude Code 账户。";
 "Reads only recent usage history (24 hours by default), so it stays light on memory." = "只读取最近的用量记录（默认 24 小时），因此占用内存很少。";
 "Can switch for you before an account runs out." = "可在账户额度用完前自动为你切换。";

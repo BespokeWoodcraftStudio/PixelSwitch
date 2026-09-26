@@ -52,6 +52,8 @@ targets:
         # alongside the DMG, signed with the PixelSwitch EdDSA key below.
         SUFeedURL: https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/latest/download/appcast.xml
         SUEnableAutomaticChecks: true
+        # Every 6 hours, so "Update automatically" picks up a release the same day.
+        SUScheduledCheckInterval: 21600
         # PixelSwitch public EdDSA key. The private half lives in the founder's
         # login keychain (Sparkle generate_keys, account "pixelswitch") and in the
         # `SPARKLE_EDDSA_KEY` GitHub secret used by CI to sign each DMG.

@@ -34,6 +34,8 @@
 "Version %@" = "Version %@";
 "Checking..." = "Checking...";
 "Check for Updates" = "Check for Updates";
+"Update automatically" = "Update automatically";
+"Checks every 6 hours and installs new versions by itself, restarting PixelSwitch when no switch or sign-in is running. Off: it asks before installing." = "Checks every 6 hours and installs new versions by itself, restarting PixelSwitch when no switch or sign-in is running. Off: it asks before installing.";
 "Switch Claude Code accounts from the menu bar in one click." = "Switch Claude Code accounts from the menu bar in one click.";
 "Reads only recent usage history (24 hours by default), so it stays light on memory." = "Reads only recent usage history (24 hours by default), so it stays light on memory.";
 "Can switch for you before an account runs out." = "Can switch for you before an account runs out.";

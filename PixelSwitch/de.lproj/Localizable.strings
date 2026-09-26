@@ -34,6 +34,8 @@
 "Version %@" = "Version %@";
 "Checking..." = "Überprüfe...";
 "Check for Updates" = "Nach Updates suchen";
+"Update automatically" = "Automatisch aktualisieren";
+"Checks every 6 hours and installs new versions by itself, restarting PixelSwitch when no switch or sign-in is running. Off: it asks before installing." = "Sucht alle 6 Stunden nach Updates und installiert neue Versionen selbst. PixelSwitch startet dafür neu, sobald kein Wechsel und keine Anmeldung läuft. Aus: Es fragt vor der Installation.";
 "Switch Claude Code accounts from the menu bar in one click." = "Wechsle Claude-Code-Konten mit einem Klick in der Menüleiste.";
 "Reads only recent usage history (24 hours by default), so it stays light on memory." = "Liest nur den jüngsten Nutzungsverlauf (standardmäßig 24 Stunden) und braucht daher wenig Arbeitsspeicher.";
 "Can switch for you before an account runs out." = "Kann automatisch wechseln, bevor ein Konto sein Limit erreicht.";

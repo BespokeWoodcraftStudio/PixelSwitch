@@ -34,6 +34,8 @@
 "Version %@" = "バージョン %@";
 "Checking..." = "確認中...";
 "Check for Updates" = "アップデートを確認";
+"Update automatically" = "自動的にアップデート";
+"Checks every 6 hours and installs new versions by itself, restarting PixelSwitch when no switch or sign-in is running. Off: it asks before installing." = "6時間ごとに確認し、新しいバージョンを自動でインストールします。アカウントの切り替えやサインインが行われていないときに PixelSwitch を再起動します。オフ：インストール前に確認します。";
 "Switch Claude Code accounts from the menu bar in one click." = "メニューバーからワンクリックで Claude Code アカウントを切り替えます。";
 "Reads only recent usage history (24 hours by default), so it stays light on memory." = "最近の使用履歴だけを読み込むため（既定は 24 時間）、メモリをあまり使いません。";
 "Can switch for you before an account runs out." = "アカウントの上限に達する前に自動で切り替えることもできます。";

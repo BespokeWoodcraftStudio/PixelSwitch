@@ -366,6 +366,6 @@ enum SettingKeyNames {
         "maskEmailAddresses", "colorCodeAccounts", "appLanguage", "launchAtLogin",
         "menuBar.showsHeadIcon", "menuBar.modules", "menuBar.customizesLimitBarColors",
         "menuBar.color.session", "menuBar.color.weekly", "menuBar.color.fable", "menuBar.color.lowRemaining",
-        "menuBar.lowRemainingWarningThreshold", "claude.binaryPath"
+        "menuBar.lowRemainingWarningThreshold", "claude.binaryPath", "updates.automatic"
     ]
 }

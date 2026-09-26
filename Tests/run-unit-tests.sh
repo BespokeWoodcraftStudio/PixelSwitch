@@ -41,6 +41,8 @@ swiftc -swift-version 6 \
   PixelSwitchCLI/MCPServer.swift \
   PixelSwitch/Control/CommandLineToolInstaller.swift \
   Tests/UnitTests/ControlTests.swift \
+  PixelSwitch/Services/AutoUpdatePolicy.swift \
+  Tests/UnitTests/AutoUpdateTests.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
 "$OUT/pixelswitch-unit-tests"

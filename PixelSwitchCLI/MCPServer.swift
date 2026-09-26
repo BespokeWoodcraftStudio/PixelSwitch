@@ -85,7 +85,7 @@ final class MCPServer {
             Tool(name: "set_account_order", description: "Set the priority order: list every account exactly once, first choice first. \"My order\" auto-switching follows it.",
                  properties: ["accounts": .object(["type": .string("array"), "items": .object(["type": .string("string")]), "description": .string("Every account, in order.")])],
                  required: ["accounts"], method: .accountsSetOrder, params: pass),
-            Tool(name: "get_settings", description: "Every setting and its value, or one (key). Keys include autoSwitch.enabled, autoSwitch.threshold, autoSwitch.strategy (mostRoom, myOrder, resetsSoonest), autoSwitch.drainEarly, autoSwitch.drainWithinHours, refreshInterval, launchAtLogin, menuBar.modules.",
+            Tool(name: "get_settings", description: "Every setting and its value, or one (key). Keys include autoSwitch.enabled, autoSwitch.threshold, autoSwitch.strategy (mostRoom, myOrder, resetsSoonest), autoSwitch.drainEarly, autoSwitch.drainWithinHours, refreshInterval, launchAtLogin, menuBar.modules, updates.automatic (install updates by itself).",
                  properties: ["key": prop("string", "Optional: one setting.")], required: [], method: .settingsGet, params: pass),
             Tool(name: "set_setting", description: "Change one setting. The value is checked; an invalid one is refused with the allowed values.",
                  properties: ["key": prop("string", "The setting's name, as get_settings lists it."),

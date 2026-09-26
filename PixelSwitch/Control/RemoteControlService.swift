@@ -29,6 +29,7 @@ final class RemoteControlService: ObservableObject {
     func start(appState: AppState, updateChecker: UpdateChecker) {
         guard server == nil else { return }
         SettingsStore.shared.appState = appState
+        SettingsStore.shared.updateChecker = updateChecker
         let api = ControlAPI(controller: AppController(appState: appState, updateChecker: updateChecker),
                              log: { controlLog.info($0) })
         let server = ControlServer(

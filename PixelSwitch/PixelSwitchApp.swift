@@ -49,7 +49,13 @@ struct PixelSwitchApp: App {
                     // Sparkle's SPUStandardUpdaterController(startingUpdater: true)
                     // schedules its own background update checks; no need to
                     // call checkForUpdates here.
-                    _ = updateChecker
+                    // Automatic updates relaunch the app, so they wait out
+                    // a switch, a login or a sign-in.
+                    let state = appState
+                    updateChecker.isBusy = {
+                        !AutoUpdatePolicy.mayInstallNow(isSwitching: state.isSwitching, isLoggingIn: state.isLoggingIn,
+                                                        signIn: state.currentSignIn?.state)
+                    }
                     statusItemController.install(
                         appState: appState,
                         config: menuBarConfig,

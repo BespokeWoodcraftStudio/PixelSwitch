@@ -28,6 +28,7 @@ enum SettingKey: String, CaseIterable, Sendable {
     case menuBarColorLowRemaining = "menuBar.color.lowRemaining"
     case menuBarLowRemainingWarningThreshold = "menuBar.lowRemainingWarningThreshold"
     case claudeBinaryPath = "claude.binaryPath"
+    case autoUpdate = "updates.automatic"
 
     enum Kind: Equatable, Sendable {
         case bool
@@ -48,7 +49,7 @@ enum SettingKey: String, CaseIterable, Sendable {
         case .refreshInterval: return .choice([15, 30, 60, 300, 600].map(JSONValue.number))
         case .transcriptLookbackHours: return .choice([24, 72, 168, 720, 0].map(JSONValue.number))
         case .autoSwitchEnabled, .autoSwitchOnFable, .autoSwitchDrainEarly, .maskEmailAddresses,
-             .colorCodeAccounts, .launchAtLogin, .menuBarShowsHeadIcon, .menuBarCustomizesLimitBarColors:
+             .colorCodeAccounts, .launchAtLogin, .menuBarShowsHeadIcon, .menuBarCustomizesLimitBarColors, .autoUpdate:
             return .bool
         case .autoSwitchThreshold: return .number(AutoSwitchSettings.thresholdRange, step: 1)
         case .autoSwitchStrategy: return .choice(AutoSwitchStrategy.allCases.map { .string($0.rawValue) })

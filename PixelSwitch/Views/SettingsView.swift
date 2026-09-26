@@ -243,6 +243,21 @@ struct SettingsView: View {
             .disabled(updateChecker.isChecking)
             .padding(.top, 20)
 
+            Toggle(isOn: Binding(
+                get: { updateChecker.installsAutomatically },
+                set: { updateChecker.setInstallsAutomatically($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Update automatically")
+                    Text("Checks every 6 hours and installs new versions by itself, restarting PixelSwitch when no switch or sign-in is running. Off: it asks before installing.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.checkbox)
+            .padding(.top, 12)
+
             Spacer(minLength: 16)
 
             Divider()

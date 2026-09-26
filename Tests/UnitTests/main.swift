@@ -585,6 +585,7 @@ do {
 runAutoSwitchRulesTests()
 runSignInTests()
 runControlTests()
+runAutoUpdateTests()
 
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

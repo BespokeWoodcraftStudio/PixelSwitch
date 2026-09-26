@@ -163,6 +163,9 @@ enum ControlTestKit {
           "settings: the claude path is auto or absolute")
     check(norm(.appLanguage, .string("ja")) == .string("ja") && norm(.appLanguage, .string("es")) == nil, "settings: only the app's five languages or auto")
     check((try? SettingKey.named("AUTOSWITCH.ENABLED")) == .autoSwitchEnabled, "settings: keys are found case-insensitively")
+    check((try? SettingKey.named("updates.automatic")) == .autoUpdate && norm(.autoUpdate, .string("on")) == .bool(true)
+          && norm(.autoUpdate, .string("sometimes")) == nil,
+          "settings: automatic updates is an on/off setting called updates.automatic")
     do {
         _ = try SettingKey.named("volume")
         check(false, "settings: an unknown key lists the real ones")
