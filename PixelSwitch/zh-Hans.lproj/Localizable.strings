@@ -212,7 +212,6 @@
 
 /* Auto-switch rules: Settings → General (1.2) */
 "Default threshold" = "默认阈值";
-"Any account can have its own threshold in Settings → Accounts. 100% uses an account until it is empty." = "每个账户都可以在设置 → 账户中设置自己的阈值。设为 100% 表示用完为止。";
 "Choose the next account by" = "下一个账户的选择方式";
 "Most room left" = "剩余额度最多";
 "My order" = "我的顺序";
@@ -223,16 +222,13 @@
 "Switch early to use quota before it resets" = "提前切换，在重置前用完额度";
 "Within %lld hours" = "%lld 小时内";
 "Switches before the active account reaches its threshold when another account's weekly quota resets within this many hours, sooner than the active account's, and that account still has room." = "当另一个账户的每周额度在这段时间内重置、早于当前账户，且该账户仍有余量时，会在当前账户达到阈值之前切换过去。";
-"When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping." = "当活跃账户的 5 小时、每周或 Fable 用量达到其阈值时，PixelSwitch 会切换到另一个比其自身阈值至少低 10 个百分点的账户。关闭上方的 Fable 开关后，Fable 仅作为显示，5 小时与每周限额仍会触发切换。每次刷新时检查；5 分钟冷却时间可防止频繁来回切换。";
 
 /* Settings → Accounts (1.2) */
-"Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only." = "拖动账户即可调整顺序。设置 → 通用中的“我的顺序”会从上到下依次尝试账户，所有账户列表也都按此顺序显示。非默认的阈值只对该账户生效。";
 "Weekly resets %@" = "每周：%@ 重置";
 "Weekly resets in %@" = "每周：%@ 后重置";
 "Weekly reset not known yet" = "尚不知道每周重置时间";
 "Default (%lld%%)" = "默认（%lld%%）";
 "Switch at %lld%%" = "%lld%% 时切换";
-"When this account's usage reaches this level, auto-switch moves you to another account." = "当此账户的用量达到该水平时，自动切换会把你转到另一个账户。";
 
 /* Sign-in links (1.2) */
 "Couldn't prepare the sign-in: %@" = "无法准备登录：%@";
@@ -289,3 +285,15 @@
 "To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH." = "若要让另一台 Mac 上的 Claude 控制 PixelSwitch，请将此内容添加到它的 MCP 设置中。那台 Mac 必须能通过 SSH 连接到这台 Mac。";
 "No account is active yet, so there is nothing to switch from. Add the current account first." = "尚无活跃账户，因此无从切换。请先添加当前账户。";
 "A switch or sign-in is in progress. Try again in a moment." = "正在切换或登录。请稍后再试。";
+
+/* Manual only (0%) and thresholds below 50% (1.5) */
+"Manual only (%lld%%)" = "仅手动（%lld%%）";
+"Manual only" = "仅手动";
+"Auto-switch moves you off this account at %@, and moves you to it only while it is at %@ or less." = "自动切换会在 %@ 时离开此账户，且仅在其用量不超过 %@ 时切换到它。";
+"Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default threshold (%@)." = "自动切换永远不会切换到此账户。您仍可自行切换到它；使用它时，自动切换会在默认阈值（%@）时离开它。";
+"You're using it now. Auto-switch moves you off it at %@ and won't move you back to it." = "您正在使用它。自动切换会在 %@ 时离开它，且不会再切换回来。";
+"Every account except the one you're using is Manual only, so auto-switch has nowhere to move you." = "除您正在使用的账户外，其他账户均为“仅手动”，因此自动切换无处可切。";
+"Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only. Manual only accounts are never switched to automatically; you can still switch to them yourself." = "拖动账户即可调整顺序。设置 → 通用中的“我的顺序”会从上到下依次尝试账户，所有账户列表也都按此顺序显示。非默认的阈值只对该账户生效。自动切换永远不会切换到“仅手动”账户；您仍可自行切换到它们。";
+"Auto-switch never moves you to this account. You can still switch to it here." = "自动切换永远不会切换到此账户。您仍可在此切换到它。";
+"Any account can have its own threshold in Settings → Accounts, from 1% to 100%, or be Manual only so auto-switch never moves you to it. 100% uses an account until it is empty." = "每个账户都可以在设置 → 账户中设置 1% 到 100% 的阈值，或设为“仅手动”，让自动切换永远不会切换到它。设为 100% 表示用完为止。";
+"When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold (at or under half of it, for thresholds below 20%) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping." = "当活跃账户的 5 小时、每周或 Fable 用量达到其阈值时，PixelSwitch 会切换到另一个比其自身阈值至少低 10 个百分点（阈值低于 20% 时为不超过其一半）且不是“仅手动”的账户。关闭上方的 Fable 开关后，Fable 仅作为显示，5 小时与每周限额仍会触发切换。每次刷新时检查；5 分钟冷却时间可防止频繁来回切换。";

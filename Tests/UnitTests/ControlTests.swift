@@ -81,6 +81,10 @@ enum ControlTestKit {
     let value: JSONValue = .object(["b": .bool(true), "n": .number(2.5), "s": .string("x"), "a": .array([.null, .number(1)]), "o": .object([:])])
     let round = try? ControlCoding.decoder.decode(JSONValue.self, from: Data(value.compactText.utf8))
     check(round == value, "control protocol: any JSON value survives a round trip", value.compactText)
+    let plainAccount = AccountInfo(id: "1", email: "a@x.com", label: nil, subscription: nil, isActive: false, isSwitchable: true, position: 1,
+                                   threshold: nil, effectiveThreshold: 90, manualOnly: false, usage: nil)
+    check(ControlProtocol.version == 2 && (try? JSONValue.encode(plainAccount))?["manualOnly"] == .bool(false),
+          "control protocol: version 2 (accounts carry manualOnly)")
     check(JSONValue.bool(true).compactText == "true" && JSONValue.number(1).compactText == "1", "control protocol: true stays a boolean and 1 a number")
 
     let success = RPCResponse.success(.int(7), .object(["ok": .bool(true)])).line
@@ -148,7 +152,8 @@ enum ControlTestKit {
     check(norm(.autoSwitchStrategy, .string("RESETSSOONEST")) == .string("resetsSoonest") && norm(.autoSwitchStrategy, .string("fastest")) == nil,
           "settings: the strategy is matched case-insensitively and stored by its canonical name")
     check(norm(.autoSwitchThreshold, .string("72.4")) == .number(72) && norm(.autoSwitchThreshold, .number(100)) == .number(100)
-          && norm(.autoSwitchThreshold, .number(49)) == nil && norm(.autoSwitchThreshold, .number(.infinity)) == nil,
+          && norm(.autoSwitchThreshold, .number(49)) == nil && norm(.autoSwitchThreshold, .number(.infinity)) == nil
+          && norm(.autoSwitchThreshold, .number(0)) == nil,
           "settings: the default threshold is a whole number from 50 to 100")
     check(norm(.autoSwitchDrainWithinHours, .number(0.4)) == nil && norm(.autoSwitchDrainWithinHours, .number(72)) == .number(72),
           "settings: the early-switch window is 1–72 hours")
@@ -341,9 +346,34 @@ extension ControlTestKit {
     check(threshold?.result?["account"]?["threshold"] == .number(73) && app.calls.last == "threshold 73.0", "api: a threshold is rounded to a whole number")
     _ = Kit.call(api, "accounts.setThreshold", .object(["account": .string("1"), "threshold": .null]))
     check(app.calls.last == "threshold nil", "api: a null threshold goes back to the default")
-    check(kind(Kit.call(api, "accounts.setThreshold", .object(["account": .string("1"), "threshold": .number(101)]))) == "invalidValue"
-          && kind(Kit.call(api, "accounts.setThreshold", .object(["account": .string("1"), "threshold": .number(49)]))) == "invalidValue",
-          "api: a threshold outside 50–100 is refused")
+    func setThreshold(_ account: String, _ value: JSONValue) -> RPCResponse? {
+        Kit.call(api, "accounts.setThreshold", .object(["account": .string(account), "threshold": value]))
+    }
+    let manual = setThreshold("1", .number(0))?.result?["account"]
+    check(manual?["threshold"] == .number(0) && manual?["manualOnly"] == .bool(true) && manual?["effectiveThreshold"] == .number(90)
+          && app.calls.last == "threshold 0.0", "api: a threshold of 0 makes the account manual only", manual?.compactText ?? "nil")
+    let one = setThreshold("1", .number(1))?.result?["account"]
+    let low = setThreshold("1", .number(35))?.result?["account"]
+    check(one?["threshold"] == .number(1) && low?["threshold"] == .number(35) && low?["effectiveThreshold"] == .number(35)
+          && one?["manualOnly"] == .bool(false) && low?["manualOnly"] == .bool(false), "api: thresholds below 50 are accepted")
+    let point4 = setThreshold("1", .number(0.4))?.result?["account"]
+    let call4 = app.calls.last
+    _ = setThreshold("1", .number(0.6))
+    check(call4 == "threshold 0.0" && point4?["manualOnly"] == .bool(true) && app.calls.last == "threshold 1.0",
+          "api: 0.4 rounds to manual only and 0.6 to 1")
+    let under = setThreshold("1", .number(-1))
+    check(kind(under) == "invalidValue" && kind(setThreshold("1", .number(101))) == "invalidValue"
+          && under?.error?.message == "A threshold must be 1–100, 0 for manual only, or null to follow the default.",
+          "api: a threshold outside 0–100 is refused", under?.error?.message ?? "nil")
+    _ = setThreshold("1", .null)
+    let before = Kit.call(api, "accounts.list")?.result?["accounts"]?.arrayValue ?? []
+    _ = setThreshold("bob@home.com", .number(0))
+    let after = Kit.call(api, "accounts.list")?.result?["accounts"]?.arrayValue ?? []
+    let bob = after.first { $0["email"] == .string("bob@home.com") }
+    check(before.count == 3 && before.allSatisfy { $0["manualOnly"] == .bool(false) }
+          && bob?["manualOnly"] == .bool(true) && bob?["effectiveThreshold"] == .number(90),
+          "api: accounts.list reports manualOnly")
+    _ = setThreshold("bob@home.com", .number(70))
 
     let order = Kit.call(api, "accounts.setOrder", .object(["accounts": .array([.string("3"), .string("bob@home.com"), .string("11111111-1111-1111-1111-111111111111")])]))
     check(order?.result?["accounts"]?.arrayValue?.compactMap { $0["email"]?.stringValue } == ["carol@work.com", "bob@home.com", "alice@work.com"],
@@ -612,6 +642,11 @@ extension ControlTestKit {
           "cli: a label can have spaces, and --clear clears it")
     check(parsed("accounts threshold 2 75%") == .threshold("2", 75) && parsed("accounts threshold 2 default") == .threshold("2", nil)
           && refused("accounts threshold 2 high") != nil, "cli: a threshold is a number or default")
+    check(parsed("accounts threshold 2 manual") == .threshold("2", 0) && parsed("accounts threshold 2 MANUAL") == .threshold("2", 0)
+          && parsed("accounts threshold 2 0") == .threshold("2", 0) && parsed("accounts threshold 2 0%") == .threshold("2", 0)
+          && parsed("accounts threshold 2 35") == .threshold("2", 35)
+          && ["off", "never", "high"].allSatisfy { refused("accounts threshold 2 \($0)")?.contains("manual") == true },
+          "cli: a threshold is 1–100, default or manual")
     check(parsed("accounts order 1 4 2") == .order(["1", "4", "2"]) && refused("accounts order") != nil, "cli: order lists the accounts")
     check(parsed("usage") == .usage(nil) && parsed("usage 2") == .usage("2"), "cli: usage for all or one")
     check(parsed("settings") == .settingsGet(nil) && parsed("settings autoSwitch.enabled") == .settingsGet("autoSwitch.enabled")
@@ -659,9 +694,9 @@ extension ControlTestKit {
                           fable: nil, extraUsage: nil, sampledAt: nil, error: nil)
     let accounts = [
         AccountInfo(id: "1", email: "alice@work.com", label: "Work", subscription: "Max", isActive: true, isSwitchable: true, position: 1,
-                    threshold: nil, effectiveThreshold: 90, usage: usage),
+                    threshold: nil, effectiveThreshold: 90, manualOnly: false, usage: usage),
         AccountInfo(id: "2", email: "bob@home.com", label: nil, subscription: nil, isActive: false, isSwitchable: false, position: 2,
-                    threshold: 70, effectiveThreshold: 70, usage: nil)
+                    threshold: 70, effectiveThreshold: 70, manualOnly: false, usage: nil)
     ]
     let table = CLIOutput.accounts(accounts)
     let lines = table.split(separator: "\n").map(String.init)
@@ -670,6 +705,23 @@ extension ControlTestKit {
     check(lines[2].hasPrefix("!  2  bob@home.com") && lines[2].contains("70%") && !lines[2].contains("default"),
           "cli output: an account that cannot be switched to is marked, with its own threshold", table)
     check(CLIOutput.accounts([]).contains("add-current"), "cli output: no accounts says how to add one")
+    let carol = AccountInfo(id: "3", email: "carol@work.com", label: nil, subscription: nil, isActive: false, isSwitchable: true, position: 3,
+                            threshold: 0, effectiveThreshold: 90, manualOnly: true, usage: nil)
+    let carolActive = AccountInfo(id: "3", email: "carol@work.com", label: nil, subscription: nil, isActive: true, isSwitchable: true, position: 3,
+                                  threshold: 0, effectiveThreshold: 90, manualOnly: true, usage: nil)
+    let withManual = CLIOutput.accounts(accounts + [carol]).split(separator: "\n").map(String.init)
+    check(withManual.contains { $0.contains("carol@work.com") && $0.contains("90% (manual only)") }
+          && withManual.contains { $0.hasPrefix("manual only:") },
+          "cli output: a Manual only account shows where it is left, and the legend explains it", withManual.joined(separator: "\n"))
+    check(CLIOutput.thresholdSet(carol) == "carol@work.com is now manual only: auto-switch never switches to it. You can still switch to it yourself."
+          && CLIOutput.thresholdSet(carolActive) == "carol@work.com is now manual only: auto-switch never switches to it. You can still switch to it yourself. You're using it now: auto-switch moves you off it at 90% and won't move you back to it."
+          && CLIOutput.thresholdSet(accounts[0]) == "alice@work.com now follows the default threshold (90%)."
+          && CLIOutput.thresholdSet(accounts[1]) == "bob@home.com now switches at 70%."
+          && CLIOutput.thresholdSet(nil) == "Threshold set.",
+          "cli output: setting manual only says so, and warns when it is the active account", CLIOutput.thresholdSet(carolActive))
+    check(CLIOutput.switched(carolActive) == "Switched to carol@work.com. It is manual only: auto-switch moves you off it at 90% and won't move you back to it."
+          && CLIOutput.switched(accounts[1]) == "Switched to bob@home.com.",
+          "cli output: switching to a Manual only account says where it will be left", CLIOutput.switched(carolActive))
     check(CLIOutput.percent(99.6) == "100%" && CLIOutput.percent(nil) == "—", "cli output: percentages are whole numbers")
     let status = StatusInfo(appVersion: "1.2", protocolVersion: 1, activeAccountId: "1", activeAccountEmail: "alice@work.com", accountCount: 2,
                             claudeAvailable: true, lastRefresh: nil,
@@ -751,6 +803,14 @@ extension ControlTestKit {
     check(tools.count == 18 && modernList?["result"]?["resultType"] == .string("complete"), "mcp: a modern tools/list has all 18 tools and a resultType", "\(tools.count)")
     check(tools.allSatisfy { $0["inputSchema"]?["type"] == .string("object") && $0["description"]?.stringValue?.isEmpty == false },
           "mcp: every tool has a description and an object input schema")
+    func tool(_ name: String) -> JSONValue? { tools.first { $0["name"] == .string(name) } }
+    let thresholdTool = tool("set_account_threshold")
+    check(thresholdTool?["inputSchema"]?["properties"]?["threshold"]?["minimum"] == .number(0)
+          && thresholdTool?["inputSchema"]?["properties"]?["threshold"]?["maximum"] == .number(100)
+          && thresholdTool?["description"]?.stringValue?.contains("manual only") == true
+          && tool("list_accounts")?["description"]?.stringValue?.contains("manualOnly") == true
+          && tool("switch_account")?["description"]?.stringValue?.contains("manual-only") == true,
+          "mcp: set_account_threshold takes 0–100 and says what 0 means")
     let names = Set(tools.compactMap { $0["name"]?.stringValue })
     check(names == Set(["get_status", "list_accounts", "get_usage", "refresh_usage", "switch_account", "add_current_account", "remove_account",
                         "start_sign_in", "get_sign_in_status", "submit_sign_in_code", "cancel_sign_in", "set_account_label", "set_account_threshold",

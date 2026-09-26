@@ -9,6 +9,11 @@ import Foundation
     strategyTests()
     earlyDrainTests()
     accountOrderTests()
+    manualOnlySettingsTests()
+    ceilingTests()
+    manualOnlyEngineTests()
+    lowThresholdTests()
+    thresholdStringsTests()
 }
 
 /// Fixtures shared by every case in this file.
@@ -32,7 +37,8 @@ private enum Rules {
             active: active, candidates: candidates, usageByAccount: usage,
             isSwitchable: switchable, activeSampledThisCycle: sampled,
             threshold: { AutoSwitchSettings.effectiveThreshold(own: $0.switchThreshold, defaultThreshold: defaultThreshold) },
-            hysteresisPct: 10, watchFable: watchFable, strategy: strategy,
+            defaultThreshold: defaultThreshold,
+            hysteresisPct: AutoSwitchEngine.hysteresis, watchFable: watchFable, strategy: strategy,
             drainEarly: drainEarly, drainWithin: drainWithinHours * 3600, asOf: now)
     }
 
@@ -396,4 +402,220 @@ private func sample(_ session: Double?, _ weekly: Double?,
     check(moved([1], to: 2) == "ABCD" && moved([1], to: 1) == "ABCD", "order: dropping an account where it already is changes nothing")
     check(moved([9], to: 0) == "ABCD", "order: an offset outside the list is ignored")
     check(moved([0], to: 99) == "BCDA", "order: a destination past the end moves to the bottom")
+}
+
+// MARK: - Manual only (0%) and thresholds below 50 (founder, 2026-09-26)
+
+@MainActor private func manualOnlySettingsTests() {
+    check(AutoSwitchSettings.accountThresholdRange == 0.0...100.0 && AutoSwitchSettings.accountStepperRange == 1.0...100.0
+          && AutoSwitchSettings.thresholdRange == 50.0...100.0 && AutoSwitchSettings.manualOnlyThreshold == 0,
+          "rules: a per-account threshold runs 0–100 while the default stays 50–100")
+    let n = AutoSwitchSettings.normalizedAccountThreshold
+    check(n(-5) == 0 && n(0) == 0 && n(0.4) == 0 && n(0.6) == 1 && n(35) == 35 && n(72.6) == 73 && n(120) == 100
+          && n(nil) == nil && n(.nan) == nil && n(-0.3)?.sign == .plus,
+          "rules: a per-account threshold is stored as a whole number within 0–100")
+    let manual = AutoSwitchSettings.isManualOnly
+    check(manual(0) && manual(0.4) && !manual(nil) && !manual(1) && !manual(50) && !manual(100),
+          "rules: 0 is Manual only and nothing else is")
+    check(AutoSwitchSettings.effectiveThreshold(own: 35, defaultThreshold: 90) == 35
+          && AutoSwitchSettings.effectiveThreshold(own: 0, defaultThreshold: 90) == 0
+          && AutoSwitchSettings.effectiveThreshold(own: nil, defaultThreshold: 30) == 50,
+          "rules: an account's own threshold below 50 is kept, Manual only's rule value is 0, and the default still clamps to 50")
+    let leave = AutoSwitchSettings.leaveAtThreshold
+    check(leave(0, 90) == 90 && leave(0, 70) == 70 && leave(0, 30) == 50 && leave(35, 90) == 35 && leave(90, 70) == 90,
+          "rules: a Manual only account is left at the default")
+
+    let m = Account(email: "m@x.com", displayName: "M", switchThreshold: 0)
+    let back = (try? JSONEncoder().encode([m])).flatMap { try? JSONDecoder().decode([Account].self, from: $0) }?.first
+    check(back?.switchThreshold == 0 && AutoSwitchSettings.isManualOnly(own: back?.switchThreshold),
+          "rules: a Manual only account saves switchThreshold 0 and loads it back")
+
+    let saved14 = #"[{"id":"CB7797E5-5257-402B-80D6-ADAE1220D361","email":"a@x.com","displayName":"A","provider":"Claude Code","isActive":true,"switchThreshold":50},{"id":"CB7797E5-5257-402B-80D6-ADAE1220D362","email":"b@x.com","displayName":"B","provider":"Claude Code","isActive":false,"switchThreshold":75},{"id":"CB7797E5-5257-402B-80D6-ADAE1220D363","email":"c@x.com","displayName":"C","provider":"Claude Code","isActive":false,"switchThreshold":100},{"id":"CB7797E5-5257-402B-80D6-ADAE1220D364","email":"d@x.com","displayName":"D","provider":"Claude Code","isActive":false}]"#
+    let old = (try? JSONDecoder().decode([Account].self, from: Data(saved14.utf8))) ?? []
+    check(old.map { AutoSwitchSettings.effectiveThreshold(own: $0.switchThreshold, defaultThreshold: 90) } == [50, 75, 100, 90]
+          && !old.contains { AutoSwitchSettings.isManualOnly(own: $0.switchThreshold) },
+          "rules: accounts saved by 1.4 behave exactly as before")
+
+    let defaults = UserDefaults.standard
+    let savedDefault = defaults.object(forKey: AutoSwitchSettings.thresholdKey)
+    defaults.set(0.0, forKey: AutoSwitchSettings.thresholdKey)
+    check(AutoSwitchSettings.defaultThreshold == 90, "rules: a saved default of 0 still reads 90, never Manual only")
+    if let savedDefault { defaults.set(savedDefault, forKey: AutoSwitchSettings.thresholdKey) } else { defaults.removeObject(forKey: AutoSwitchSettings.thresholdKey) }
+
+    let mA = Account(email: "m@x.com", displayName: "M", switchThreshold: 0)
+    let mB = Account(email: "n@x.com", displayName: "N", switchThreshold: 0)
+    let b = Account(email: "b@x.com", displayName: "B")
+    let c = Account(email: "c@x.com", displayName: "C")
+    check(AccountOrder.fallback(from: [mA, b, c])?.id == b.id && AccountOrder.fallback(from: [b, mA])?.id == b.id
+          && AccountOrder.fallback(from: [mA, mB])?.id == mA.id && AccountOrder.fallback(from: []) == nil,
+          "order: removing the active account falls back to the first account that is not Manual only")
+}
+
+@MainActor private func ceilingTests() {
+    let ceiling = AutoSwitchEngine.ceiling
+    check(AutoSwitchEngine.hysteresis == 10, "rules: the hysteresis is 10 points")
+    check(ceiling(100, 10) == 90 && ceiling(50, 10) == 40 && ceiling(20, 10) == 10 && ceiling(19, 10) == 9.5
+          && ceiling(10, 10) == 5 && ceiling(5, 10) == 2.5 && ceiling(1, 10) == 0.5,
+          "rules: ceiling: 10 points under from 20% up, half the threshold below")
+    check(ceiling(90, 1) == 89 && ceiling(2, 1) == 1 && ceiling(1, 1) == 0.5,
+          "rules: ceiling: the drain's 1 point, or half the threshold below 2%")
+    check(ceiling(0, 10) == nil && ceiling(0, 1) == nil && ceiling(-5, 10) == nil && ceiling(.nan, 10) == nil,
+          "rules: ceiling: Manual only has none")
+    var sound = true
+    var previous: (Double, Double) = (0, 0)
+    for t in 1...100 {
+        let T = Double(t)
+        guard let c = ceiling(T, 10), let d = ceiling(T, 1) else { sound = false; break }
+        if !(0 < c && c < T && c <= d && d < T && c >= previous.0 && d >= previous.1) { sound = false; break }
+        previous = (c, d)
+    }
+    check(sound, "rules: ceiling: every whole threshold 1–100 leaves room, never reaches it, and the drain's is never tighter")
+    let same = (20...100).allSatisfy { ceiling(Double($0), 10) == Double($0) - 10 }
+        && (2...100).allSatisfy { ceiling(Double($0), 1) == Double($0) - 1 }
+    check(same, "rules: ceiling: identical to 1.4 for 20–100 (switch) and 2–100 (drain)")
+}
+
+@MainActor private func manualOnlyEngineTests() {
+    let aDefault = Account(email: "a@x.com", displayName: "A", isActive: true)
+    let m0 = Account(email: "m@x.com", displayName: "M", switchThreshold: 0)
+    let mActive = Account(email: "m@x.com", displayName: "M", isActive: true, switchThreshold: 0)
+    let b = Account(email: "b@x.com", displayName: "B")
+    let bActive = Account(email: "b@x.com", displayName: "B", isActive: true)
+    let c = Account(email: "c@x.com", displayName: "C")
+    let y = Account(email: "y@x.com", displayName: "Y")
+    let strategies: [AutoSwitchStrategy] = [.mostRoom, .myOrder, .resetsSoonest]
+    func describe(_ p: Rules.Plan?) -> String { Rules.describe(p) }
+
+    for s in strategies {
+        check(describe(Rules.plan(active: aDefault, candidates: [m0], [aDefault.id: sample(95, 40), m0.id: sample(0, 0)], strategy: s)) == "stay",
+              "rules: manual only: never a target, even at 0% use (\(s.rawValue))")
+        check(describe(Rules.plan(active: aDefault, candidates: [m0, c],
+                                  [aDefault.id: sample(95, 40), m0.id: sample(0, 0), c.id: sample(50, 50)], strategy: s)) == "windows/threshold: C",
+              "rules: manual only: skipped for the next account (\(s.rawValue))")
+    }
+    check(describe(Rules.plan(active: aDefault, candidates: [m0], [aDefault.id: sample(10, 20, fable: 95), m0.id: sample(0, 0, fable: 0)])) == "stay"
+          && describe(Rules.plan(active: aDefault, candidates: [m0, c],
+                                 [aDefault.id: sample(10, 20, fable: 95), m0.id: sample(0, 0, fable: 0), c.id: sample(5, 10, fable: 20)])) == "fable/threshold: C",
+          "rules: manual only: never a Fable target")
+    let drainUsage: [UUID: UsageAPIResponse] = [aDefault.id: sample(30, 40), m0.id: sample(10, 80, weeklyResetsIn: 12), y.id: sample(10, 80, weeklyResetsIn: 12)]
+    check(describe(Rules.plan(active: aDefault, candidates: [m0], drainUsage, strategy: .resetsSoonest, drainEarly: true)) == "stay"
+          && describe(Rules.plan(active: aDefault, candidates: [y], drainUsage, strategy: .resetsSoonest, drainEarly: true)) == "windows/drainEarly: Y",
+          "rules: manual only: never an early-drain target")
+    let refusedThreshold = AutoSwitchEngine.eligibleUtilization(sample(0, 0), limit: .windows, trigger: .threshold, threshold: 0, hysteresisPct: 10,
+                                                                activeWeeklyReset: nil, drainWithin: 24 * 3600, watchFable: true, asOf: Rules.now)
+    let refusedDrain = AutoSwitchEngine.eligibleUtilization(sample(0, 0, weeklyResetsIn: 12), limit: .windows, trigger: .drainEarly, threshold: 0, hysteresisPct: 10,
+                                                            activeWeeklyReset: Rules.now.addingTimeInterval(100 * 3600), drainWithin: 24 * 3600, watchFable: true, asOf: Rules.now)
+    check(refusedThreshold == nil && refusedDrain == nil, "rules: manual only: verification refuses it under both rules")
+    var keychainReads = 0
+    _ = Rules.plan(active: aDefault, candidates: [m0], [aDefault.id: sample(95, 40), m0.id: sample(0, 0)], switchable: { _ in keychainReads += 1; return true })
+    check(keychainReads == 0, "rules: manual only: never checked in the Keychain")
+    check(describe(Rules.plan(active: aDefault, candidates: [m0, b],
+                              [aDefault.id: sample(95, 40, fable: 50), m0.id: sample(0, 0, fable: 0), b.id: sample(50, 50, fable: 100)])) == "windows/threshold: B",
+          "rules: manual only: most room left never ranks it, even with Fable to spare")
+
+    check(describe(Rules.plan(active: mActive, candidates: [c], [mActive.id: sample(89, 40), c.id: sample(50, 50)])) == "stay",
+          "rules: manual only, active: stays below the default threshold")
+    check(describe(Rules.plan(active: mActive, candidates: [c], [mActive.id: sample(90, 40), c.id: sample(50, 50)])) == "windows/threshold: C",
+          "rules: manual only, active: leaves at the default threshold")
+    check(describe(Rules.plan(active: mActive, candidates: [c], [mActive.id: sample(72, 40), c.id: sample(50, 50)], defaultThreshold: 70)) == "windows/threshold: C"
+          && describe(Rules.plan(active: mActive, candidates: [c], [mActive.id: sample(69, 40), c.id: sample(50, 50)], defaultThreshold: 70)) == "stay",
+          "rules: manual only, active: follows the user's default, not 90")
+    let fableUsage: [UUID: UsageAPIResponse] = [mActive.id: sample(10, 20, fable: 90), c.id: sample(5, 10, fable: 20)]
+    check(describe(Rules.plan(active: mActive, candidates: [c], fableUsage)) == "fable/threshold: C"
+          && describe(Rules.plan(active: mActive, candidates: [c], fableUsage, watchFable: false)) == "stay",
+          "rules: manual only, active: also leaves on Fable at the default")
+    let activeDrain: [UUID: UsageAPIResponse] = [mActive.id: sample(30, 40), aDefault.id: sample(30, 40), y.id: sample(10, 80, weeklyResetsIn: 12)]
+    check(describe(Rules.plan(active: mActive, candidates: [y], activeDrain, strategy: .resetsSoonest, drainEarly: true)) == "stay"
+          && describe(Rules.plan(active: aDefault, candidates: [y], activeDrain, strategy: .resetsSoonest, drainEarly: true)) == "windows/drainEarly: Y",
+          "rules: manual only, active: early drain never moves you off it")
+    check(describe(Rules.plan(active: mActive, candidates: [c], [c.id: sample(50, 50)])) == "stay"
+          && describe(Rules.plan(active: mActive, candidates: [c], [mActive.id: sample(95, 95, weeklyResetsIn: nil, sessionResetsIn: nil), c.id: sample(50, 50)], sampled: false)) == "stay",
+          "rules: manual only, active: no reading, no move")
+    check(Rules.plan(active: mActive, candidates: [c], [mActive.id: sample(95, 40), c.id: sample(85, 85)]) == nil,
+          "rules: manual only, active: stays when nobody has room")
+    let pingPong = strategies.allSatisfy {
+        describe(Rules.plan(active: bActive, candidates: [m0], [bActive.id: sample(95, 40), m0.id: sample(0, 0)], strategy: $0)) == "stay"
+    } && describe(Rules.plan(active: bActive, candidates: [m0], [bActive.id: sample(30, 40), m0.id: sample(10, 10, weeklyResetsIn: 12)],
+                             strategy: .resetsSoonest, drainEarly: true)) == "stay"
+    check(pingPong, "rules: ping-pong: nothing brings you back to a Manual only account")
+}
+
+@MainActor private func lowThresholdTests() {
+    let aDefault = Account(email: "a@x.com", displayName: "A", isActive: true)
+    func target(_ t: Double, _ name: String = "B") -> Account { Account(email: "\(name.lowercased())@x.com", displayName: name, switchThreshold: t) }
+    func describe(_ p: Rules.Plan?) -> String { Rules.describe(p) }
+    func one(_ b: Account, _ u: UsageAPIResponse) -> String {
+        describe(Rules.plan(active: aDefault, candidates: [b], [aDefault.id: sample(95, 40), b.id: u]))
+    }
+    let b20 = target(20), b10 = target(10), b1 = target(1)
+    check(one(b20, sample(10, 10)) == "windows/threshold: B" && one(b20, sample(11, 5)) == "stay",
+          "rules: low thresholds: a 20% candidate is eligible at 10%, not at 11%")
+    check(one(b10, sample(5, 5)) == "windows/threshold: B" && one(b10, sample(6, 0)) == "stay",
+          "rules: low thresholds: a 10% candidate is eligible at 5%, not at 6%")
+    check(one(b1, sample(0.5, 0)) == "windows/threshold: B" && one(b1, sample(1, 0)) == "stay",
+          "rules: low thresholds: a 1% candidate only at 0.5% or less")
+
+    let a5 = Account(email: "a@x.com", displayName: "A", isActive: true, switchThreshold: 5)
+    let c = Account(email: "c@x.com", displayName: "C")
+    check(describe(Rules.plan(active: a5, candidates: [c], [a5.id: sample(5, 1), c.id: sample(0, 0)])) == "windows/threshold: C"
+          && describe(Rules.plan(active: a5, candidates: [c], [a5.id: sample(4, 1), c.id: sample(0, 0)])) == "stay",
+          "rules: low thresholds: an active account on 5% leaves at 5% and stays at 4%")
+    let bActive = Account(email: "b@x.com", displayName: "B", isActive: true)
+    let a6 = target(6, "A")
+    check(describe(Rules.plan(active: bActive, candidates: [a6], [bActive.id: sample(95, 40), a6.id: sample(3.5, 0)])) == "stay"
+          && describe(Rules.plan(active: bActive, candidates: [a6], [bActive.id: sample(95, 40), a6.id: sample(3, 0)])) == "windows/threshold: A",
+          "rules: low thresholds: an account left at 6% is a target again only at 3% or less")
+    let A5 = Account(email: "a@x.com", displayName: "A", isActive: true, switchThreshold: 5)
+    let B5 = Account(email: "b@x.com", displayName: "B", switchThreshold: 5)
+    let B5active = Account(id: B5.id, email: "b@x.com", displayName: "B", isActive: true, switchThreshold: 5)
+    let A5idle = Account(id: A5.id, email: "a@x.com", displayName: "A", switchThreshold: 5)
+    check(describe(Rules.plan(active: A5, candidates: [B5], [A5.id: sample(5, 0), B5.id: sample(2, 0)])) == "windows/threshold: B"
+          && describe(Rules.plan(active: B5active, candidates: [A5idle], [B5.id: sample(5, 0), A5.id: sample(5, 0)])) == "stay",
+          "rules: low thresholds: two 5% accounts never ping-pong")
+    let y1 = target(1, "Y"), y10 = target(10, "Y")
+    func drain(_ y: Account, _ u: UsageAPIResponse) -> String {
+        describe(Rules.plan(active: aDefault, candidates: [y], [aDefault.id: sample(30, 40), y.id: u], strategy: .resetsSoonest, drainEarly: true))
+    }
+    check(drain(y1, sample(0.5, 0.5, weeklyResetsIn: 12)) == "windows/drainEarly: Y" && drain(y1, sample(1, 0, weeklyResetsIn: 12)) == "stay"
+          && drain(y10, sample(9, 9, weeklyResetsIn: 12)) == "windows/drainEarly: Y",
+          "rules: low thresholds: drain: a 1% account needs 0.5% or less; a 10% account at 9% has room")
+    let x10 = target(10, "X"), yy10 = target(10, "Y")
+    check(describe(Rules.plan(active: aDefault, candidates: [x10, yy10],
+                              [aDefault.id: sample(95, 40, fable: 50), x10.id: sample(1, 1, fable: 4), yy10.id: sample(0, 0, fable: 6)])) == "windows/threshold: X,Y",
+          "rules: low thresholds: the Fable preference uses the same halved room")
+    let y90 = target(90, "Y")
+    check(describe(Rules.plan(active: aDefault, candidates: [x10, y90],
+                              [aDefault.id: sample(95, 40), x10.id: sample(2, 2), y90.id: sample(70, 70)])) == "windows/threshold: Y,X",
+          "rules: low thresholds: most room left measures room under each account's own threshold")
+}
+
+/// The five string tables share one key set, and the Manual only strings are in place.
+@MainActor private func thresholdStringsTests() {
+    let languages = ["en", "de", "fr", "ja", "zh-Hans"]
+    let tables = languages.map { NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String] ?? [:] }
+    let keySets = tables.map { Set($0.keys) }
+    check(!keySets[0].isEmpty && keySets.allSatisfy { $0 == keySets[0] }, "l10n: the app's five string tables have the same keys",
+          zip(languages, keySets).map { "\($0.0) \($0.1.count)" }.joined(separator: ", "))
+    let added = [
+        "Manual only (%lld%%)",
+        "Manual only",
+        "Auto-switch moves you off this account at %@, and moves you to it only while it is at %@ or less.",
+        "Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default threshold (%@).",
+        "You're using it now. Auto-switch moves you off it at %@ and won't move you back to it.",
+        "Every account except the one you're using is Manual only, so auto-switch has nowhere to move you.",
+        "Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only. Manual only accounts are never switched to automatically; you can still switch to them yourself.",
+        "Auto-switch never moves you to this account. You can still switch to it here.",
+        "Any account can have its own threshold in Settings → Accounts, from 1% to 100%, or be Manual only so auto-switch never moves you to it. 100% uses an account until it is empty.",
+        "When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold (at or under half of it, for thresholds below 20%) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.",
+    ]
+    let retired = [
+        "When this account's usage reaches this level, auto-switch moves you to another account.",
+        "Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only.",
+        "Any account can have its own threshold in Settings → Accounts. 100% uses an account until it is empty.",
+        "When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.",
+    ]
+    let missing = added.filter { key in !tables.allSatisfy { $0[key] != nil } }
+    let leftover = retired.filter { key in tables.contains { $0[key] != nil } }
+    check(missing.isEmpty && leftover.isEmpty, "l10n: the Manual only strings exist in all five languages and the retired ones are gone",
+          "missing \(missing.count), leftover \(leftover.count)")
 }

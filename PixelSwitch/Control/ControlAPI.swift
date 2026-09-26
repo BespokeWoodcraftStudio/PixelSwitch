@@ -152,8 +152,8 @@ final class ControlAPI {
             detail = " \(target.id.uuidString)"
             var threshold = p.threshold
             if let value = threshold {
-                guard value.isFinite, AutoSwitchSettings.thresholdRange.contains(value.rounded()) else {
-                    throw ControlError(.invalidValue, "A threshold must be 50–100, or null to follow the default.")
+                guard value.isFinite, AutoSwitchSettings.accountThresholdRange.contains(value.rounded()) else {
+                    throw ControlError(.invalidValue, "A threshold must be 1–100, 0 for manual only, or null to follow the default.")
                 }
                 threshold = value.rounded()
             }
@@ -251,7 +251,8 @@ final class ControlAPI {
             account,
             position: position,
             isSwitchable: controller.isSwitchable(account.id),
-            effectiveThreshold: controller.effectiveSwitchThreshold(for: account),
+            effectiveThreshold: AutoSwitchSettings.leaveAtThreshold(rule: controller.effectiveSwitchThreshold(for: account),
+                                                                    defaultThreshold: controller.autoSwitch.defaultThreshold),
             usage: ControlSnapshots.usageInfo(controller.usage(for: account.id),
                                               sampledAt: controller.usageSampledAt(for: account.id),
                                               error: controller.usageError(for: account.id))
@@ -282,6 +283,7 @@ enum ControlSnapshots {
             position: position,
             threshold: account.switchThreshold,
             effectiveThreshold: effectiveThreshold,
+            manualOnly: AutoSwitchSettings.isManualOnly(own: account.switchThreshold),
             usage: usage
         )
     }

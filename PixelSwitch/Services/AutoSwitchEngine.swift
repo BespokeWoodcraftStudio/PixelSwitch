@@ -19,8 +19,9 @@ enum AutoSwitchStrategy: String, CaseIterable, Codable, Sendable {
 /// Mirrors the proven design in `claude-swap` (threshold + hysteresis): when the
 /// active account's *binding window* (the higher of its 5h / weekly utilization)
 /// reaches ITS OWN threshold, pick a same-provider account that sits at least
-/// `hysteresisPct` below ITS OWN threshold, so two accounts hovering at the line
-/// never ping-pong. Which eligible account comes first is the user's
+/// `hysteresisPct` below ITS OWN threshold (half its own threshold, for
+/// thresholds below 20%), so two accounts hovering at the line never
+/// ping-pong. An account on 0 (Manual only) is never switched to. Which eligible account comes first is the user's
 /// `AutoSwitchStrategy`. All guardrails that need state (cooldown, re-entrancy,
 /// verification) live in `AppState`; this stays a pure function.
 ///
@@ -40,6 +41,20 @@ enum AutoSwitchEngine {
 
     /// The model whose weekly allowance `.fable` watches, as the API names it.
     static let fableModelName = "Fable"
+
+    /// How far below its own threshold a threshold-triggered target must sit,
+    /// in percentage points (half its threshold below 20%: see `ceiling`).
+    static let hysteresis: Double = 10
+
+    /// The highest use at which an account may be switched TO: `room` under
+    /// its own threshold, or half the threshold when that is smaller, so a low
+    /// threshold such as 5% still accepts an account at 2.5% instead of none.
+    /// Nil for Manual only (0), a negative value or NaN: the one place that
+    /// excludes an account, shared by ranking and verification.
+    static func ceiling(threshold: Double, room: Double) -> Double? {
+        guard threshold > AutoSwitchSettings.manualOnlyThreshold else { return nil }
+        return threshold - min(room, threshold / 2)
+    }
 
     /// How far below its own threshold an early-drain target must sit on every
     /// watched limit, in percentage points. Deliberately not the 10-point
@@ -137,7 +152,8 @@ enum AutoSwitchEngine {
     /// - its weekly window has a known reset within `drainWithin` of now,
     /// - that reset is strictly earlier than the active account's weekly reset,
     /// - it sits at least `drainMinimumRoom` below its own `threshold` on the
-    ///   5-hour and weekly windows,
+    ///   5-hour and weekly windows (half the threshold below 2%; never for
+    ///   Manual only),
     /// - and, when Fable switching is on, on Fable too. Without that last rule
     ///   the Fable trigger would move the user straight off the account and
     ///   the drain would bring them back after every cooldown.
@@ -149,10 +165,10 @@ enum AutoSwitchEngine {
         watchFable: Bool,
         asOf now: Date = Date()
     ) -> Double? {
-        guard let resets = weeklyReset(usage, limit: .windows, asOf: now),
+        guard let ceiling = Self.ceiling(threshold: threshold, room: drainMinimumRoom),
+              let resets = weeklyReset(usage, limit: .windows, asOf: now),
               resets < activeWeeklyReset,
               resets.timeIntervalSince(now) <= drainWithin else { return nil }
-        let ceiling = threshold - drainMinimumRoom
         guard let util = eligibleUtilization(usage, limit: .windows, ceiling: ceiling, asOf: now) else { return nil }
         if watchFable, let fable = utilization(usage, limit: .fable, asOf: now), fable > ceiling { return nil }
         return util
@@ -168,6 +184,7 @@ enum AutoSwitchEngine {
     ///   limit that fired (and on session/weekly for a Fable switch).
     /// - `.drainEarly`: `drainEligibleUtilization`; only ever on `.windows`,
     ///   and never without the active account's weekly reset.
+    /// A threshold of 0 (Manual only) is never eligible, by either rule.
     static func eligibleUtilization(
         _ usage: UsageAPIResponse?,
         limit: Limit,
@@ -181,7 +198,8 @@ enum AutoSwitchEngine {
     ) -> Double? {
         switch trigger {
         case .threshold:
-            return eligibleUtilization(usage, limit: limit, ceiling: threshold - hysteresisPct, asOf: now)
+            guard let ceiling = Self.ceiling(threshold: threshold, room: hysteresisPct) else { return nil }
+            return eligibleUtilization(usage, limit: limit, ceiling: ceiling, asOf: now)
         case .drainEarly:
             guard limit == .windows, let activeWeeklyReset else { return nil }
             return drainEligibleUtilization(usage, threshold: threshold, activeWeeklyReset: activeWeeklyReset,
@@ -222,8 +240,12 @@ enum AutoSwitchEngine {
     ///     by the refresh cycle that is asking. Fresh readings are trusted even
     ///     without a parseable `resets_at`; only RETAINED readings need the
     ///     strict expiry check.
-    ///   - threshold: each account's effective switch threshold (its own, else
-    ///     the default), 50–100.
+    ///   - threshold: each account's rule value
+    ///     (`AutoSwitchSettings.effectiveThreshold`): its own 1–100, 0 for
+    ///     Manual only, else the default. A candidate at 0 is never eligible;
+    ///     the active account at 0 is left at `defaultThreshold` and never drained.
+    ///   - defaultThreshold: the global default (50–100): where an active
+    ///     Manual only account is left.
     ///   - hysteresisPct: a threshold-triggered candidate must sit at least this
     ///     far below its own threshold (e.g. 10).
     ///   - watchFable: the user's Fable setting.
@@ -239,6 +261,7 @@ enum AutoSwitchEngine {
         isSwitchable: (Account) -> Bool,
         activeSampledThisCycle: Bool,
         threshold: (Account) -> Double,
+        defaultThreshold: Double,
         hysteresisPct: Double,
         watchFable: Bool = true,
         strategy: AutoSwitchStrategy = .mostRoom,
@@ -246,7 +269,12 @@ enum AutoSwitchEngine {
         drainWithin: TimeInterval = 24 * 3600,
         asOf now: Date = Date()
     ) -> (limit: Limit, trigger: Trigger, targets: [Account])? {
-        let activeThreshold = threshold(active)
+        let activeRule = threshold(active)
+        // Manual only on the active account: it was chosen by hand (or signed
+        // in outside PixelSwitch), so it is left only at the default and never
+        // drained, and auto-switch never comes back to it.
+        let activeIsManualOnly = !(activeRule > AutoSwitchSettings.manualOnlyThreshold)
+        let activeThreshold = AutoSwitchSettings.leaveAtThreshold(rule: activeRule, defaultThreshold: defaultThreshold)
         var thresholdReached = false
         for limit in (watchFable ? [Limit.windows, .fable] : [Limit.windows]) {
             // Only act once the active account has reached its threshold on a
@@ -267,7 +295,7 @@ enum AutoSwitchEngine {
             if !targets.isEmpty { return (limit, .threshold, targets) }
         }
 
-        guard !thresholdReached, strategy == .resetsSoonest, drainEarly,
+        guard !thresholdReached, !activeIsManualOnly, strategy == .resetsSoonest, drainEarly,
               let activeWeeklyReset = weeklyReset(usageByAccount[active.id], limit: .windows, asOf: now) else {
             return nil
         }
@@ -332,7 +360,8 @@ enum AutoSwitchEngine {
                                                  hysteresisPct: hysteresisPct, activeWeeklyReset: activeWeeklyReset,
                                                  drainWithin: drainWithin, watchFable: watchFable, asOf: now),
                   isSwitchable(candidate) else { return nil }
-            let keepsFable = utilization(usage, limit: .fable, asOf: now).map { $0 <= own - hysteresisPct } ?? false
+            let keepsFable = utilization(usage, limit: .fable, asOf: now)
+                .flatMap { fable in Self.ceiling(threshold: own, room: hysteresisPct).map { fable <= $0 } } ?? false
             let resetMinute = weeklyReset(usage, limit: limit, asOf: now)
                 .map { ($0.timeIntervalSince1970 / 60).rounded(.down) }
             return Ranked(account: candidate, position: position, util: util, room: own - util,
@@ -395,8 +424,18 @@ enum AutoSwitchSettings {
     static let drainEarlyKey = "autoSwitchDrainEarly"
     static let drainWithinHoursKey = "autoSwitchDrainWithinHours"
 
-    /// A switch threshold, global or per account, in percent.
+    /// The global DEFAULT threshold only (Settings → General, settings key
+    /// autoSwitch.threshold). Never below 50: a 0% default would stop every
+    /// account being used.
     static let thresholdRange = 50.0...100.0
+    /// One account's own threshold; 0 = Manual only (founder, 2026-09-26).
+    static let accountThresholdRange = 0.0...100.0
+    /// The Settings stepper: Manual only is chosen by name, never by stepping
+    /// down from 1%.
+    static let accountStepperRange = 1.0...100.0
+    /// An account's own threshold that means Manual only: auto-switch never
+    /// switches to it; while it is active it is left at the default.
+    static let manualOnlyThreshold = 0.0
     /// How soon a weekly reset must be for an early drain, in hours.
     static let drainHoursRange = 1.0...72.0
 
@@ -437,15 +476,29 @@ enum AutoSwitchSettings {
     }
 
     /// What a per-account threshold is stored as: nil (use the default) for
-    /// nil or a value that is not a number, else the value kept within 50–100.
+    /// nil or a value that is not a number, else a whole number within 0–100
+    /// (0 = Manual only; never -0).
     static func normalizedAccountThreshold(_ value: Double?) -> Double? {
         guard let value, value.isFinite else { return nil }
-        return clampedThreshold(value)
+        let whole = value.rounded()
+        return whole <= accountThresholdRange.lowerBound ? accountThresholdRange.lowerBound : min(whole, accountThresholdRange.upperBound)
     }
 
-    /// The threshold that applies to an account: its own when set, else the
-    /// default, always within 50–100.
+    /// Whether an account's own threshold makes it Manual only.
+    static func isManualOnly(own: Double?) -> Bool {
+        normalizedAccountThreshold(own) == manualOnlyThreshold
+    }
+
+    /// The rule value auto-switch uses for an account: its own 0–100 when set
+    /// (0 = Manual only), else the default 50–100. The engine reads 0; use
+    /// `leaveAtThreshold` for where an active account is left.
     static func effectiveThreshold(own: Double?, defaultThreshold: Double) -> Double {
         normalizedAccountThreshold(own) ?? clampedThreshold(defaultThreshold)
+    }
+
+    /// Where auto-switch moves the user OFF an account while it is active:
+    /// the rule value, or the default for Manual only.
+    static func leaveAtThreshold(rule: Double, defaultThreshold: Double) -> Double {
+        rule > manualOnlyThreshold ? rule : clampedThreshold(defaultThreshold)
     }
 }

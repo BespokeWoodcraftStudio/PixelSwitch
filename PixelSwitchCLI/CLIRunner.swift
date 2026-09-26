@@ -91,7 +91,7 @@ struct CLIRunner {
 
         case .switchAccount(let reference):
             let result = try call(.accountsSwitch, .object(["account": .string(reference)]), slow: true)
-            show(result) { "Switched to \(CLIOutput.name(try? result["account"]?.decode(AccountInfo.self)))." }
+            show(result) { CLIOutput.switched(try? result["account"]?.decode(AccountInfo.self)) }
 
         case .addCurrent:
             let result = try call(.accountsAddCurrent, slow: true)
@@ -146,12 +146,7 @@ struct CLIRunner {
 
         case .threshold(let reference, let threshold):
             let result = try call(.accountsSetThreshold, .object(["account": .string(reference), "threshold": threshold.map(JSONValue.number) ?? .null]))
-            show(result) {
-                guard let account = try? result["account"]?.decode(AccountInfo.self) else { return "Threshold set." }
-                return account.threshold == nil
-                    ? "\(account.email) now follows the default threshold (\(CLIOutput.percent(account.effectiveThreshold)))."
-                    : "\(account.email) now switches at \(CLIOutput.percent(account.effectiveThreshold))."
-            }
+            show(result) { CLIOutput.thresholdSet(try? result["account"]?.decode(AccountInfo.self)) }
 
         case .order(let references):
             let result = try call(.accountsSetOrder, .object(["accounts": .array(references.map(JSONValue.string))]))
@@ -275,7 +270,7 @@ enum CLIOutput {
         var rows = [["", "#", "Account", "Session", "Weekly", "Fable", "Switches at"]]
         for account in accounts {
             let usage = account.usage
-            let at = percent(account.effectiveThreshold) + (account.threshold == nil ? " (default)" : "")
+            let at = switchesAt(account)
             rows.append([
                 account.isActive ? "*" : (account.isSwitchable ? "" : "!"),
                 String(account.position),
@@ -288,6 +283,38 @@ enum CLIOutput {
         }
         var text = table(rows)
         text += "\n* active   ! cannot be switched to until it is re-signed (pixelswitch accounts reauth <account>)"
+        if accounts.contains(where: \.manualOnly) {
+            text += "\nmanual only: auto-switch never moves you to it; switch to it yourself with pixelswitch switch <account>"
+        }
+        return text
+    }
+
+    /// The "Switches at" cell: where auto-switch moves off the account.
+    static func switchesAt(_ account: AccountInfo) -> String {
+        percent(account.effectiveThreshold) + (account.manualOnly ? " (manual only)" : account.threshold == nil ? " (default)" : "")
+    }
+
+    /// What `accounts threshold` prints once the app has saved it.
+    static func thresholdSet(_ account: AccountInfo?) -> String {
+        guard let account else { return "Threshold set." }
+        if account.manualOnly {
+            var text = "\(account.email) is now manual only: auto-switch never switches to it. You can still switch to it yourself."
+            if account.isActive {
+                text += " You're using it now: auto-switch moves you off it at \(percent(account.effectiveThreshold)) and won't move you back to it."
+            }
+            return text
+        }
+        return account.threshold == nil
+            ? "\(account.email) now follows the default threshold (\(percent(account.effectiveThreshold)))."
+            : "\(account.email) now switches at \(percent(account.effectiveThreshold))."
+    }
+
+    /// What `switch` prints once the switch is done.
+    static func switched(_ account: AccountInfo?) -> String {
+        var text = "Switched to \(name(account))."
+        if let account, account.manualOnly {
+            text += " It is manual only: auto-switch moves you off it at \(percent(account.effectiveThreshold)) and won't move you back to it."
+        }
         return text
     }
 

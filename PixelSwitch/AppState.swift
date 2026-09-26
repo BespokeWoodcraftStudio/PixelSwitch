@@ -106,11 +106,6 @@ final class AppState: ObservableObject {
         AutoSwitchFableSetting.isOn
     }
 
-    /// A threshold-triggered candidate must sit at least this far below its
-    /// own threshold to be eligible, so two accounts hovering at the line
-    /// never ping-pong. (An early drain uses `AutoSwitchEngine.drainMinimumRoom`.)
-    private let autoSwitchHysteresis: Double = 10
-
     /// Minimum gap between two automatic switches, to avoid rapid flip-flopping.
     private let autoSwitchCooldown: TimeInterval = 300
 
@@ -654,8 +649,9 @@ final class AppState: ObservableObject {
 
     // MARK: - Per-account threshold and priority order
 
-    /// The threshold auto-switch applies to `account`: its own when set, else
-    /// the default from Settings → General. Read from `accounts` by id, so a
+    /// The rule value auto-switch uses for `account`: its own when set (0 =
+    /// Manual only, which the engine interprets), else the default from
+    /// Settings → General. Read from `accounts` by id, so a
     /// stale copy (such as `activeAccount` held across an await) still gets
     /// the value saved most recently.
     func effectiveSwitchThreshold(for account: Account) -> Double {
@@ -664,8 +660,9 @@ final class AppState: ObservableObject {
                                                      defaultThreshold: AutoSwitchSettings.defaultThreshold)
     }
 
-    /// Sets `account`'s own threshold, kept within 50–100; nil (or a value that
-    /// is not a number) clears it back to the default. Saves.
+    /// Sets `account`'s own threshold, a whole number within 0–100 (0 = Manual
+    /// only); nil (or a value that is not a number) clears it back to the
+    /// default. Saves.
     func setSwitchThreshold(_ threshold: Double?, for account: Account) {
         guard let index = accounts.firstIndex(where: { $0.id == account.id }) else {
             log.warning("[setSwitchThreshold] No account \(account.id)")
@@ -678,7 +675,8 @@ final class AppState: ObservableObject {
             activeAccount = accounts[index]
         }
         saveAccounts()
-        log.info("[setSwitchThreshold] \(account.id): \(value.map { String(format: "%.0f%%", $0) } ?? "default")")
+        let described = value == AutoSwitchSettings.manualOnlyThreshold ? "manual only" : (value.map { String(format: "%.0f%%", $0) } ?? "default")
+        log.info("[setSwitchThreshold] \(account.id): \(described)")
     }
 
     /// Puts the accounts list in the order `orderedIds` gives. That order is
@@ -718,11 +716,13 @@ final class AppState: ObservableObject {
         accountUsageSampledAt[account.id] = nil
         accountUsageErrors[account.id] = nil
         usageRetryNotBefore[account.id] = nil
-        if account.isActive, let first = accounts.first {
-            accounts[accounts.startIndex].isActive = true
-            activeAccount = accounts.first
-            log.info("[removeAccount] Removed active account, switching to first remaining")
-            Task { await switchTo(first) }
+        // The first remaining account that is not Manual only, else the first.
+        if account.isActive, let fallback = AccountOrder.fallback(from: accounts),
+           let index = accounts.firstIndex(where: { $0.id == fallback.id }) {
+            accounts[index].isActive = true
+            activeAccount = accounts[index]
+            log.info("[removeAccount] Removed active account, switching to \(fallback.id)")
+            Task { await switchTo(fallback) }
         }
         saveAccounts()
         log.info("[removeAccount] Done. Remaining accounts: \(self.accounts.count)")
@@ -1074,7 +1074,8 @@ final class AppState: ObservableObject {
             isSwitchable: { [unowned self] in self.isSwitchable($0) },
             activeSampledThisCycle: activeSampledThisCycle,
             threshold: { [unowned self] in self.effectiveSwitchThreshold(for: $0) },
-            hysteresisPct: autoSwitchHysteresis,
+            defaultThreshold: AutoSwitchSettings.defaultThreshold,
+            hysteresisPct: AutoSwitchEngine.hysteresis,
             watchFable: watchFable,
             strategy: strategy,
             drainEarly: drainEarly,
@@ -1091,8 +1092,10 @@ final class AppState: ObservableObject {
         defer { isEvaluatingAutoSwitch = false }
 
         let activeUtil = AutoSwitchEngine.utilization(accountUsage[active.id], limit: limit) ?? -1
-        let activeThreshold = effectiveSwitchThreshold(for: active)
-        log.info("[autoSwitch] Rule \(trigger.rawValue), strategy \(strategy.rawValue): active \(active.id) at \(String(format: "%.0f", activeUtil))% on \(limit.rawValue) (its threshold \(String(format: "%.0f", activeThreshold))%); \(ranked.count) candidate(s)")
+        let activeRule = effectiveSwitchThreshold(for: active)
+        let activeThreshold = AutoSwitchSettings.leaveAtThreshold(rule: activeRule, defaultThreshold: AutoSwitchSettings.defaultThreshold)
+        let manualNote = activeRule == AutoSwitchSettings.manualOnlyThreshold ? ", manual only: left at the default" : ""
+        log.info("[autoSwitch] Rule \(trigger.rawValue), strategy \(strategy.rawValue): active \(active.id) at \(String(format: "%.0f", activeUtil))% on \(limit.rawValue) (its threshold \(String(format: "%.0f", activeThreshold))%\(manualNote)); \(ranked.count) candidate(s)")
 
         // At most ONE fresh verification request per evaluation. Later ranked
         // candidates only qualify via samples this cycle already took.
@@ -1118,9 +1121,13 @@ final class AppState: ObservableObject {
             let targetThreshold = effectiveSwitchThreshold(for: target)
             guard let verifiedUtil = AutoSwitchEngine.eligibleUtilization(
                 usage, limit: limit, trigger: trigger,
-                threshold: targetThreshold, hysteresisPct: autoSwitchHysteresis,
+                threshold: targetThreshold, hysteresisPct: AutoSwitchEngine.hysteresis,
                 activeWeeklyReset: activeWeeklyReset, drainWithin: drainWithin, watchFable: watchFable
             ) else {
+                if targetThreshold == AutoSwitchSettings.manualOnlyThreshold {
+                    log.info("[autoSwitch] Candidate \(target.id) is manual only now; trying next")
+                    continue
+                }
                 let onLimit = AutoSwitchEngine.utilization(usage, limit: limit).map { String(format: "%.0f%%", $0) } ?? "no reading"
                 let onWindows = AutoSwitchEngine.bindingUtilization(usage).map { String(format: "%.0f%%", $0) } ?? "no reading"
                 log.info("[autoSwitch] Candidate \(target.id) failed verification for \(trigger.rawValue) (\(limit.rawValue) \(onLimit), windows \(onWindows), its threshold \(String(format: "%.0f", targetThreshold))%); trying next")

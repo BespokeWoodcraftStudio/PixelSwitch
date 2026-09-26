@@ -13,10 +13,12 @@ struct SettingsAccountsTab: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage(EmailDisplay.key) private var maskEmails = false
     @AppStorage(AutoSwitchSettings.thresholdKey) private var defaultThreshold = AutoSwitchSettings.fallbackThreshold
+    @AppStorage(AutoSwitchSettings.enabledKey) private var autoSwitchEnabled = false
 
-    /// The thresholds the menu offers, in 5-point steps; the stepper beside a
-    /// custom value reaches every whole number in between.
-    private static let thresholdChoices: [Double] = Array(stride(from: 50.0, through: 100.0, by: 5.0))
+    /// The thresholds the menu offers: 10–40 in 10s, then 50–100 in 5s; the
+    /// stepper beside a custom value reaches every whole number from 1 to 100.
+    /// Manual only (0) is its own named item, never a stepper stop.
+    private static let thresholdChoices: [Double] = [10, 20, 30, 40] + Array(stride(from: 50.0, through: 100.0, by: 5.0))
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -42,7 +44,14 @@ struct SettingsAccountsTab: View {
                 .listStyle(.inset(alternatesRowBackgrounds: true))
             }
 
-            Text("Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only.")
+            if nowhereToGo {
+                Text("Every account except the one you're using is Manual only, so auto-switch has nowhere to move you.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only. Manual only accounts are never switched to automatically; you can still switch to them yourself.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -81,6 +90,12 @@ struct SettingsAccountsTab: View {
                 weeklyReset(for: account)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if autoSwitchEnabled && account.isActive && isManualOnly(account) {
+                    Text("You're using it now. Auto-switch moves you off it at \(Self.percent(shownDefault)) and won't move you back to it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -115,11 +130,38 @@ struct SettingsAccountsTab: View {
 
     // MARK: - Threshold
 
+    /// The default threshold as auto-switch reads it (unset or 0 is 90; kept
+    /// within 50–100). Reads the @AppStorage value so rows redraw when the
+    /// General slider moves.
+    private var shownDefault: Double {
+        AutoSwitchSettings.clampedThreshold(defaultThreshold == 0 ? AutoSwitchSettings.fallbackThreshold : defaultThreshold)
+    }
+
+    private func isManualOnly(_ account: Account) -> Bool {
+        AutoSwitchSettings.isManualOnly(own: account.switchThreshold)
+    }
+
+    /// Auto-switch on, an account active, and every other account Manual only.
+    private var nowhereToGo: Bool {
+        guard autoSwitchEnabled, appState.accounts.count >= 2, appState.accounts.contains(where: \.isActive) else { return false }
+        return appState.accounts.filter { !$0.isActive }.allSatisfy(isManualOnly)
+    }
+
+    /// A percentage with at most one decimal, in the user's locale ("5%", "2.5%").
+    private static func percent(_ value: Double) -> String {
+        (value / 100).formatted(.percent.precision(.fractionLength(0...1)))
+    }
+
     private func thresholdControl(for account: Account) -> some View {
-        HStack(spacing: 4) {
+        let own = AutoSwitchSettings.normalizedAccountThreshold(account.switchThreshold)
+        return HStack(spacing: 4) {
             Menu {
-                Button("Default (\(Int(defaultThreshold))%)") {
+                Button("Default (\(Int(shownDefault))%)") {
                     appState.setSwitchThreshold(nil, for: account)
+                }
+                Divider()
+                Button("Manual only (\(Int(AutoSwitchSettings.manualOnlyThreshold))%)") {
+                    appState.setSwitchThreshold(AutoSwitchSettings.manualOnlyThreshold, for: account)
                 }
                 Divider()
                 ForEach(Self.thresholdChoices, id: \.self) { value in
@@ -130,20 +172,32 @@ struct SettingsAccountsTab: View {
                     }
                 }
             } label: {
-                if let own = account.switchThreshold {
+                if own == AutoSwitchSettings.manualOnlyThreshold {
+                    Text("Manual only")
+                } else if let own {
                     Text("Switch at \(Int(own))%")
                 } else {
-                    Text("Default (\(Int(defaultThreshold))%)")
+                    Text("Default (\(Int(shownDefault))%)")
                 }
             }
             .fixedSize()
-            .help("When this account's usage reaches this level, auto-switch moves you to another account.")
+            .help(thresholdHelp(own: own))
 
-            if account.switchThreshold != nil {
-                Stepper("", value: customThreshold(for: account), in: AutoSwitchSettings.thresholdRange, step: 1)
+            if let own, own > AutoSwitchSettings.manualOnlyThreshold {
+                Stepper("", value: customThreshold(for: account), in: AutoSwitchSettings.accountStepperRange, step: 1)
                     .labelsHidden()
             }
         }
+    }
+
+    /// What the account's setting does, in numbers from the engine's own rule.
+    private func thresholdHelp(own: Double?) -> Text {
+        if own == AutoSwitchSettings.manualOnlyThreshold {
+            return Text("Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default threshold (\(Self.percent(shownDefault))).")
+        }
+        let leaveAt = own ?? shownDefault
+        let arriveAt = AutoSwitchEngine.ceiling(threshold: leaveAt, room: AutoSwitchEngine.hysteresis) ?? 0
+        return Text("Auto-switch moves you off this account at \(Self.percent(leaveAt)), and moves you to it only while it is at \(Self.percent(arriveAt)) or less.")
     }
 
     /// The stepper's binding: the account's own threshold, saved on change.

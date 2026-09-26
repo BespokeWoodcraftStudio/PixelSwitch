@@ -214,7 +214,6 @@
 
 /* Auto-switch rules: Settings → General (1.2) */
 "Default threshold" = "Default threshold";
-"Any account can have its own threshold in Settings → Accounts. 100% uses an account until it is empty." = "Any account can have its own threshold in Settings → Accounts. 100% uses an account until it is empty.";
 "Choose the next account by" = "Choose the next account by";
 "Most room left" = "Most room left";
 "My order" = "My order";
@@ -225,16 +224,13 @@
 "Switch early to use quota before it resets" = "Switch early to use quota before it resets";
 "Within %lld hours" = "Within %lld hours";
 "Switches before the active account reaches its threshold when another account's weekly quota resets within this many hours, sooner than the active account's, and that account still has room." = "Switches before the active account reaches its threshold when another account's weekly quota resets within this many hours, sooner than the active account's, and that account still has room.";
-"When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping." = "When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.";
 
 /* Settings → Accounts (1.2) */
-"Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only." = "Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only.";
 "Weekly resets %@" = "Weekly resets %@";
 "Weekly resets in %@" = "Weekly resets in %@";
 "Weekly reset not known yet" = "Weekly reset not known yet";
 "Default (%lld%%)" = "Default (%lld%%)";
 "Switch at %lld%%" = "Switch at %lld%%";
-"When this account's usage reaches this level, auto-switch moves you to another account." = "When this account's usage reaches this level, auto-switch moves you to another account.";
 
 /* Sign-in links (1.2) */
 "Couldn't prepare the sign-in: %@" = "Couldn't prepare the sign-in: %@";
@@ -291,3 +287,15 @@
 "To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH." = "To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH.";
 "No account is active yet, so there is nothing to switch from. Add the current account first." = "No account is active yet, so there is nothing to switch from. Add the current account first.";
 "A switch or sign-in is in progress. Try again in a moment." = "A switch or sign-in is in progress. Try again in a moment.";
+
+/* Manual only (0%) and thresholds below 50% (1.5) */
+"Manual only (%lld%%)" = "Manual only (%lld%%)";
+"Manual only" = "Manual only";
+"Auto-switch moves you off this account at %@, and moves you to it only while it is at %@ or less." = "Auto-switch moves you off this account at %@, and moves you to it only while it is at %@ or less.";
+"Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default threshold (%@)." = "Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default threshold (%@).";
+"You're using it now. Auto-switch moves you off it at %@ and won't move you back to it." = "You're using it now. Auto-switch moves you off it at %@ and won't move you back to it.";
+"Every account except the one you're using is Manual only, so auto-switch has nowhere to move you." = "Every account except the one you're using is Manual only, so auto-switch has nowhere to move you.";
+"Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only. Manual only accounts are never switched to automatically; you can still switch to them yourself." = "Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only. Manual only accounts are never switched to automatically; you can still switch to them yourself.";
+"Auto-switch never moves you to this account. You can still switch to it here." = "Auto-switch never moves you to this account. You can still switch to it here.";
+"Any account can have its own threshold in Settings → Accounts, from 1% to 100%, or be Manual only so auto-switch never moves you to it. 100% uses an account until it is empty." = "Any account can have its own threshold in Settings → Accounts, from 1% to 100%, or be Manual only so auto-switch never moves you to it. 100% uses an account until it is empty.";
+"When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold (at or under half of it, for thresholds below 20%) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping." = "When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold (at or under half of it, for thresholds below 20%) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.";

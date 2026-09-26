@@ -6,6 +6,7 @@ struct AccountSwitcherView: View {
     @AppStorage(AccountColorCoding.key) private var colorCodeAccounts = true
     @EnvironmentObject private var appState: AppState
     @AppStorage(EmailDisplay.key) private var maskEmails = false
+    @AppStorage(AutoSwitchSettings.enabledKey) private var autoSwitchEnabled = false
     @State private var showingAddConfirm = false
     @State private var editingAccountId: UUID?
     @State private var editingLabel = ""
@@ -175,6 +176,17 @@ struct AccountSwitcherView: View {
                 .font(.caption2)
                 .foregroundStyle(.textSecondary)
                 .lineLimit(1)
+
+                // A third quiet line, never a badge beside the name (the
+                // address above already truncates on the 360pt panel). Only
+                // with auto-switch on: with it off every account is manual.
+                if autoSwitchEnabled && AutoSwitchSettings.isManualOnly(own: account.switchThreshold) {
+                    Label("Manual only", systemImage: "hand.raised")
+                        .font(.caption2)
+                        .foregroundStyle(.textSecondary)
+                        .lineLimit(1)
+                        .help("Auto-switch never moves you to this account. You can still switch to it here.")
+                }
             }
             // Takes every point the buttons do not need. There is deliberately
             // NO Spacer after this: a Spacer expands too, so the two of them

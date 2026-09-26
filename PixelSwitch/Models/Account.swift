@@ -38,10 +38,11 @@ struct Account: Identifiable, Codable, Hashable {
     var isActive: Bool
     var lastUsed: Date?
     var customLabel: String?
-    /// This account's own auto-switch threshold, 50–100 percent. nil means it
-    /// uses the default (global) threshold. Saved accounts from before this
+    /// This account's own auto-switch threshold, 0–100 percent; 0 means
+    /// Manual only (auto-switch never switches to it). nil means it uses the
+    /// default (global) threshold. Saved accounts from before this
     /// existed decode it as nil, so they behave exactly as they did.
-    var switchThreshold: Double?   // 50...100; nil = use the default (global) threshold
+    var switchThreshold: Double?   // 0...100; 0 = Manual only; nil = use the default (global) threshold
 
     /// Subscription type with first letter capitalized (e.g., "max" → "Max").
     var displaySubscriptionType: String? {

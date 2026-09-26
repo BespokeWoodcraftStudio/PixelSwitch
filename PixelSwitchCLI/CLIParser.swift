@@ -31,7 +31,7 @@ enum CLICommand: Equatable, Sendable {
     case signInCancel
     case remove(String)
     case label(String, String?)
-    /// nil threshold: back to the default.
+    /// nil: back to the default; 0: manual only.
     case threshold(String, Double?)
     case order([String])
     case usage(String?)
@@ -156,10 +156,14 @@ enum CLIParser {
             let text = rest.dropFirst().joined(separator: " ")
             return .label(account, text == "--clear" ? nil : text)
         case "threshold":
-            guard rest.count == 2 else { throw CLIUsageError("Usage: pixelswitch accounts threshold <account> <50-100|default>") }
+            guard rest.count == 2 else { throw CLIUsageError("Usage: pixelswitch accounts threshold <account> <1-100|default|manual>") }
             if rest[1].lowercased() == "default" { return .threshold(rest[0], nil) }
+            // Manual only is 0. A literal, because this target does not compile
+            // AutoSwitchSettings. "off", "never" and "disable" are deliberately
+            // not aliases: they read just as well as "never switch away".
+            if rest[1].lowercased() == "manual" { return .threshold(rest[0], 0) }
             guard let value = Double(rest[1].replacingOccurrences(of: "%", with: "")) else {
-                throw CLIUsageError("The threshold must be a number from 50 to 100, or \"default\".")
+                throw CLIUsageError("The threshold must be a number from 1 to 100, \"default\", or \"manual\" (0 means manual too).")
             }
             return .threshold(rest[0], value)
         case "order":
@@ -214,7 +218,8 @@ enum CLIParser {
       pixelswitch accounts sign-in code <code>       The code the page shows, from another device
       pixelswitch accounts remove <account> --yes    Deletes the account's saved login
       pixelswitch accounts label <account> <text> | --clear
-      pixelswitch accounts threshold <account> <50-100|default>
+      pixelswitch accounts threshold <account> <1-100|default|manual>
+                                                     manual (or 0): never switched to automatically
       pixelswitch accounts order <account> <account> ...   The full priority order
 
     Usage

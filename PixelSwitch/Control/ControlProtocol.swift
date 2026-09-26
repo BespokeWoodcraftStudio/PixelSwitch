@@ -10,7 +10,7 @@ enum ControlProtocol {
     /// Bumped whenever a method, parameter or result changes shape. The CLI
     /// refuses to talk to an app with a different number (an old app still
     /// running after an update).
-    static let version = 1
+    static let version = 2
 
     static let appBundleIdentifier = "ai.pixelventures.pixelswitch"
 
@@ -293,7 +293,8 @@ struct LabelParams: Codable, Equatable, Sendable {
 
 struct ThresholdParams: Codable, Equatable, Sendable {
     let account: String
-    /// 50–100; nil means the account follows the default threshold.
+    /// 1–100; 0 = manual only (auto-switch never switches to it); nil
+    /// follows the default threshold.
     var threshold: Double?
 }
 
@@ -387,9 +388,15 @@ struct AccountInfo: Codable, Equatable, Sendable {
     let isSwitchable: Bool
     /// 1-based position in the priority order.
     let position: Int
-    /// This account's own threshold; nil when it follows the default.
+    /// This account's own threshold: 1–100, or 0 for manual only; nil when it
+    /// follows the default.
     let threshold: Double?
+    /// Where auto-switch moves off this account while it is active: its own
+    /// threshold, else the default (also when manualOnly).
     let effectiveThreshold: Double
+    /// True when auto-switch never switches to it; a person or
+    /// accounts.switch still can.
+    let manualOnly: Bool
     let usage: UsageInfo?
 }
 

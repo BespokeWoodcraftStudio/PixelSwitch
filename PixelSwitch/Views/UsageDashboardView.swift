@@ -25,6 +25,7 @@ struct UsageDashboardView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var menuBarConfig: MenuBarConfig
     @AppStorage(EmailDisplay.key) private var maskEmails = false
+    @AppStorage(AutoSwitchSettings.enabledKey) private var autoSwitchEnabled = false
     /// Settings → Appearance. Off restores the plain, uncoloured cards.
     @AppStorage(AccountColorCoding.key) private var colorCodeAccounts = true
     /// Which card the pointer is over, so it can offer the double-click.
@@ -372,6 +373,12 @@ struct UsageDashboardView: View {
                     .font(.caption2)
                     .foregroundStyle(.textSecondary)
                     .transition(.opacity)
+            } else if autoSwitchEnabled && AutoSwitchSettings.isManualOnly(own: account.switchThreshold) {
+                Label("Manual only", systemImage: "hand.raised")
+                    .font(.caption2)
+                    .foregroundStyle(.textSecondary)
+                    .lineLimit(1)
+                    .help("Auto-switch never moves you to this account. You can still switch to it here.")
             }
         }
         .frame(minHeight: 14)

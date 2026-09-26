@@ -34,4 +34,10 @@ enum AccountOrder {
         result.insert(contentsOf: moved, at: insertAt)
         return result
     }
+
+    /// Where to go when the active account is removed: the first account that
+    /// is not Manual only, else the first.
+    static func fallback(from remaining: [Account]) -> Account? {
+        remaining.first { !AutoSwitchSettings.isManualOnly(own: $0.switchThreshold) } ?? remaining.first
+    }
 }
