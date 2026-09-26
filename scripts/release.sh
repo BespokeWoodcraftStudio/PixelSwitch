@@ -126,17 +126,29 @@ git tag "$TAG"
 git push origin main
 git push origin "$TAG"
 
-# This repository is a GitHub fork, and GitHub does not start workflows from
-# pushes on it (observed 2026-09-21: neither the main push nor the v1.0 tag
-# push triggered a run). Start the release build on the tag explicitly.
+# The tag push starts the release build by itself: the repository is no longer
+# a GitHub fork (it was on 2026-09-21, when pushes started nothing). Start one
+# by hand ONLY if no run for this tag appears. Two release builds race to upload
+# the DMG and the appcast, and a DMG from one with the appcast's signature from
+# the other fails every update (v1.2, 2026-09-25: both ran; this time the later
+# one uploaded all three files).
 #
-# `-R` is not optional. Without it the gh CLI resolves a fork to its PARENT, so
-# the dispatch went to XueshiQiao/CCSwitcher and came back "HTTP 403: Must have
-# admin rights to Repository" while the tag sat there with no build (v1.0.10,
-# 2026-09-22). Read from the origin remote rather than hardcoded, so a rename
-# cannot make this silently wrong again.
+# `-R` is not optional. Without it the gh CLI resolved the old fork to its
+# PARENT and the dispatch came back "HTTP 403" (v1.0.10, 2026-09-22). Read from
+# the origin remote rather than hardcoded, so a rename cannot break it silently.
 REPO=$(git remote get-url origin | sed -E 's#.*github\.com[:/]##; s#\.git$##')
-gh workflow run build.yml -R "$REPO" --ref "$TAG"
+RUN=""
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    sleep 5
+    RUN=$(gh run list -R "$REPO" --workflow build.yml --branch "$TAG" --event push -L 1 --json databaseId --jq '.[0].databaseId // empty')
+    [ -n "$RUN" ] && break
+done
+if [ -n "$RUN" ]; then
+    echo "The tag push started the release build: https://github.com/${REPO}/actions/runs/${RUN}"
+else
+    echo "No build started from the tag push within a minute; starting it by hand."
+    gh workflow run build.yml -R "$REPO" --ref "$TAG"
+fi
 
 echo ""
 echo "Released ${TAG} (build ${NEW_BUILD})"
