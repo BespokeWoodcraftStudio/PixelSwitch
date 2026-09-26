@@ -34,16 +34,21 @@ final class ControlServer: @unchecked Sendable {
     let path: String
     private let handler: Handler
     private let log: @Sendable (String) -> Void
+    private let writeTimeoutMilliseconds: Int32
     private let queue = DispatchQueue(label: "ai.pixelventures.pixelswitch.control")
     private let lock = NSLock()
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var connections: [UUID: ControlConnection] = [:]
 
-    init(path: String, handler: @escaping Handler, log: @escaping @Sendable (String) -> Void = { _ in }) {
+    /// `writeTimeoutMilliseconds`: how long a reply or event may wait for a
+    /// client that is not reading.
+    init(path: String, handler: @escaping Handler, log: @escaping @Sendable (String) -> Void = { _ in },
+         writeTimeoutMilliseconds: Int32 = 2000) {
         self.path = path
         self.handler = handler
         self.log = log
+        self.writeTimeoutMilliseconds = writeTimeoutMilliseconds
     }
 
     var isListening: Bool {
@@ -131,7 +136,7 @@ final class ControlServer: @unchecked Sendable {
             var on: Int32 = 1
             setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
             _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) | O_NONBLOCK)
-            let connection = ControlConnection(fd: client, queue: queue, onClose: { [weak self] id in self?.forget(id) })
+            let connection = ControlConnection(fd: client, queue: queue, writeTimeoutMilliseconds: writeTimeoutMilliseconds, onClose: { [weak self] id in self?.forget(id) })
             lock.lock(); connections[connection.id] = connection; lock.unlock()
             connection.start(handler: handler)
         }
@@ -173,6 +178,7 @@ final class ControlConnection: @unchecked Sendable {
     let id = UUID()
     private let fd: Int32
     private let queue: DispatchQueue
+    private let writeTimeoutMilliseconds: Int32
     private let onClose: @Sendable (UUID) -> Void
     private let lock = NSLock()
     private var source: DispatchSourceRead?
@@ -181,9 +187,10 @@ final class ControlConnection: @unchecked Sendable {
     private var subscribed = false
     private var continuation: AsyncStream<String>.Continuation?
 
-    init(fd: Int32, queue: DispatchQueue, onClose: @escaping @Sendable (UUID) -> Void) {
+    init(fd: Int32, queue: DispatchQueue, writeTimeoutMilliseconds: Int32 = 2000, onClose: @escaping @Sendable (UUID) -> Void) {
         self.fd = fd
         self.queue = queue
+        self.writeTimeoutMilliseconds = writeTimeoutMilliseconds
         self.onClose = onClose
     }
 
@@ -211,10 +218,13 @@ final class ControlConnection: @unchecked Sendable {
     }
 
     /// Writes `line` and a newline. False once the connection is closed.
+    /// A line that cannot be written whole within the write timeout closes the
+    /// connection: its stream would hold half a line, and a client that has
+    /// stopped reading would stall the main actor again on every event.
     @discardableResult
     func send(_ line: String) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        guard !closed else { return false }
+        lock.lock()
+        guard !closed else { lock.unlock(); return false }
         var bytes = Array((line + "\n").utf8)
         var offset = 0
         while offset < bytes.count {
@@ -224,13 +234,13 @@ final class ControlConnection: @unchecked Sendable {
             if written > 0 { offset += written; continue }
             if written < 0, errno == EAGAIN || errno == EINTR {
                 var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
-                if poll(&pfd, 1, 2000) <= 0 { break }
-                continue
+                if poll(&pfd, 1, writeTimeoutMilliseconds) > 0 { continue }
             }
             break
         }
-        bytes.removeAll()
-        return offset > 0
+        lock.unlock()
+        guard offset == bytes.count else { close(); return false }
+        return true
     }
 
     func close() {

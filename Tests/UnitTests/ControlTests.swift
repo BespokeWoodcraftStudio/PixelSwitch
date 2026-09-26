@@ -555,6 +555,34 @@ extension ControlTestKit {
     } else {
         check(false, "socket: with the app not running, the client says it is unreachable", "\(String(describing: unreachable))")
     }
+
+    // A subscriber that stops reading (a frozen SSH session running `watch`)
+    // is dropped at its first stalled write. Left open, every event would
+    // stall the main thread and leave half a line in its stream.
+    let quickPath = dir.appendingPathComponent("q/control.sock").path
+    let quick = ControlServer(path: quickPath, handler: { line, connection in
+        await api.handle(line, onSubscribe: { connection.markSubscribed() })
+    }, writeTimeoutMilliseconds: 100)
+    guard (try? quick.start()) != nil else { check(false, "socket: the second server starts"); return }
+    defer { quick.stop() }
+    let stuck = socket(AF_UNIX, SOCK_STREAM, 0)
+    defer { close(stuck) }
+    var small: Int32 = 1024
+    setsockopt(stuck, SOL_SOCKET, SO_RCVBUF, &small, socklen_t(MemoryLayout<Int32>.size))
+    var quickAddress = ControlServer.address(quickPath)
+    _ = withUnsafePointer(to: &quickAddress) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(stuck, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+    let subscribe = Array((#"{"jsonrpc":"2.0","id":1,"method":"events.subscribe"}"# + "\n").utf8)
+    _ = subscribe.withUnsafeBytes { write(stuck, $0.baseAddress!, $0.count) }
+    ControlTestKit.spin(until: { !quick.subscribers().isEmpty }, timeout: 5)
+    if let watcher = quick.subscribers().first {
+        let event = String(repeating: "x", count: 32 * 1024)
+        var attempts = 0
+        while watcher.isSubscribed, attempts < 40 { watcher.send(event); attempts += 1 }
+        check(!watcher.isSubscribed && quick.subscribers().isEmpty && !watcher.send("{}"),
+              "socket: a subscriber that stops reading is dropped at its first stalled write", "attempts \(attempts)")
+    } else {
+        check(false, "socket: a subscriber that stops reading is dropped at its first stalled write", "never subscribed")
+    }
 }
 
 // MARK: - Command-line parser
