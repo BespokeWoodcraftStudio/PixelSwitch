@@ -29,6 +29,7 @@ struct PixelSwitchApp: App {
     @AppStorage("appLanguage") private var appLanguage = "auto"
 
     @State private var statusItemController = StatusItemController()
+    @State private var signInWindowController = SignInWindowController()
     @State private var didBootstrap = false
 
     init() {
@@ -54,6 +55,7 @@ struct PixelSwitchApp: App {
                         config: menuBarConfig,
                         locale: currentLocale
                     )
+                    signInWindowController.install(appState: appState, locale: currentLocale)
                     // Kick off background usage tracking immediately upon app start
                     Task {
                         await appState.refresh()
@@ -62,6 +64,7 @@ struct PixelSwitchApp: App {
                 }
                 .onChange(of: appLanguage) { _, _ in
                     statusItemController.updateLocale(currentLocale)
+                    signInWindowController.updateLocale(currentLocale)
                 }
         }
         .defaultSize(width: 20, height: 20)
