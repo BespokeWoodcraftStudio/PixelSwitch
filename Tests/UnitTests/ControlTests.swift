@@ -13,6 +13,7 @@ import Foundation
     runControlSocketTests()
     runControlCLIParserTests()
     runControlCLIOutputTests()
+    runControlMCPTests()
 }
 
 /// Shared helpers, in one namespace so nothing collides with other test files.
@@ -662,4 +663,67 @@ extension ControlTestKit {
     } else {
         check(false, "cli output: a stand-in old app starts for the protocol check")
     }
+}
+
+// MARK: - MCP
+
+@MainActor func runControlMCPTests() {
+    let calls = ControlTestKit.Box<[String]>([])
+    let server = MCPServer(serverVersion: "1.2") { method, params in
+        MainActor.assumeIsolated { calls.value.append("\(method.rawValue) \(params?.compactText ?? "nil")") }
+        if method == .accountsSwitch, params?["account"] == .string("busy") { throw ControlError(.busy, "A switch is in progress.") }
+        return .object(["ok": .bool(true)])
+    }
+    func reply(_ json: String) -> JSONValue? {
+        server.handle(json).flatMap { try? ControlCoding.decoder.decode(JSONValue.self, from: Data($0.utf8)) }
+    }
+    let modernMeta = #""_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}"#
+
+    let initialize = reply(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude","version":"9"}}}"#)
+    check(initialize?["result"]?["protocolVersion"] == .string("2025-06-18") && initialize?["result"]?["capabilities"]?["tools"] == .object([:])
+          && initialize?["result"]?["serverInfo"]?["name"] == .string("pixelswitch"), "mcp: a legacy client gets the version it asked for")
+    let unknownVersion = reply(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-01-01"}}"#)
+    check(unknownVersion?["result"]?["protocolVersion"] == .string("2025-11-25"), "mcp: an unknown legacy version gets the newest legacy one")
+    check(server.handle(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#) == nil, "mcp: notifications get no reply")
+
+    let discover = reply(#"{"jsonrpc":"2.0","id":"d","method":"server/discover","params":{\#(modernMeta)}}"#)
+    check(discover?["result"]?["supportedVersions"]?.arrayValue?.first == .string("2026-07-28") && discover?["result"]?["resultType"] == .string("complete")
+          && discover?["result"]?["_meta"]?["io.modelcontextprotocol/serverInfo"]?["version"] == .string("1.2") && discover?["id"] == .string("d"),
+          "mcp: server/discover lists the supported versions and who the server is")
+
+    let modernList = reply(#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{\#(modernMeta)}}"#)
+    let tools = modernList?["result"]?["tools"]?.arrayValue ?? []
+    check(tools.count == 18 && modernList?["result"]?["resultType"] == .string("complete"), "mcp: a modern tools/list has all 18 tools and a resultType", "\(tools.count)")
+    check(tools.allSatisfy { $0["inputSchema"]?["type"] == .string("object") && $0["description"]?.stringValue?.isEmpty == false },
+          "mcp: every tool has a description and an object input schema")
+    let names = Set(tools.compactMap { $0["name"]?.stringValue })
+    check(names == Set(["get_status", "list_accounts", "get_usage", "refresh_usage", "switch_account", "add_current_account", "remove_account",
+                        "start_sign_in", "get_sign_in_status", "submit_sign_in_code", "cancel_sign_in", "set_account_label", "set_account_threshold",
+                        "set_account_order", "get_settings", "set_setting", "check_for_updates", "quit_app"]),
+          "mcp: the tools are the ones the design lists")
+    let legacyList = reply(#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#)
+    check(legacyList?["result"]?["resultType"] == nil && legacyList?["result"]?["tools"]?.arrayValue?.count == 18, "mcp: a legacy tools/list has no resultType")
+
+    let unsupported = reply(#"{"jsonrpc":"2.0","id":4,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"1900-01-01","io.modelcontextprotocol/clientCapabilities":{}}}}"#)
+    check(unsupported?["error"]?["code"] == .number(-32022) && unsupported?["error"]?["data"]?["requested"] == .string("1900-01-01"),
+          "mcp: an unsupported modern version gets UnsupportedProtocolVersion with the supported list")
+    let noCaps = reply(#"{"jsonrpc":"2.0","id":5,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}"#)
+    check(noCaps?["error"]?["code"] == .number(-32602), "mcp: a modern request without client capabilities is invalid params")
+
+    let called = reply(#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"switch_account","arguments":{"account":"bob@home.com"}}}"#)
+    check(calls.value.last == #"accounts.switch {"account":"bob@home.com"}"# && called?["result"]?["isError"] == .bool(false)
+          && called?["result"]?["structuredContent"]?["ok"] == .bool(true), "mcp: a tool call runs the matching control method", calls.value.last ?? "")
+    let busy = reply(#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"switch_account","arguments":{"account":"busy"}}}"#)
+    check(busy?["result"]?["isError"] == .bool(true) && busy?["result"]?["content"]?.arrayValue?.first?["text"] == .string("busy: A switch is in progress."),
+          "mcp: a refused call is a tool error the model can read")
+    let callsBefore = calls.value.count
+    let missing = reply(#"{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"switch_account","arguments":{}}}"#)
+    check(missing?["result"]?["isError"] == .bool(true) && calls.value.count == callsBefore, "mcp: a missing required argument is refused before calling the app")
+    _ = reply(#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"get_status"}}"#)
+    check(calls.value.last == "status.get nil", "mcp: a tool with no arguments sends no params")
+    let unknownTool = reply(#"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"teleport"}}"#)
+    check(unknownTool?["error"]?["code"] == .number(-32602), "mcp: an unknown tool is invalid params")
+    check(reply(#"{"jsonrpc":"2.0","id":11,"method":"ping"}"#)?["result"] == .object([:]), "mcp: ping answers")
+    check(reply(#"{"jsonrpc":"2.0","id":12,"method":"resources/list"}"#)?["error"]?["code"] == .number(-32601), "mcp: an unknown method is method-not-found")
+    check(reply("garbage")?["error"]?["code"] == .number(-32700), "mcp: garbage is a parse error")
 }

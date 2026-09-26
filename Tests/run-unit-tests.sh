@@ -38,6 +38,7 @@ swiftc -swift-version 6 \
   PixelSwitchCLI/ControlClient.swift \
   PixelSwitchCLI/CLIParser.swift \
   PixelSwitchCLI/CLIRunner.swift \
+  PixelSwitchCLI/MCPServer.swift \
   Tests/UnitTests/ControlTests.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
