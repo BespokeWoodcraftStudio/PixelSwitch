@@ -14,7 +14,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>PixelSwitch: build plans A and B</title>
+<title>PixelSwitch: build plans A, B and C</title>
 <style>
   :root {
     --bg: #f6f5f1; --surface: #ffffff; --ink: #16181d; --muted: #565b66; --line: #dcd9d0;
@@ -142,30 +142,30 @@
    html: true fields may carry links and <code>. Put the recommended option FIRST.
    ========================================================================================== */
 var PAGE = {
-  key: 'pixelswitch-plans-ab-2026-09-25',
-  heading: 'PIXELSWITCH: FOUNDER QUESTIONS, BUILD PLANS A AND B (2026-09-25)',
-  eyebrow: 'PixelSwitch · build plans A and B · 2026-09-25',
-  title: 'Approve the build plans for auto-switch rules and sign-in links',
-  lede: '<strong>REPLACED: answer <a href="pixelswitch-plans-abc-2026-09-25.html">the page for all three plans</a> instead.</strong> This one is kept for the record. <strong>Card 1 blocks building Part A and Part B; the other three have defaults and block nothing.</strong> I keep writing the Part C (remote control) plan while you look at this, in the same single lane.',
+  key: 'pixelswitch-plans-abc-2026-09-25',
+  heading: 'PIXELSWITCH: FOUNDER QUESTIONS, BUILD PLANS A, B AND C (2026-09-25)',
+  eyebrow: 'PixelSwitch · build plans A, B and C · 2026-09-25',
+  title: 'Approve the build plans for all three parts',
+  lede: '<strong>Card 1 blocks the build; the other three have defaults and block nothing.</strong> All three plans are written and were each tried step by step on a copy of the code first. This page replaces the earlier one for Parts A and B, so answer only this one.',
   questions: [
     {
       id: 'approve-plans',
-      title: 'Approve the plans for Part A and Part B',
-      what: '<b>Part A, auto-switch rules</b> (9 steps): your own threshold per account, the "choose the next account by" setting (most room left, my order, resets soonest), switching early to use quota before it resets with its own on/off switch, and a new Settings → Accounts tab where you drag accounts into order and set each one\'s threshold. It was tried step by step on a copy of the code first: 205 automatic checks pass and the app compiles.<br><br><b>Part B, sign-in links</b> (8 steps): the sign-in window with Open, Open in (every browser you have) and Copy, the code box for another device, and Add Current Account / Sign In New Account buttons in Settings → Accounts. Also tried on a copy first: 146 new checks pass, including a run against a stand-in <code>claude</code> that behaves like the real one.<br><br>Following your single-lane rule, I build them myself in this session, one step at a time, no helper agents. Full plans: <a href="../superpowers/plans/2026-09-25-part-a-auto-switch-rules.md">Part A</a>, <a href="../superpowers/plans/2026-09-25-part-b-sign-in-links.md">Part B</a>.',
-      why: 'These are the step-by-step instructions every line of code will follow. They match the design you approved; the few choices they had to make that the design did not cover are the next three cards.',
+      title: 'Approve the plans for Parts A, B and C',
+      what: '<b>Part A, auto-switch rules</b> (9 steps): your own threshold per account, "choose the next account by" (most room left, my order, resets soonest), switching early before quota resets with its own on/off switch, and a Settings → Accounts tab to drag accounts into order and set thresholds.<br><br><b>Part B, sign-in links</b> (8 steps): the sign-in window with Open, Open in (every browser you have) and Copy, the code box for another device, and Add Current Account / Sign In New Account in Settings → Accounts.<br><br><b>Part C, remote control</b> (13 steps): the <code>pixelswitch</code> command inside the app, a one-click Install in Settings → Claude CLI, and <code>pixelswitch mcp</code> so Claude on your other Mac sees 18 tools (read usage, switch, add, re-sign, rename, reorder, remove, every setting). It talks to the app through a private connection only your Mac user can open; nothing opens onto your network and no login token is ever handed out. It speaks both the newest and the older versions of Claude\'s tool protocol.<br><br><b>How far the plans were checked:</b> all three together pass 505 automatic checks on a copy of the code (154 of them for remote control, including a real connection round trip and the command itself); the full app build happens on GitHub. Following your single-lane rule, I build them myself, one after the other. Full plans: <a href="../superpowers/plans/2026-09-25-part-a-auto-switch-rules.md">Part A</a>, <a href="../superpowers/plans/2026-09-25-part-b-sign-in-links.md">Part B</a>, <a href="../superpowers/plans/2026-09-25-part-c-remote-control.md">Part C</a>.',
+      why: 'These are the step-by-step instructions every line of code will follow, and they match the design you approved. The few choices they had to make are the next three cards, and the small changes they made along the way are listed at the end of the design document.',
       nothing: 'Nothing is built until you say yes.',
-      recommend: 'Approve; build them in this session, one after the other',
+      recommend: 'Approve; build A, then B, then C, in this session',
       options: [
-        { label: 'Approve; build Part A, then Part B, in this session', note: 'I start Part A right away and tell you when each part is done.' },
+        { label: 'Approve; build A, then B, then C, in this session', note: 'I start Part A right away and tell you as each part finishes.' },
         { label: 'Approve, with the changes in my comment', note: 'I change the plans first, then build.' },
-        { label: 'Wait until the Part C plan is written too', note: 'Nothing is built until all three plans are ready.' }
+        { label: 'Approve A and B only for now', note: 'Remote control waits until you say so.' }
       ]
     },
     {
       id: 'most-room',
       title: 'What should "Most room left" mean once accounts have their own thresholds?',
       what: 'Today "Most room left" picks the account with the lowest usage. With per-account thresholds that can pick the wrong one: an account at 60% whose own threshold is 70% has 10 points left, while one at 65% with a 100% threshold has 35 points left, but the first looks better because its usage number is lower.',
-      why: 'When every account uses the default threshold, both ways pick exactly the same account, so nothing changes for you unless you set different thresholds. When you do, ranking by the room left under each account\'s own threshold avoids switching to an account that trips its limit again minutes later.',
+      why: 'When every account uses the default threshold, both ways pick exactly the same account, so nothing changes unless you set different thresholds. When you do, ranking by the room left under each account\'s own threshold avoids moving to an account that trips its limit again minutes later.',
       nothing: 'The first option: rank by the room left under each account\'s own threshold.',
       recommend: 'Room left under each account\'s own threshold',
       options: [
@@ -176,19 +176,19 @@ var PAGE = {
     {
       id: 'manual-checks',
       title: 'When do you want to test by hand?',
-      what: 'Some things only a person can check: a real sign-in in two different browsers, dragging accounts into order, what the new windows look like. Each check needs you to install a test build of the app.',
-      why: 'Testing after every part means installing three test builds. Testing once, after Part C, means one build with everything in it. The automatic checks run after every step either way.',
+      what: 'Some things only a person can check: a real sign-in in two different browsers, dragging accounts into order, how the new windows look, and Claude on your other Mac using the tools. Each round needs you to install a test build.',
+      why: 'Testing after every part means three test builds to install. Testing once, after Part C, means one build with everything in it and one checklist. The automatic checks run after every step either way.',
       nothing: 'The first option: one round of hand checks, on one build, after Part C.',
       recommend: 'Once, after all three parts',
       options: [
-        { label: 'Once, on one build with all three parts', note: 'One install, one checklist. Parts A and B wait in their own branches until then.' },
+        { label: 'Once, on one build with all three parts', note: 'One install, one checklist.' },
         { label: 'After each part', note: 'Three installs; problems show up sooner.' }
       ]
     },
     {
       id: 'xcode',
       title: 'Install Xcode on this Mac?',
-      what: 'This Mac has only Apple\'s command-line tools, not Xcode. I can still check that all the code compiles (in about 15 seconds), and GitHub builds the real app, as it does for your releases.',
+      what: 'This Mac has only Apple\'s command-line tools, not Xcode. I can still check that all the code compiles (about 15 seconds each time), and GitHub builds, signs and notarizes the real app, as it does for your releases.',
       why: 'Xcode would let me build and open the app here, which makes checking the new windows faster. It is a large download (about 15 GB), signs in with your Apple ID, and adds load to this laptop, which you asked me to keep low.',
       nothing: 'The first option: no Xcode; GitHub builds the app.',
       recommend: 'Not needed',
