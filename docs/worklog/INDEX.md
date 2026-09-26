@@ -25,3 +25,4 @@ that file for the full entry. Start here to get up to speed on the project.
 - [WL-2026-09-25-004](./2026-09-25.md) — All three build plans written and verified; one founder page to approve them — _docs/done_
 - [WL-2026-09-25-005](./2026-09-25.md) — Part A built: per-account thresholds, next-account strategy, early switching — _feature/done_
 - [WL-2026-09-25-006](./2026-09-25.md) — Part B built: sign-in links (Open, Open in, Copy, code box) — _feature/done_
+- [WL-2026-09-25-007](./2026-09-25.md) — Part C built (remote control); CI target-name clash fixed; final self-review fixed two defects — _feature/partial_
