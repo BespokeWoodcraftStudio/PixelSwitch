@@ -26,3 +26,4 @@ that file for the full entry. Start here to get up to speed on the project.
 - [WL-2026-09-25-005](./2026-09-25.md) — Part A built: per-account thresholds, next-account strategy, early switching — _feature/done_
 - [WL-2026-09-25-006](./2026-09-25.md) — Part B built: sign-in links (Open, Open in, Copy, code box) — _feature/done_
 - [WL-2026-09-25-007](./2026-09-25.md) — Part C built (remote control); CI target-name clash fixed; final self-review fixed two defects — _feature/partial_
+- [WL-2026-09-25-008](./2026-09-25.md) — 1.2 test build handed to the founder with the hand-check page — _chore/wip_
