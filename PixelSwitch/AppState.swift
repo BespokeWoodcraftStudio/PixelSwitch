@@ -90,7 +90,7 @@ final class AppState: ObservableObject {
     /// responsive, so without this a second switch — a user click during an
     /// auto-switch verification, or vice versa — could interleave keychain and
     /// ~/.claude.json writes with the first.
-    private var isSwitching = false
+    private(set) var isSwitching = false
 
     // MARK: - Auto-switch
 
@@ -227,66 +227,85 @@ final class AppState: ObservableObject {
 
     // MARK: - Account Management
 
+    /// Why an action could not be done, for callers that need to know (the
+    /// control API). The GUI's wrappers turn it into `errorMessage` as before.
+    struct ActionError: Error, Equatable {
+        enum Kind: Equatable { case busy, claudeUnavailable, noActiveAccount, failed }
+        let kind: Kind
+        let message: String
+    }
+
+    /// The popover's and Settings' "Add Current Account".
     func addAccount() async {
-        log.info("[addAccount] Starting add current account flow...")
-        guard claudeAvailable else {
-            errorMessage = String(localized: "Claude CLI not found", bundle: L10n.bundle)
-            log.error("[addAccount] Aborted: Claude CLI not found")
-            return
-        }
-
         do {
-            let status = try await claudeService.getAuthStatus()
-            guard status.loggedIn else {
-                errorMessage = String(localized: "Not logged in to Claude. Run 'claude auth login' first.", bundle: L10n.bundle)
-                log.error("[addAccount] Aborted: not logged in")
-                return
-            }
-            guard let email = status.email else {
-                errorMessage = shadowedIdentityMessage(status)
-                log.error("[addAccount] Aborted: CLI reports authMethod=\(status.authMethod ?? "nil") without an account identity")
-                return
-            }
-            log.info("[addAccount] Current auth: logged in, sub=\(status.subscriptionType ?? "nil")")
-
-            if accounts.contains(where: { $0.email == email }) {
-                errorMessage = String(localized: "Account already exists", bundle: L10n.bundle)
-                log.warning("[addAccount] Aborted: duplicate account")
-                return
-            }
-
-            var account = Account(
-                email: email,
-                displayName: status.orgName ?? email,
-                provider: .claudeCode,
-                orgName: status.orgName,
-                subscriptionType: status.subscriptionType,
-                isActive: accounts.isEmpty
-            )
-            log.info("[addAccount] Created account model, id=\(account.id)")
-
-            log.info("[addAccount] Capturing token from keychain...")
-            let captured = await claudeService.captureCurrentCredentials(for: account)
-            if !captured {
-                errorMessage = String(localized: "Could not capture auth token from keychain", bundle: L10n.bundle)
-                log.error("[addAccount] Token capture failed!")
-                return
-            }
-            log.info("[addAccount] Token captured successfully")
-
-            if accounts.isEmpty {
-                account.isActive = true
-                activeAccount = account
-                log.info("[addAccount] First account, setting as active")
-            }
-
-            accounts.append(account)
-            saveAccounts()
-            log.info("[addAccount] Account saved. Total accounts: \(self.accounts.count)")
+            _ = try await performAddCurrentAccount()
+        } catch let error as ActionError {
+            errorMessage = error.message
         } catch {
             errorMessage = error.localizedDescription
-            log.error("[addAccount] Error: \(error.localizedDescription)")
         }
+    }
+
+    /// Saves the account Claude Code is signed in as and returns it. Throws
+    /// `ActionError` with the same messages the popover has always shown.
+    @discardableResult
+    func performAddCurrentAccount() async throws -> Account {
+        log.info("[addAccount] Starting add current account flow...")
+        guard claudeAvailable else {
+            log.error("[addAccount] Aborted: Claude CLI not found")
+            throw ActionError(kind: .claudeUnavailable, message: String(localized: "Claude CLI not found", bundle: L10n.bundle))
+        }
+
+        let status: AuthStatus
+        do {
+            status = try await claudeService.getAuthStatus()
+        } catch {
+            log.error("[addAccount] Error: \(error.localizedDescription)")
+            throw ActionError(kind: .failed, message: error.localizedDescription)
+        }
+        guard status.loggedIn else {
+            log.error("[addAccount] Aborted: not logged in")
+            throw ActionError(kind: .failed, message: String(localized: "Not logged in to Claude. Run 'claude auth login' first.", bundle: L10n.bundle))
+        }
+        guard let email = status.email else {
+            log.error("[addAccount] Aborted: CLI reports authMethod=\(status.authMethod ?? "nil") without an account identity")
+            throw ActionError(kind: .failed, message: shadowedIdentityMessage(status))
+        }
+        log.info("[addAccount] Current auth: logged in, sub=\(status.subscriptionType ?? "nil")")
+
+        if accounts.contains(where: { $0.email == email }) {
+            log.warning("[addAccount] Aborted: duplicate account")
+            throw ActionError(kind: .failed, message: String(localized: "Account already exists", bundle: L10n.bundle))
+        }
+
+        var account = Account(
+            email: email,
+            displayName: status.orgName ?? email,
+            provider: .claudeCode,
+            orgName: status.orgName,
+            subscriptionType: status.subscriptionType,
+            isActive: accounts.isEmpty
+        )
+        log.info("[addAccount] Created account model, id=\(account.id)")
+
+        log.info("[addAccount] Capturing token from keychain...")
+        let captured = await claudeService.captureCurrentCredentials(for: account)
+        if !captured {
+            log.error("[addAccount] Token capture failed!")
+            throw ActionError(kind: .failed, message: String(localized: "Could not capture auth token from keychain", bundle: L10n.bundle))
+        }
+        log.info("[addAccount] Token captured successfully")
+
+        if accounts.isEmpty {
+            account.isActive = true
+            activeAccount = account
+            log.info("[addAccount] First account, setting as active")
+        }
+
+        accounts.append(account)
+        saveAccounts()
+        log.info("[addAccount] Account saved. Total accounts: \(self.accounts.count)")
+        return account
     }
 
     // MARK: - Sign-in
@@ -709,10 +728,27 @@ final class AppState: ObservableObject {
         log.info("[removeAccount] Done. Remaining accounts: \(self.accounts.count)")
     }
 
+    /// The popover's Switch and double-click, and auto-switch.
     func switchTo(_ account: Account) async {
+        do {
+            try await performSwitch(to: account)
+        } catch let error as ActionError {
+            switch error.kind {
+            case .failed, .claudeUnavailable: errorMessage = error.message
+            case .busy, .noActiveAccount: break  // logged; the GUI has always stayed quiet here
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Switches to `account` and returns once the switch has finished (or was
+    /// not needed). Throws `ActionError`; the messages are the ones the popover
+    /// has always shown.
+    func performSwitch(to account: Account) async throws {
         guard let currentActive = activeAccount else {
             log.info("[switchTo] No switch needed (no active account)")
-            return
+            throw ActionError(kind: .noActiveAccount, message: String(localized: "No account is active yet, so there is nothing to switch from. Add the current account first.", bundle: L10n.bundle))
         }
 
         // One credential mutation at a time: a switch already in flight (its
@@ -720,7 +756,7 @@ final class AppState: ObservableObject {
         // before another switch may touch the keychain and ~/.claude.json.
         guard !isSwitching, !isLoggingIn else {
             log.warning("[switchTo] Skipped: another switch or a login is in progress")
-            return
+            throw ActionError(kind: .busy, message: String(localized: "A switch or sign-in is in progress. Try again in a moment.", bundle: L10n.bundle))
         }
         isSwitching = true
         switchingTo = account.id
@@ -756,8 +792,7 @@ final class AppState: ObservableObject {
             targetBackup = backup
         case .failure(let problem):
             log.error("[switchTo] ABORT: \(problem.message)")
-            errorMessage = problem.message
-            return
+            throw ActionError(kind: .failed, message: problem.message)
         }
 
         // Any switch, deliberate or automatic, restarts the auto-switch cooldown:
@@ -787,9 +822,9 @@ final class AppState: ObservableObject {
             }
             log.info("[switchTo] ===== Switch completed =====")
         } catch {
-            errorMessage = error.localizedDescription
             isLoading = false
             log.error("[switchTo] Switch failed: \(error.localizedDescription)")
+            throw ActionError(kind: .failed, message: error.localizedDescription)
         }
     }
 
@@ -992,7 +1027,7 @@ final class AppState: ObservableObject {
     /// Whether an account can be switched to right now: it must have a stored
     /// backup token and not be flagged expired (an expired backup would fail the
     /// switch verification, or silently swap in a dead session).
-    private func isSwitchable(_ account: Account) -> Bool {
+    func isSwitchable(_ account: Account) -> Bool {
         guard keychain.getAccountBackup(forAccountId: account.id.uuidString) != nil else { return false }
         if let error = accountUsageErrors[account.id], error.isExpired { return false }
         return true
