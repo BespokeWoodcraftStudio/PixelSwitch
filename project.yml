@@ -63,8 +63,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.pixelventures.pixelswitch
         CODE_SIGN_ENTITLEMENTS: PixelSwitch/Resources/PixelSwitch.entitlements
         PRODUCT_NAME: PixelSwitch
-        MARKETING_VERSION: "1.2"
-        CURRENT_PROJECT_VERSION: "23"
+        MARKETING_VERSION: "1.3"
+        CURRENT_PROJECT_VERSION: "24"
         COMBINE_HIDPI_IMAGES: true
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
@@ -107,8 +107,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.pixelventures.pixelswitch.widget
         CODE_SIGN_ENTITLEMENTS: PixelSwitchWidget/Resources/PixelSwitchWidget.entitlements
         PRODUCT_NAME: PixelSwitchWidgetExtension
-        MARKETING_VERSION: "1.2"
-        CURRENT_PROJECT_VERSION: "23"
+        MARKETING_VERSION: "1.3"
+        CURRENT_PROJECT_VERSION: "24"
         SWIFT_VERSION: "6.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         CODE_SIGN_STYLE: Automatic
@@ -139,8 +139,8 @@ targets:
         PRODUCT_NAME: pixelswitch
         PRODUCT_MODULE_NAME: PixelSwitchCLI
         PRODUCT_BUNDLE_IDENTIFIER: ai.pixelventures.pixelswitch.cli
-        MARKETING_VERSION: "1.2"
-        CURRENT_PROJECT_VERSION: "23"
+        MARKETING_VERSION: "1.3"
+        CURRENT_PROJECT_VERSION: "24"
         SWIFT_VERSION: "6.0"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         CODE_SIGN_STYLE: Automatic
