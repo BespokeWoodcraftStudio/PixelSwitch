@@ -5,6 +5,7 @@ import Foundation
 
 @MainActor func runSignInTests() {
     runSignInParserTests()
+    runSignInRulesTests()
 }
 
 /// Shared test data and helpers, in one namespace so nothing here collides
@@ -78,4 +79,56 @@ enum SignInTestKit {
           "sign-in parser: the loggable form names host, path and where it returns to", redactedManual)
     check(SignInOutputParser.redacted(automatic) == "https://claude.com/cai/oauth/authorize (returns to localhost:54545/callback)",
           "sign-in parser: the loggable form of the automatic link", SignInOutputParser.redacted(automatic))
+}
+
+// MARK: - Rules AppState acts on
+
+@MainActor func runSignInRulesTests() {
+    check(SignInCode.normalized("abc123#state456") == "abc123#state456", "sign-in code: a whole code#state is accepted")
+    check(SignInCode.normalized("  abc123#state456 \n") == "abc123#state456", "sign-in code: surrounding whitespace is trimmed")
+    for bad in ["", "   ", "abc123", "abc123#", "#state456", "a#b#c", "abc 123#state", "abc123#sta\nte", "abc\u{0}1#x"] {
+        check(SignInCode.normalized(bad) == nil, "sign-in code: refuses \(bad.debugDescription)")
+    }
+
+    let finished: [SignInState] = [.succeeded(accountId: SignInTestKit.accountId), .failed(message: "x"), .cancelled]
+    let running: [SignInState] = [.starting, .waitingForUser, .completing]
+    check(finished.allSatisfy(\.isFinished) && !running.contains(where: \.isFinished),
+          "sign-in state: only succeeded, failed and cancelled are finished")
+
+    check(SignInGate.decide(claudeAvailable: false, isSwitching: true, isLoggingIn: true, current: .waitingForUser) == .claudeUnavailable,
+          "sign-in gate: a missing Claude CLI is reported first, as before")
+    check(SignInGate.decide(claudeAvailable: true, isSwitching: false, isLoggingIn: false, current: nil) == .allowed,
+          "sign-in gate: nothing running allows a sign-in")
+    check(SignInGate.decide(claudeAvailable: true, isSwitching: true, isLoggingIn: false, current: nil) == .busy,
+          "sign-in gate: a switch in progress blocks it")
+    check(SignInGate.decide(claudeAvailable: true, isSwitching: false, isLoggingIn: true, current: nil) == .busy,
+          "sign-in gate: a sign-in in progress blocks another")
+    check(SignInGate.decide(claudeAvailable: true, isSwitching: false, isLoggingIn: false, current: .waitingForUser) == .busy,
+          "sign-in gate: a second sign-in from the other entry point while one is running is refused")
+    check(SignInGate.decide(claudeAvailable: true, isSwitching: false, isLoggingIn: false, current: .completing) == .busy,
+          "sign-in gate: nothing starts while the last sign-in's account is being saved")
+    check(SignInGate.decide(claudeAvailable: true, isSwitching: false, isLoggingIn: false, current: .failed(message: "x")) == .allowed,
+          "sign-in gate: a finished sign-in does not block the next")
+
+    func status(_ loggedIn: Bool, _ email: String?, method: String = "claude.ai") -> AuthStatus {
+        AuthStatus(loggedIn: loggedIn, authMethod: method, apiProvider: nil, email: email, orgId: nil, orgName: nil, subscriptionType: nil)
+    }
+    let a = Account(email: "a@x.com", displayName: "A")
+    let b = Account(email: "b@x.com", displayName: "B")
+    check(SignInResult.newAccount(status: status(false, nil), accounts: [a]) == .notLoggedIn,
+          "sign-in result: not logged in after the CLI finished")
+    check(SignInResult.newAccount(status: status(true, nil, method: "apiKeyHelper"), accounts: [a]) == .noIdentity,
+          "sign-in result: a shadowing credential source hides the identity")
+    check(SignInResult.newAccount(status: status(true, "b@x.com"), accounts: [a, b]) == .existing(accountId: b.id),
+          "sign-in result: a new sign-in that lands on an account PixelSwitch already has is recognised")
+    check(SignInResult.newAccount(status: status(true, "c@x.com"), accounts: [a, b]) == .new(email: "c@x.com"),
+          "sign-in result: a new account is new")
+    check(SignInResult.reauthentication(status: status(true, "a@x.com"), expectedEmail: "a@x.com") == .matches,
+          "sign-in result: re-authenticating the right account matches")
+    check(SignInResult.reauthentication(status: status(true, "b@x.com"), expectedEmail: "a@x.com") == .wrongAccount(signedInAs: "b@x.com"),
+          "sign-in result: signing in to the wrong account in the browser is caught")
+    check(SignInResult.reauthentication(status: status(false, nil), expectedEmail: "a@x.com") == .notLoggedIn,
+          "sign-in result: re-authentication that did not log in")
+    check(SignInResult.reauthentication(status: status(true, nil, method: "oauthToken"), expectedEmail: "a@x.com") == .noIdentity,
+          "sign-in result: re-authentication hidden by a shadowing credential source")
 }
