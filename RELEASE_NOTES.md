@@ -1,16 +1,22 @@
-## PixelSwitch 1.1
+## PixelSwitch 1.2
 
-### Changed
+### New
 
-- **PixelSwitch is now signed and notarized by Apple.** It opens with a normal double-click and no security warning. You no longer need to run `xattr -dr com.apple.quarantine` or use Privacy & Security → Open Anyway on a fresh install.
-- **Desktop widgets now work.** macOS only loads widgets from a signed app, so they could not appear in the unsigned 1.0.x releases. In 1.1, right-click your desktop, choose **Edit Widgets**, and search for PixelSwitch: small, medium and large widgets, plus a circular ring, show your account usage, costs and activity.
-- **Version numbers are shorter.** From here on releases are numbered 1.1, 1.2, 1.3, then 2.0, and so on, instead of 1.0.16.
+- **Auto-switch rules you control.** Settings → General → Auto-switch now has:
+  - a **Default threshold** (50–100%);
+  - **Choose the next account by**: **Most room left** (the most headroom under each account's own threshold), **My order**, or **Resets soonest**;
+  - with Resets soonest, **Switch early to use quota before it resets**: an account whose weekly limit resets within your chosen number of hours (1–72) is used up first. It has its own on/off switch.
+- **A new Accounts tab in Settings.**
+  - Drag accounts into the priority order you want; the popover follows it.
+  - Give any account its own switch threshold, or leave it on the default.
+  - See when each account's weekly limit resets.
+  - Add the current account or sign in a new one from here.
+- **Sign-in links, and nothing opens by itself.** Signing in or re-signing an account opens a small **Sign in to Claude** window with **Open in default browser**, **Open in** (pick any installed browser) and **Copy link**, so you can sign in from the browser that holds the right Claude account. **Signing in on another device?** gives a link for a phone or another computer, plus a box for the code it shows.
+- **Remote control from the command line or an AI.** Settings → Claude CLI → **Command line & AI** → **Install** puts a `pixelswitch` command at `~/.local/bin/pixelswitch`.
+  - It can show accounts and usage, switch, add, sign in, reorder, set thresholds and labels, change settings, and watch live events.
+  - From another Mac, run it over SSH. Or add the MCP snippet shown there to Claude on that Mac: Claude can then check your usage and switch accounts for you.
+  - Only your user on this Mac can reach it. Nothing listens on the network, and no login token is ever handed out.
 
-There are no other changes to how the app works. Your accounts, settings and saved tokens carry over as they are.
+Your accounts, settings and saved logins carry over as they are.
 
-#### Included from 1.0.16
-
-- **The Accounts tab is readable again.** Each row is now two lines and never wraps: your address (or your own label, if you have set one) on top, and **Max · Claude Code** underneath. The organisation name is gone, because it never said anything the address did not already say.
-- Double-click an account on the Usage tab to switch to it. Also in the 1.0 series: whole email addresses with masking as an opt-in, a colour per account, honest cost totals, a switch for Fable auto-switching, MCP logins that survive a switch, and a switch that cannot mix up two accounts.
-
-**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.0.16...v1.1
+**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.1...v1.2
