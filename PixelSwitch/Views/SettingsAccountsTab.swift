@@ -7,7 +7,8 @@ import SwiftUI
 /// popover's Accounts and Usage tabs, the widget). Each row also carries the
 /// account's weekly reset and its own auto-switch threshold.
 ///
-/// Sign-in buttons are added here by Part B (sign-in links); this tab has none yet.
+/// Add Current Account and Sign In New Account sit under the list
+/// (`SettingsSignInButtons`); both open the same sign-in window as the popover.
 struct SettingsAccountsTab: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage(EmailDisplay.key) private var maskEmails = false
@@ -45,6 +46,8 @@ struct SettingsAccountsTab: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            SettingsSignInButtons()
         }
         .padding()
     }
