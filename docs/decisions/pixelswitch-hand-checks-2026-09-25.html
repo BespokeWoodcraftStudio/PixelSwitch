@@ -146,21 +146,18 @@ var PAGE = {
   "heading": "PIXELSWITCH: HAND CHECKS FOR 1.3 (2026-09-26)",
   "eyebrow": "PixelSwitch · hand checks · version 1.3",
   "title": "One round of hand checks on 1.3",
-  "lede": "<strong>1.3 is out, and your PixelSwitch can update itself to it (card 1).</strong> It has everything from 1.2 plus Update automatically (card 2). Everything that can be checked automatically already passed (516 checks, and GitHub built, signed and notarized it). These are the things only a person can see; anything they find is fixed in 1.4. On each card, do the steps, then pick what happened. Start with card 1 and paste your answers after it, so I can run the command-line checks while you do the rest.",
+  "lede": "<strong>You are on 1.3 (card 1), and 1.4 will reach you by itself (card 2).</strong> 1.3 has everything from 1.2 plus Update automatically; 1.4 only makes that on by default. Everything that can be checked automatically already passed (517 checks, and GitHub built, signed and notarized it). These are the things only a person can see; anything they find is fixed in the next version. On each card, do the steps, then pick what happened. Start with card 1 and paste your answers after it, so I can run the command-line checks while you do the rest.",
   "questions": [
     {
       "id": "install",
-      "title": "Update to 1.3 with the updater",
-      "what": "1.3 is released (everything in 1.2 plus Update automatically): GitHub built, signed and notarized it. The PixelSwitch you are running can install it itself.",
-      "why": "Every other check needs 1.3 running. Your accounts, settings and saved logins carry over as they are.",
+      "title": "Update with the updater",
+      "what": "You have done this one already: you updated from 1.2 to 1.3 with <b>Check for Updates</b>.",
+      "why": "Every other check needs 1.3 or later running. Your accounts, settings and saved logins carried over.",
       "steps": [
-        "Click PixelSwitch in the menu bar, then the <b>gear</b> (Settings), then the <b>About</b> tab.",
-        "Click <b>Check for Updates</b>. The update window offers <b>PixelSwitch 1.3</b> and shows its release notes.",
-        "Click <b>Install Update</b>, then <b>Install and Relaunch</b> when it has downloaded. PixelSwitch quits and reopens by itself.",
-        "Settings → About now reads <b>Version 1.3</b>. If macOS asks to allow keychain access, click <b>Always Allow</b>.",
-        "Come back and paste your answers (at least this card) so I can start the command-line checks on my side."
+        "Settings → About reads <b>Version 1.3</b> (or <b>Version 1.4</b>, once card 2 has happened).",
+        "Paste your answers (at least this card) so I can start the command-line checks on my side."
       ],
-      "nothing": "Counted as not checked yet. 1.3 is already out; anything a check finds is fixed in 1.4.",
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",
       "options": [
         {
@@ -179,15 +176,15 @@ var PAGE = {
     },
     {
       "id": "autoupdate",
-      "title": "Turn on Update automatically",
+      "title": "Update automatically is on",
       "what": "New in 1.3: a checkbox under <b>Check for Updates</b> in Settings → About.",
-      "why": "Tick it once and you never install PixelSwitch by hand again.",
+      "why": "With it on you never install PixelSwitch by hand again. It is on by default from 1.4; yours is already on because you ticked it in 1.3.",
       "steps": [
-        "Settings → About: under <b>Check for Updates</b> is <b>Update automatically</b>, unticked, with a line explaining it (every 6 hours; restarts only when no switch or sign-in is running).",
-        "Tick it. Close Settings, open it again: it is still ticked.",
-        "The real proof comes with the next release (1.4): within about 6 hours of it coming out, PixelSwitch restarts into it by itself. I will tell you when 1.4 is out; there is nothing to do until then."
+        "Settings → About: under <b>Check for Updates</b>, <b>Update automatically</b> is ticked, with a line explaining it (every 6 hours; restarts only when no switch or sign-in is running).",
+        "Leave it ticked. 1.4 is out now: within about 6 hours your PixelSwitch should restart into it by itself, with no window and no click.",
+        "Afterwards, Settings → About reads <b>Version 1.4</b>. That is the proof that automatic updates work; tell me when you see it (or if it has not happened by the next day)."
       ],
-      "nothing": "Counted as not checked yet. 1.3 is already out; anything a check finds is fixed in 1.4.",
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",
       "options": [
         {
@@ -216,7 +213,7 @@ var PAGE = {
         "Turn that switch off: the hours control hides. Pick Most room left or My order: both hide.",
         "Quit and reopen PixelSwitch: every choice is still there. (Put them back how you like them.)"
       ],
-      "nothing": "Counted as not checked yet. 1.3 is already out; anything a check finds is fixed in 1.4.",
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",
       "options": [
         {
@@ -246,7 +243,7 @@ var PAGE = {
         "Under the list are <b>Add Current Account</b> and <b>Sign In New Account</b>.",
         "Optional: set Language to Deutsch: the tab reads <b>Konten</b> and the new controls are German. Set it back."
       ],
-      "nothing": "Counted as not checked yet. 1.3 is already out; anything a check finds is fixed in 1.4.",
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",
       "options": [
         {
@@ -273,7 +270,7 @@ var PAGE = {
         "<b>Open in</b> lists your installed browsers, default first.",
         "If you have an account to add: pick a browser already signed in to it. It finishes by itself; the window closes and the account appears, active. If not, click <b>Cancel</b>: the window closes and nothing changed."
       ],
-      "nothing": "Counted as not checked yet. 1.3 is already out; anything a check finds is fixed in 1.4.",
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",
       "options": [
         {
@@ -300,7 +297,7 @@ var PAGE = {
         "Paste it into a DIFFERENT browser that is signed in to another Claude account.",
         "It finishes by itself in that browser, and that account is added (or, if it already exists, its sign-in is refreshed)."
       ],
-      "nothing": "Counted as not checked yet. 1.3 is already out; anything a check finds is fixed in 1.4.",
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",
       "options": [
         {
@@ -327,7 +324,7 @@ var PAGE = {
         "Start a sign-in, click away so the popover closes, reopen the popover: it says <b>Signing in…</b> with <b>Show sign-in window</b>, which brings the window back.",
         "With a sign-in running, press <b>Sign In New Account</b> in Settings: it is refused with <b>A sign-in is already in progress.</b> and the running window comes to the front. Cancel it afterwards."
       ],
-      "nothing": "Counted as not checked yet. 1.3 is already out; anything a check finds is fixed in 1.4.",
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",
       "options": [
         {
@@ -354,7 +351,7 @@ var PAGE = {
         "Click <b>Install</b>: the row reads <b>Installed at ~/.local/bin/pixelswitch</b>.",
         "The MCP snippet below shows this Mac's name ending in <b>.local</b>. After this, I run the safe command-line checks myself (status, accounts, usage, settings round trips, a sign-in started and cancelled, MCP)."
       ],
-      "nothing": "Counted as not checked yet. 1.3 is already out; anything a check finds is fixed in 1.4.",
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",
       "options": [
         {
@@ -381,7 +378,7 @@ var PAGE = {
         "Copy the MCP snippet from Settings → Claude CLI → Command line & AI into that Mac's Claude MCP settings.",
         "Ask that Claude: <i>List my PixelSwitch accounts and their weekly usage.</i> It uses the PixelSwitch tools and answers."
       ],
-      "nothing": "Counted as not checked yet. 1.3 is already out; anything a check finds is fixed in 1.4.",
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",
       "options": [
         {
