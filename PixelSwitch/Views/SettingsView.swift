@@ -1,5 +1,4 @@
 import SwiftUI
-import ServiceManagement
 
 /// Settings window for configuring the app.
 struct SettingsView: View {
@@ -49,7 +48,7 @@ struct SettingsView: View {
         }
         .frame(width: 520, height: 440)
         .onAppear {
-            launchAtLogin = SMAppService.mainApp.status == .enabled
+            launchAtLogin = SettingsStore.shared.launchAtLogin
         }
     }
 
@@ -66,7 +65,7 @@ struct SettingsView: View {
                     Text("10 minutes").tag(600.0)
                 }
                 .onChange(of: refreshInterval) { _, newValue in
-                    appState.startAutoRefresh(interval: newValue)
+                    SettingsStore.shared.refreshIntervalChanged(newValue)
                 }
                 Picker("Usage history window", selection: $transcriptLookbackHours) {
                     Text("Last 24 hours").tag(24)
@@ -76,7 +75,7 @@ struct SettingsView: View {
                     Text("All history").tag(0)
                 }
                 .onChange(of: transcriptLookbackHours) { _, _ in
-                    Task { await appState.refresh() }
+                    SettingsStore.shared.lookbackChanged()
                 }
                 Text("How far back to parse Claude session transcripts for cost and activity stats. Memory use grows with the window; longer windows also lengthen the first scan after launch.")
                     .font(.caption)
@@ -148,7 +147,7 @@ struct SettingsView: View {
                     Text("Français").tag("fr")
                 }
                 .onChange(of: appLanguage) { _, newValue in
-                    applyLanguage(newValue)
+                    SettingsStore.shared.applyLanguage(newValue)
                 }
             }
 
@@ -317,22 +316,9 @@ struct SettingsView: View {
         }
     }
 
-    private func applyLanguage(_ lang: String) {
-        // Set AppleLanguages for next launch; .environment(\.locale) handles live update
-        if lang == "auto" {
-            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
-        } else {
-            UserDefaults.standard.set([lang], forKey: "AppleLanguages")
-        }
-    }
-
     private func toggleLaunchAtLogin(_ enable: Bool) {
         do {
-            if enable {
-                try SMAppService.mainApp.register()
-            } else {
-                try SMAppService.mainApp.unregister()
-            }
+            try SettingsStore.shared.setLaunchAtLogin(enable)
         } catch {
             launchAtLogin = !enable // revert on failure
         }

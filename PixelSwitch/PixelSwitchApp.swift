@@ -56,6 +56,7 @@ struct PixelSwitchApp: App {
                         locale: currentLocale
                     )
                     signInWindowController.install(appState: appState, locale: currentLocale)
+                    RemoteControlService.shared.start(appState: appState, updateChecker: updateChecker)
                     // Kick off background usage tracking immediately upon app start
                     Task {
                         await appState.refresh()

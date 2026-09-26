@@ -216,13 +216,11 @@ struct ClaudeCLITabView: View {
     }
 
     /// Write the preference, push to ClaudeService, refresh app + versions.
-    /// `newValue == ""` means revert to auto.
+    /// `newValue == ""` means revert to auto. `SettingsStore` does the same
+    /// for a change made from the command line.
     private func applyPreference(_ newValue: String) {
         preference = newValue
-        ClaudeService.shared.setPath(newValue.isEmpty ? nil : newValue)
-        Task {
-            await reloadVersions()
-            await appState.refresh()
-        }
+        SettingsStore.shared.applyClaudeBinaryPath(newValue)
+        Task { await reloadVersions() }
     }
 }
