@@ -18,3 +18,4 @@
   - `*Parser.swift`: Parses `~/.claude/` JSON caches (Activity/Cost/Stats).
 - **Models**: `Account.swift`, `*Data.swift` (usage/cost/activity).
 - **Views**: `MainMenuView.swift` (dropdown), `SettingsView.swift` (native window), `HiddenWindowView.swift` (LSUIElement keepalive workaround).
+- **Remote control** (`PixelSwitch/Control/`, `PixelSwitchCLI/`): the `pixelswitch` tool (`Contents/Helpers/pixelswitch`, a `type: tool` target in `project.yml`, signed in CI) talks to the app over a user-only Unix socket (`~/Library/Application Support/PixelSwitch/control.sock`, newline-delimited JSON-RPC, `ControlProtocol.swift` shared by both). `ControlAPI` (pure, unit-tested) → `AppController` → `AppState`; `SettingsStore` owns every setting's side effect; `pixelswitch mcp` is an MCP server (modern 2026-07-28 and legacy handshake). No token ever crosses the socket; no TCP listener.

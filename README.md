@@ -85,6 +85,17 @@ This account is nearly out of its session and has 13% of its Fable left. With au
 - **Seamless Login Flow**: Add new accounts without ever opening a terminal. The app silently invokes the CLI and handles the browser OAuth loop for you.
 - **System-Native UX**: A clean, native SwiftUI interface that behaves exactly like a first-class macOS menu bar utility, complete with a fully functional settings window.
 
+## Remote control (command line and AI)
+
+PixelSwitch can be driven from the command line, or by an AI on another Mac. Everything the app does is available: read usage, switch, add, re-sign, rename, reorder and remove accounts, set per-account thresholds, and change every setting.
+
+1. In **Settings → Claude CLI → Command line & AI**, click **Install**. It links `~/.local/bin/pixelswitch` to the tool inside the app, so updates keep it current.
+2. Try it: `pixelswitch status`, `pixelswitch accounts`, `pixelswitch usage`, `pixelswitch switch 2`. Add `--json` for exact JSON. `pixelswitch help` lists everything.
+3. From another Mac, run it over SSH: `ssh this-mac.local ~/.local/bin/pixelswitch status`.
+4. For Claude on another Mac, copy the MCP snippet from the same Settings section into that Claude's MCP settings. It runs `ssh <this-mac>.local /Users/<you>/.local/bin/pixelswitch mcp`, and Claude sees each action as a tool.
+
+The tool talks to the app over a socket in `~/Library/Application Support/PixelSwitch/` that only your macOS user can open. Nothing listens on the network, and no command ever returns a login token. Every remote command is written to `~/Library/Logs/PixelSwitch-app.log`. Adding a brand-new account still needs a person to sign in to Anthropic in a browser; `pixelswitch accounts sign-in` prints the links.
+
 ## Key Features & Architecture
 
 PixelSwitch employs several specific architectural strategies, some uniquely tailored to its operation and others drawing inspiration from the open-source community (notably [CodexBar](https://github.com/steipete/CodexBar)).

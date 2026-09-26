@@ -560,3 +560,21 @@ To circumvent this macOS limitation, PixelSwitch uses the **Lifecycle Keepalive*
 3. **Triggering Settings:** `HiddenWindowView` listens for a custom `Notification.Name.pixelswitchOpenSettings` via Combine. When received, it invokes the native SwiftUI `@Environment(\.openSettings)` action.
 4. **Invocation:** In `MainMenuView`, when the user clicks the Settings gear icon, we post this notification. The hidden window (which SwiftUI recognizes as a valid, active scene) catches it and smoothly opens the native Settings window with proper focus.
 
+
+---
+
+## Remote control (1.2)
+
+```
+other Mac ──ssh──▶ pixelswitch <command> ─┐
+other Mac ──ssh──▶ pixelswitch mcp ───────┤  ~/Library/Application Support/PixelSwitch/control.sock
+                                          ▼  (folder 0700, socket 0600, peer uid checked)
+              PixelSwitch.app: ControlServer ─▶ ControlAPI ─▶ AppController ─▶ AppState / SettingsStore
+```
+
+- **Transport.** A Unix-domain socket, newline-delimited JSON-RPC 2.0 (`PixelSwitch/Control/ControlProtocol.swift`, compiled into the app and the tool, protocol version 1). `ControlServer` refuses a peer whose uid is not this user's, replaces a socket file left by a crash, and will not take over one another copy of the app still answers on. There is no TCP listener.
+- **API.** `ControlAPI` maps the 19 methods (`status.get`, `accounts.*`, `usage.*`, `settings.*`, `events.subscribe`, `app.*`) onto `AppControlling`, which `AppController` implements with the same `AppState` methods the GUI uses. It never touches `KeychainService` or `ClaudeService` credential methods, and a unit test scans every result for token fields. Accounts are named by id, email, label or position (`AccountResolver`).
+- **Settings.** `SettingKey` (pure) knows every setting's shape; `SettingsStore` reads and writes the real values and owns their side effects, which the Settings window's `onChange` handlers also call.
+- **Events.** `ControlEventHub` pushes `activeAccountChanged`, `usageUpdated`, `autoSwitched`, `signInChanged` and `error` to subscribed connections (`pixelswitch watch`).
+- **Tool.** `PixelSwitchCLI/` (`pixelswitch`): hand-rolled argument parsing, readable output or `--json`, exit codes 0 ok, 1 failed, 2 usage, 3 busy, 4 no such account, 5 unreachable. Starts the app with `open -g -b` if it is not running. `pixelswitch mcp` serves MCP on stdio in both eras: modern (2026-07-28, per-request `_meta`, `server/discover`) and legacy (`initialize`).
+- **Logging.** Each remote command is logged as its method, account id or setting key, and outcome. No email address, link or argument is logged.
