@@ -33,5 +33,8 @@ codesign --verify --deep --strict "$APP" && echo "deep verify OK"
 spctl -a -t exec -vv "$APP" 2>&1 | sed -n 2p
 spctl -a -t open --context context:primary-signature -v "$D/PixelSwitch.dmg" 2>&1 | sed -n 2p
 xcrun stapler validate "$D/PixelSwitch.dmg" 2>&1 | tail -1
-grep -c "Update automatically" "$APP/Contents/Resources/en.lproj/Localizable.strings" 2>/dev/null | sed 's/^/strings with "Update automatically": /'
+# The compiled .strings are UTF-16, so grep finds nothing; read them with plutil.
+for phrase in "Update automatically" "has no active subscription, PixelSwitch moves you"; do
+  plutil -p "$APP/Contents/Resources/en.lproj/Localizable.strings" | grep -c "$phrase" | sed "s/^/strings with \"$phrase\": /"
+done
 hdiutil detach "$MNT" >/dev/null

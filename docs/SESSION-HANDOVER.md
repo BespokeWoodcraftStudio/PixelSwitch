@@ -5,7 +5,7 @@ Last updated 2026-09-26 (evening, PDT), after 1.6: auto-switch leaves an account
 
 ## Current state
 
-- **Released: 1.6** (build 27, tag `v1.6`, CI run 36291176079). 1.5 (build 26) is what the founder's Mac runs until 1.6 installs itself (see below).
+- **Released: 1.6** (build 27, tag `v1.6`, CI run 36291176079), verified with `scripts/verify-release.sh v1.6` (its strings check now reads the UTF-16 file with `plutil`; before, it always printed 0). 1.5 (build 26) is what the founder's Mac runs until 1.6 installs itself (see below).
 - **Branches:** `main` holds everything. `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only` and `no-subscription-switch` are fully merged and can be deleted.
 - **Tests:** `bash Tests/run-unit-tests.sh` gives 597/597. `bash scripts/typecheck.sh` is clean for the app and the CLI, and also runs the target-name guard.
 - **Users:** the founder is the only one. Release through the updater, then hand-check (memory: sole user). Versions are two-part: 1.5, then 1.6, …, 2.0.
