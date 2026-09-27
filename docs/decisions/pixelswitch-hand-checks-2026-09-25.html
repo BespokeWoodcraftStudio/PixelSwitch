@@ -143,18 +143,18 @@
    ========================================================================================== */
 var PAGE = {
   "key": "pixelswitch-hand-checks-1-5-2026-09-26",
-  "heading": "PIXELSWITCH: HAND CHECKS FOR 1.5 (2026-09-26)",
-  "eyebrow": "PixelSwitch · hand checks · version 1.5",
-  "title": "One round of hand checks on 1.5",
-  "lede": "<strong>You are on 1.4 (card 1), and 1.5 should reach you by itself this evening (card 2).</strong> 1.5 adds Manual only and thresholds below 50% (card 3). Everything that can be checked automatically already passed (576 checks, and GitHub built, signed and notarized it). These are the things only a person can see; anything they find is fixed in the next version. On each card, do the steps, then pick what happened. Start with card 1 and paste your answers after it, so I can run the command-line checks while you do the rest.",
+  "heading": "PIXELSWITCH: HAND CHECKS FOR 1.5 AND 1.6 (2026-09-26)",
+  "eyebrow": "PixelSwitch · hand checks · versions 1.5 and 1.6",
+  "title": "One round of hand checks on 1.5 and 1.6",
+  "lede": "<strong>1.5 installed itself this evening (proven from the log), and 1.6 should do the same tonight (card 2).</strong> 1.5 adds Manual only and thresholds below 50% (card 3). 1.6 stops auto-switch getting stuck on an account with no subscription (card 4). Everything that can be checked automatically already passed (597 checks, and GitHub builds, signs and notarizes each release). These are the things only a person can see; anything they find is fixed in the next version. On each card, do the steps, then pick what happened. Start with card 1 and paste your answers after it, so I can run the command-line checks while you do the rest.",
   "questions": [
     {
       "id": "install",
       "title": "Update with the updater",
-      "what": "You have done this one already: you updated with <b>Check for Updates</b> (to 1.3, then to 1.4).",
-      "why": "Every other check needs 1.4 or later running. Your accounts, settings and saved logins carried over.",
+      "what": "You have done this one already: you updated with <b>Check for Updates</b> (to 1.3, then to 1.4), and 1.5 then installed itself.",
+      "why": "Every other check needs 1.5 or later running, and card 4 needs 1.6. Your accounts, settings and saved logins carried over.",
       "steps": [
-        "Settings → About reads <b>Version 1.4</b> (or <b>Version 1.5</b>, once card 2 has happened).",
+        "Settings → About reads <b>Version 1.5</b>, or <b>Version 1.6</b> once card 2 has happened again.",
         "Paste your answers (at least this card) so I can start the command-line checks on my side."
       ],
       "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
@@ -178,11 +178,11 @@ var PAGE = {
       "id": "autoupdate",
       "title": "Update automatically is on",
       "what": "New in 1.3: a checkbox under <b>Check for Updates</b> in Settings → About.",
-      "why": "With it on you never install PixelSwitch by hand again. It is on by default from 1.4; yours is on. 1.4 you installed by hand, so this is still unproven: 1.5 is the test.",
+      "why": "With it on you never install PixelSwitch by hand again. It is on by default from 1.4; yours is on. <b>Proven on my side:</b> 1.5 installed itself at 5:36 PM on 26 September, in 3 seconds, with no window (the Mac's log shows it). 1.6 is the second time.",
       "steps": [
         "Settings → About: under <b>Check for Updates</b>, <b>Update automatically</b> is ticked, with a line explaining it (every 6 hours; restarts only when no switch or sign-in is running).",
-        "Leave it ticked, and do <b>not</b> click Check for Updates. 1.5 is out now: at PixelSwitch's next scheduled check (about 5:35 PM on 26 September), it should restart into 1.5 by itself, with no window and no click.",
-        "Afterwards, Settings → About reads <b>Version 1.5</b>. That is the proof that automatic updates work; tell me when you see it (or if it has not happened by the next morning)."
+        "Leave it ticked, and do <b>not</b> click Check for Updates. 1.6 is out now: at PixelSwitch's next scheduled check (about 11:35 PM on 26 September, if the Mac is awake; otherwise soon after it wakes), it restarts into 1.6 by itself.",
+        "Afterwards, Settings → About reads <b>Version 1.6</b>. Tell me if it has not happened by the next morning."
       ],
       "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",
@@ -213,6 +213,34 @@ var PAGE = {
         "Set the account you are using to Manual only: you are <b>not</b> moved off it, and its row says <b>You're using it now. Auto-switch moves you off it at 90% and won't move you back to it.</b>",
         "If every other account is Manual only (auto-switch on), an orange line under the list says auto-switch has nowhere to move you.",
         "Optional, once the command is installed (card on remote control): <code>pixelswitch accounts threshold 2 manual</code>, then <code>pixelswitch accounts</code> shows <b>90% (manual only)</b> for it. Put every account back how you like it afterwards."
+      ],
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
+      "recommend": "Do it and tell me what you saw",
+      "options": [
+        {
+          "label": "Passed: everything looked as described",
+          "note": "Pick this only if every step matched. (The template marks the first option; it is not a hint.)"
+        },
+        {
+          "label": "Something was wrong",
+          "note": "Say which step and what you saw in the comment box (a screenshot path helps)."
+        },
+        {
+          "label": "Skipped for now",
+          "note": "Fine for optional checks; I will ask again about the required ones."
+        }
+      ]
+    },
+    {
+      "id": "nosub",
+      "title": "Auto-switch leaves an account with no subscription",
+      "what": "New in 1.6, the fix for your screenshot: PixelSwitch sat on claude@pixelventures.ai for over an hour after Anthropic started refusing it (\"No active subscription on this account\"). Needs <b>Version 1.6</b> (card 2).",
+      "why": "That account has no usage number, so it could never reach a threshold and auto-switch waited forever. Now it leaves such an account at the next refresh. This test puts your live login on a dead account for up to 5 minutes, so do it when Claude Code can pause.",
+      "steps": [
+        "Settings → General → Auto-switch, with it on: under the long explanation, a new line reads <b>If the account you're using has no active subscription, PixelSwitch moves you right away to another account that still has room and is not Manual only.</b>",
+        "While claude@pixelventures.ai's card still says <b>No active subscription on this account (OAuth not allowed)</b>, double-click that card to switch to it by hand.",
+        "Within about 5 minutes (the next refresh; no cooldown wait), the orange ring moves by itself to the account with the most room.",
+        "It does not come back to claude@pixelventures.ai while that card shows the error. Tell me the time you switched, and I will read the log for the line <b>Rule noSubscription</b>."
       ],
       "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",

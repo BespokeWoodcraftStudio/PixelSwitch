@@ -1,9 +1,11 @@
 // Renders the hand-check page at 1920x1080 in light and dark, tests Copy.
-// node scripts/hand-checks/render-hand-checks.cjs <out-dir>   (uses the Playwright
+// node scripts/hand-checks/render-hand-checks.cjs <out-dir> [card-id]   (card-id: the card to
+// screenshot, default the newest, nosub; uses the Playwright
 // that ships with @playwright/mcp and the installed Google Chrome, headless)
 const { chromium } = require('/Users/ahamade/.npm-global/lib/node_modules/@playwright/mcp/node_modules/playwright-core');
 const url = 'file:///Users/ahamade/Documents/GitHub/PixelSwitch/docs/decisions/pixelswitch-hand-checks-2026-09-25.html';
 const out = process.argv[2];
+const cardId = process.argv[3] || 'nosub';
 (async () => {
   const browser = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
   const errors = [];
@@ -14,7 +16,7 @@ const out = process.argv[2];
     page.on('pageerror', e => errors.push(scheme + ' pageerror: ' + e.message));
     await page.goto(url);
     await page.screenshot({ path: `${out}/hc-${scheme}-top.png` });
-    await page.locator('#q-signin').scrollIntoViewIfNeeded();
+    await page.locator('#q-' + cardId).scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${out}/hc-${scheme}-card.png` });
     const hscroll = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
     console.log(scheme, 'horizontal scroll:', hscroll, '| cards:', await page.locator('section.card').count());

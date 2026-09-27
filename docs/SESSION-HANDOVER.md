@@ -1,13 +1,13 @@
 # PixelSwitch: session handover
 
 Read this first. Then read `docs/worklog/INDEX.md` for the full history; the newest entries are at the bottom of `docs/worklog/2026-09-26.md`.
-Last updated 2026-09-26, at the end of the session that built 1.2 to 1.5.
+Last updated 2026-09-26 (evening, PDT), after 1.6: auto-switch leaves an account with no active subscription.
 
 ## Current state
 
-- **Released: 1.5** (build 26, tag `v1.5`, CI run 36268925156), verified with `scripts/verify-release.sh v1.5`.
-- **Branches:** `main` holds everything. `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default` and `manual-only` are fully merged and can be deleted.
-- **Tests:** `bash Tests/run-unit-tests.sh` gives 576/576. `bash scripts/typecheck.sh` is clean for the app and the CLI, and also runs the target-name guard.
+- **Released: 1.6** (build 27, tag `v1.6`, CI run 36291176079). 1.5 (build 26) is what the founder's Mac runs until 1.6 installs itself (see below).
+- **Branches:** `main` holds everything. `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only` and `no-subscription-switch` are fully merged and can be deleted.
+- **Tests:** `bash Tests/run-unit-tests.sh` gives 597/597. `bash scripts/typecheck.sh` is clean for the app and the CLI, and also runs the target-name guard.
 - **Users:** the founder is the only one. Release through the updater, then hand-check (memory: sole user). Versions are two-part: 1.5, then 1.6, …, 2.0.
 
 | Version | What it added |
@@ -16,10 +16,11 @@ Last updated 2026-09-26, at the end of the session that built 1.2 to 1.5.
 | 1.3 | Settings → About → **Update automatically** (Sparkle downloads silently; the updater delegate relaunches into the update when no switch or sign-in is running). Checks every 6 h. |
 | 1.4 | Update automatically is **on by default** (`SUAutomaticallyUpdate: true`). |
 | 1.5 | **Manual only (0%)** and per-account thresholds **1–100%**. Remote-control protocol 2 (`AccountInfo.manualOnly`). |
+| 1.6 | An active account whose usage request gets 403 ("OAuth authentication is currently not allowed for this organization", no active subscription) is left at the next refresh by rule `noSubscription`, cooldown or not, and is never a target. Decisions: `docs/decisions/2026-09-24-remote-control-answers.md`, last section. |
 
 ## Waiting on the founder
 
-1. **Hand checks** (12 cards, one round, on 1.5): [docs/decisions/pixelswitch-hand-checks-2026-09-25.html](decisions/pixelswitch-hand-checks-2026-09-25.html). He pastes the Copy block back. Then:
+1. **Hand checks** (13 cards, one round, on 1.5 and 1.6; card 4 is the no-subscription fix): [docs/decisions/pixelswitch-hand-checks-2026-09-25.html](decisions/pixelswitch-hand-checks-2026-09-25.html). He pastes the Copy block back. Then:
    - record his answers verbatim in `docs/decisions/`;
    - mark the page answered;
    - fix any failure test-first and ship it as the next minor version.
@@ -27,13 +28,17 @@ Last updated 2026-09-26, at the end of the session that built 1.2 to 1.5.
    Regenerate the page with `python3 scripts/hand-checks/gen-hand-checks.py`, and render it with `node scripts/hand-checks/render-hand-checks.cjs <out-dir>`.
 2. **Optional, his call:** a paid graphify refresh of this repo, estimated at about $2.38 to $8.27 by `~/.claude/graphify-smart/fleet-audit.py .`. Only the free AST update has been run.
 
-## Waiting on time: the first proof of automatic updates
+## Automatic updates: proven, and 1.6 is the second run
 
-- **Expected:** the founder's Mac is on 1.4 with the box ticked (`defaults read ai.pixelventures.pixelswitch SUAutomaticallyUpdate` gives 1). The last update check was at 18:36 UTC on 2026-09-26, so the next scheduled check is at about **00:36 UTC on 2026-09-27 (5:36 PM PDT on the 26th)**. PixelSwitch should restart into 1.5 by itself.
-- **Check:** `/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" /Applications/PixelSwitch.app/Contents/Info.plist` should give 1.5.
-  - **Automatic install:** the log shows `Autoupdate`/`Updater` with no WebKit `WebContent` (release-notes window) just before it. Query: `log show --start "<local time>" --end "<local time>" --predicate 'process == "Autoupdate" OR process == "Updater" OR process == "PixelSwitch"' --style compact`.
-  - **Manual install:** the release-notes WebView appears first. 1.3 to 1.4 was installed this way, at 11:36 PDT.
+- **Proven 2026-09-26:** at the scheduled check (17:36:35 PDT) the running 1.4 handed off to Sparkle's `Autoupdate` and `Updater` (17:36:37) and 1.5 was running at 17:36:38. There was no WebKit `WebContent` process (no release-notes window) and no click.
+- **Next:** 1.6 should install itself at the next scheduled check, about 06:36 UTC on 2026-09-27 (11:36 PM PDT on the 26th), or soon after the Mac wakes. Confirm with `/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" /Applications/PixelSwitch.app/Contents/Info.plist` (1.6), and `grep "\[init\]" ~/Library/Logs/PixelSwitch-app.log | tail -2` for the relaunch time.
+- **How to read the system log:** `/usr/bin/log show --start "<local time>" --end "<local time>" --style ndjson` and tally `processImagePath` (Autoupdate, Updater, WebContent, PixelSwitch). Use the full path: in zsh, bare `log` is a shell builtin and fails with "too many arguments".
 - **If it didn't happen:** read `UpdateChecker.updater(_:willInstallUpdateOnQuit:immediateInstallationBlock:)` and `AutoUpdatePolicy`, and check SULastCheckTime.
+
+## After 1.6 installs: prove the no-subscription fix on the real account
+
+- claude@pixelventures.ai was answering 403 as of 2026-09-27 03:06 UTC. Hand-check card 4 asks the founder to switch to it by hand; within about 5 minutes the app log (`~/Library/Logs/PixelSwitch-app.log`) should show `[autoSwitch] Rule noSubscription` and then `Switching to`.
+- If the founder pastes a time, read the log around it. If instead the log shows `has no active subscription, and no other account has room; staying put`, every other account was at or over its own threshold (a real state, not a bug).
 
 ## Deferred defects (all minor; found by the 1.5 review, evidence in `docs/superpowers/reviews/2026-09-26-manual-only-review.json`)
 
@@ -61,4 +66,6 @@ Last updated 2026-09-26, at the end of the session that built 1.2 to 1.5.
 - **The harness can hide CLI mistakes.** The unit harness compiles engine and CLI sources together, so a CLI file using app-only types (such as `AutoSwitchSettings`) passes the tests but breaks the real CLI target. Only `scripts/typecheck.sh` catches it.
 - **The .strings files are UTF-16.** The compiled `.strings` in the shipped app bundle can't be grepped; use `plutil -p`. The five source tables must share one key set, and a unit test checks this.
 - **Sparkle's settings live in the app's user defaults** (`SUAutomaticallyUpdate`, `SUEnableAutomaticChecks`, `SULastCheckTime`). The Info.plist keys are only defaults.
+- **zsh's `log` builtin.** `log show …` fails with "too many arguments"; call `/usr/bin/log`.
+- **A 403 on the usage request means no active subscription.** It clears the reading (so no threshold can fire) and is flagged `isNoSubscription` on all three usage paths via `AppState.markNoSubscription`; the engine's `isUnusable` input acts on that flag. Any new usage path must go through it, or the stuck-account bug comes back.
 - **Workflows only while ultracode is on.** Multi-agent workflows are allowed only while the founder has ultracode on, and even then they stay small and read-only; otherwise work single lane (memory: single lane).
