@@ -1,26 +1,15 @@
-## PixelSwitch 1.5
+## PixelSwitch 1.6
 
-### New
+### Fixed
 
-- **Manual only.** Each account's threshold menu in **Settings → Accounts** now ends with **Manual only (0%)**.
-  - Auto-switch never moves you to that account, but you can still switch to it yourself.
-  - While you're on it, auto-switch moves you off only at your default threshold, and never brings you back to it.
-  - Setting it on the account you're using doesn't move you off.
-  - In the popover, those accounts show a quiet "Manual only" line.
-  - If every other account is Manual only, Settings warns you that auto-switch has nowhere to go.
-- **Per-account thresholds from 1% to 100%.** The menu adds 10%, 20%, 30% and 40%, and the stepper reaches every whole number down to 1%.
-  - Below 20%, auto-switch takes an account while it is at or under half its threshold, so even a 5% account is still used.
-  - Hover over an account's threshold to see exactly when auto-switch leaves it and when it takes it.
-  - Thresholds from 50% to 100%, and the default, work exactly as before.
-- **From the command line and Claude:**
-  - `pixelswitch accounts threshold <account> manual` (or `0`), or any number from 1 to 100.
-  - `pixelswitch accounts` marks Manual only accounts.
-  - The MCP tools accept 0 to 100.
+- **Auto-switch no longer gets stuck on an account with no active subscription.** When Anthropic refuses an account's usage request with "OAuth authentication is currently not allowed for this organization", that account has no usage to reach a threshold with, so auto-switch used to wait on it forever.
+  - Now, if the account you're on is in that state, auto-switch moves you on the next refresh to another account that still has room, chosen the way you set in Settings → General. It doesn't wait for the 5-minute cooldown.
+  - It never moves you to an account in that state, and never to a Manual only account.
+  - An account whose subscription comes back is used again once PixelSwitch reads its usage.
+  - Settings → General explains this under Auto-switch.
 
-If you use `pixelswitch` right after updating while the old version is still running, it asks you once to quit and reopen PixelSwitch.
-
-Manual only and thresholds below 50% need 1.5 or later. An older version would read them as 50%.
+With auto-switch off, nothing moves; the account's card still says "No active subscription on this account".
 
 Your accounts, settings and saved logins carry over as they are.
 
-**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.4...v1.5
+**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.5...v1.6

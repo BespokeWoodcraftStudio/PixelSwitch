@@ -145,3 +145,31 @@ Decisions NOT to do something (so a later session does not "fix" them):
 - **No CLI aliases "off", "never" or "disable".** They read as "never switch away". Only `manual` and `0`.
 - **No "Manual only" badge beside the name in the popover.** The address already truncates there (recorded in AccountSwitcherView and UsageDashboardView); a separate quiet line is used instead.
 - **The global default cannot go below 50.** A 0% default would make every account Manual only.
+
+## Leave an account with no active subscription, 2026-09-26
+
+In chat, with a screenshot of the popover showing claude@pixelventures.ai with "No active subscription on this account (OAuth not allowed)". Verbatim:
+
+> need to come up with a way to know to switch if no active subscription is on the account. Take a look at the screenshot. It was stuck on this account even though there was no active subscription on it, and so it got stuck on it. If that happens, it needs to know to switch.
+
+What the log showed (`~/Library/Logs/PixelSwitch-app.log`, times UTC, 2026-09-27):
+- 01:02: auto-switch moved him from ahmed@pixelventures.ai (100%) to claude@pixelventures.ai (0%). Usage read normally until 01:51 (session 13%).
+- 01:56: its usage request got 429 with Retry-After 3600, so it was parked for an hour and nothing could be read.
+- 02:56 onwards: every request got 403 `permission_error`, "OAuth authentication is currently not allowed for this organization." Auto-switch logged nothing. He switched by hand at 03:06.
+- Root cause: the 403 clears the account's reading, and the engine treats an unknown active reading as "can't decide, do nothing". An account that cannot be used never reaches a threshold.
+
+What was built (release 1.6):
+- A 403 on any usage path (the polling loop, auto-switch's fresh verification, the retry after a token refresh) marks the account **no subscription**.
+- While such an account is active, auto-switch leaves it on the next refresh by a new rule, `noSubscription`. The target is any account with at least a point of room under its own threshold, ranked by his strategy (most room left on his Mac). Manual only accounts are still never targets. The target is still re-checked with a fresh reading first.
+- Such an account is never a target of any rule until a later reading succeeds (it is still polled in turn, so it comes back by itself if the subscription returns).
+- The 5-minute cooldown does not apply to leaving it.
+- Settings → General says so in one sentence, in all five languages. The `autoSwitched` event's `trigger` is `noSubscription`.
+
+Decisions NOT to do something (so a later session does not "fix" them):
+- **It moves on the first 403, not after several.** The 403 names the organization, not a blip, and Claude Code cannot use that login either. One needless switch costs a switch; waiting cost him an hour. A switch only ever lands on an account whose fresh reading just succeeded.
+- **The 10-point hysteresis does not apply to this rule.** An account with 5 points of room still beats one that cannot be used at all. With "most room left" the roomiest account is chosen anyway.
+- **Manual only does not keep you on a dead account.** Manual only means "never move me TO it". This is different from the 1.5 decision not to undo a manual pick of a Manual only account: that account works, and a dead one does not.
+- **A manual switch to a no-subscription account is undone at the next refresh (up to 5 minutes).** Claude Code cannot use it, so staying helps nothing.
+- **Not shown as "cannot be switched to" (`!` in `pixelswitch accounts`, `isSwitchable`).** That mark tells you to sign in again, which does not fix a missing subscription. The card's red "No active subscription" line already says what is wrong.
+- **With auto-switch off, nothing moves.** Off means off; the card still shows the error.
+- **No macOS notification.** PixelSwitch posts none today; the active ring moving in the menu bar is the feedback, as for every other automatic switch.
