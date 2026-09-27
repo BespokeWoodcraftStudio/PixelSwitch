@@ -38,6 +38,9 @@ final class AppState: ObservableObject {
         let isExpired: Bool
         let isRateLimited: Bool
         let message: String
+        /// The usage request was refused with 403: the account has no active
+        /// subscription, so auto-switch leaves it and never moves you to it.
+        var isNoSubscription = false
     }
     
     @Published var accountUsageErrors: [UUID: UsageErrorState] = [:]
@@ -1033,6 +1036,14 @@ final class AppState: ObservableObject {
         return true
     }
 
+    /// Whether the account's last usage request was refused for want of an
+    /// active subscription (`markNoSubscription`). Kept apart from
+    /// `isSwitchable`, whose "cannot be switched to" means "sign in again",
+    /// which does not help here.
+    private func hasNoSubscription(_ account: Account) -> Bool {
+        accountUsageErrors[account.id]?.isNoSubscription == true
+    }
+
     /// Evaluate whether auto-switch should move the user, and if so where.
     /// Called after every completed refresh. Safe to call repeatedly.
     ///
@@ -1054,8 +1065,10 @@ final class AppState: ObservableObject {
         guard autoSwitchEnabled, !isEvaluatingAutoSwitch else { return }
         guard !isLoggingIn, !isSwitching, let active = activeAccount else { return }
 
-        // Cooldown: never auto-switch more than once per window.
-        if let last = lastAutoSwitchAt, Date().timeIntervalSince(last) < autoSwitchCooldown {
+        // Cooldown: never auto-switch more than once per window, except off an
+        // account with no subscription, which nothing can move you back to.
+        let activeUnusable = hasNoSubscription(active)
+        if AutoSwitchEngine.cooldownHolds(lastSwitchAt: lastAutoSwitchAt, cooldown: autoSwitchCooldown, activeUnusable: activeUnusable) {
             return
         }
 
@@ -1072,6 +1085,7 @@ final class AppState: ObservableObject {
             candidates: candidates,
             usageByAccount: accountUsage,
             isSwitchable: { [unowned self] in self.isSwitchable($0) },
+            isUnusable: { [unowned self] in self.hasNoSubscription($0) },
             activeSampledThisCycle: activeSampledThisCycle,
             threshold: { [unowned self] in self.effectiveSwitchThreshold(for: $0) },
             defaultThreshold: AutoSwitchSettings.defaultThreshold,
@@ -1080,7 +1094,12 @@ final class AppState: ObservableObject {
             strategy: strategy,
             drainEarly: drainEarly,
             drainWithin: drainWithin
-        ) else { return }
+        ) else {
+            if activeUnusable {
+                log.warning("[autoSwitch] Active \(active.id) has no active subscription, and no other account has room; staying put")
+            }
+            return
+        }
         let limit = plan.limit
         let trigger = plan.trigger
         let ranked = plan.targets
@@ -1095,7 +1114,11 @@ final class AppState: ObservableObject {
         let activeRule = effectiveSwitchThreshold(for: active)
         let activeThreshold = AutoSwitchSettings.leaveAtThreshold(rule: activeRule, defaultThreshold: AutoSwitchSettings.defaultThreshold)
         let manualNote = activeRule == AutoSwitchSettings.manualOnlyThreshold ? ", manual only: left at the default" : ""
-        log.info("[autoSwitch] Rule \(trigger.rawValue), strategy \(strategy.rawValue): active \(active.id) at \(String(format: "%.0f", activeUtil))% on \(limit.rawValue) (its threshold \(String(format: "%.0f", activeThreshold))%\(manualNote)); \(ranked.count) candidate(s)")
+        if trigger == .noSubscription {
+            log.info("[autoSwitch] Rule \(trigger.rawValue), strategy \(strategy.rawValue): active \(active.id) has no active subscription; \(ranked.count) candidate(s)")
+        } else {
+            log.info("[autoSwitch] Rule \(trigger.rawValue), strategy \(strategy.rawValue): active \(active.id) at \(String(format: "%.0f", activeUtil))% on \(limit.rawValue) (its threshold \(String(format: "%.0f", activeThreshold))%\(manualNote)); \(ranked.count) candidate(s)")
+        }
 
         // At most ONE fresh verification request per evaluation. Later ranked
         // candidates only qualify via samples this cycle already took.
@@ -1159,6 +1182,7 @@ final class AppState: ObservableObject {
         switch trigger {
         case .threshold: log.info("[autoSwitch] Threshold reached but no candidate verified; staying put")
         case .drainEarly: log.info("[autoSwitch] Early drain found no verified candidate; staying put")
+        case .noSubscription: log.info("[autoSwitch] No subscription on the active account, and no candidate verified; staying put")
         }
     }
 
@@ -1208,6 +1232,12 @@ final class AppState: ObservableObject {
         } catch ClaudeService.UsageError.rateLimited(let retryAfter) {
             park(account, retryAfter: retryAfter)
             return nil
+        } catch ClaudeService.UsageError.forbidden {
+            // Marked as the polling loop does, so later evaluations skip it
+            // instead of spending their one fresh request on it every time.
+            log.warning("[fetchUsageNow] \(account.id) forbidden (no active subscription?)")
+            markNoSubscription(account)
+            return nil
         } catch {
             log.warning("[fetchUsageNow] \(account.id): \(error.localizedDescription)")
             return nil
@@ -1245,6 +1275,19 @@ final class AppState: ObservableObject {
         log.warning("[fetchUsage] \(account.id) rate-limited; parked for \(String(format: "%.0f", parkFor))s")
     }
 
+    /// A 403 on the usage request: the account has no active subscription
+    /// ("OAuth authentication is currently not allowed for this organization").
+    /// Clears its reading and flags it, so auto-switch leaves it while it is
+    /// active and never moves you to it (`hasNoSubscription`).
+    private func markNoSubscription(_ account: Account) {
+        accountUsage[account.id] = nil
+        accountUsageSampledAt[account.id] = nil
+        accountUsageErrors[account.id] = UsageErrorState(
+            isExpired: false, isRateLimited: false,
+            message: String(localized: "No active subscription on this account (OAuth not allowed).", bundle: L10n.bundle),
+            isNoSubscription: true)
+    }
+
     /// Fetch usage, honouring a 429 by parking the account. The post-refresh
     /// recovery paths previously wrapped this call in `try?`, which swallowed a
     /// 429 without parking it — leaking around the parking scheme and re-hitting
@@ -1254,6 +1297,12 @@ final class AppState: ObservableObject {
             return try await claudeService.getUsageLimits(accessToken: accessToken)
         } catch ClaudeService.UsageError.rateLimited(let retryAfter) {
             park(account, retryAfter: retryAfter)
+            return nil
+        } catch ClaudeService.UsageError.forbidden {
+            // A renewed token on an account with no subscription: left
+            // unmarked, auto-switch would wait on it for good.
+            log.warning("[fetchUsage] \(account.id) forbidden after refresh (no active subscription?)")
+            markNoSubscription(account)
             return nil
         } catch {
             log.warning("[fetchUsage] Post-refresh retry failed for \(account.id): \(error.localizedDescription)")
@@ -1429,9 +1478,7 @@ final class AppState: ObservableObject {
                 // {"error":{"type":"permission_error","message":"OAuth
                 // authentication is currently not allowed for this organization."}}
                 log.warning("[fetchUsage] \(account.email) forbidden (no active subscription?)")
-                accountUsage[account.id] = nil
-                accountUsageSampledAt[account.id] = nil
-                accountUsageErrors[account.id] = UsageErrorState(isExpired: false, isRateLimited: false, message: String(localized: "No active subscription on this account (OAuth not allowed).", bundle: L10n.bundle))
+                markNoSubscription(account)
             } catch ClaudeService.UsageError.rateLimited(let retryAfter) {
                 // Rate-limited: park the account until the server-given deadline
                 // and keep the last known sample - a stale percentage carrying

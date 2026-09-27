@@ -59,7 +59,8 @@ enum AutoSwitchEngine {
     /// How far below its own threshold an early-drain target must sit on every
     /// watched limit, in percentage points. Deliberately not the 10-point
     /// hysteresis: the founder's example is an account with 5% left that
-    /// should still be used up before its week resets.
+    /// should still be used up before its week resets. Also the room a target
+    /// needs when the active account has no subscription (`.noSubscription`).
     static let drainMinimumRoom: Double = 1.0
 
     /// The binding utilization for an account = max of the windows we watch.
@@ -184,7 +185,11 @@ enum AutoSwitchEngine {
     ///   limit that fired (and on session/weekly for a Fable switch).
     /// - `.drainEarly`: `drainEligibleUtilization`; only ever on `.windows`,
     ///   and never without the active account's weekly reset.
-    /// A threshold of 0 (Manual only) is never eligible, by either rule.
+    /// - `.noSubscription`: at least `drainMinimumRoom` below its threshold on
+    ///   session and weekly. Any account with room beats one that cannot be
+    ///   used at all, so the hysteresis does not apply; Fable is left to the
+    ///   ranking, which prefers accounts with Fable to spare.
+    /// A threshold of 0 (Manual only) is never eligible, by any rule.
     static func eligibleUtilization(
         _ usage: UsageAPIResponse?,
         limit: Limit,
@@ -204,7 +209,19 @@ enum AutoSwitchEngine {
             guard limit == .windows, let activeWeeklyReset else { return nil }
             return drainEligibleUtilization(usage, threshold: threshold, activeWeeklyReset: activeWeeklyReset,
                                             drainWithin: drainWithin, watchFable: watchFable, asOf: now)
+        case .noSubscription:
+            guard limit == .windows, let ceiling = Self.ceiling(threshold: threshold, room: drainMinimumRoom) else { return nil }
+            return eligibleUtilization(usage, limit: .windows, ceiling: ceiling, asOf: now)
         }
+    }
+
+    /// Whether the cooldown still holds auto-switch back: less than `cooldown`
+    /// since the last automatic switch. Never for an active account with no
+    /// subscription: the cooldown stops two accounts trading places, and
+    /// nothing moves you back to an account that cannot be used.
+    static func cooldownHolds(lastSwitchAt: Date?, cooldown: TimeInterval, activeUnusable: Bool, asOf now: Date = Date()) -> Bool {
+        guard !activeUnusable, let lastSwitchAt else { return false }
+        return now.timeIntervalSince(lastSwitchAt) < cooldown
     }
 
     /// One window's utilization, or nil if it has none or its window has reset.
@@ -218,6 +235,10 @@ enum AutoSwitchEngine {
 
     /// Which limit to act on, by which rule, and where to go; nil to stay put.
     ///
+    /// 0. No subscription: an active account that cannot be used at all is
+    ///    left at once, whatever its rule, for any account with room under its
+    ///    own threshold (`.noSubscription`, ranked on `.windows`). Its usage is
+    ///    unknown by then, so without this rule nothing would ever move you.
     /// 1. Threshold: session and weekly are checked first, then Fable (only
     ///    when `watchFable`), each against the ACTIVE account's own threshold.
     ///    A Fable target must have session and weekly room anyway.
@@ -236,6 +257,9 @@ enum AutoSwitchEngine {
     ///   - usageByAccount: latest usage sample per account id.
     ///   - isSwitchable: whether an account can actually be switched to right now
     ///     (has a stored backup token and isn't flagged expired).
+    ///   - isUnusable: whether an account has no active subscription (its
+    ///     usage request was refused with 403). Such an account is never a
+    ///     target, and while active it is left by rule 0.
     ///   - activeSampledThisCycle: whether the active account's sample was taken
     ///     by the refresh cycle that is asking. Fresh readings are trusted even
     ///     without a parseable `resets_at`; only RETAINED readings need the
@@ -259,6 +283,7 @@ enum AutoSwitchEngine {
         candidates: [Account],
         usageByAccount: [UUID: UsageAPIResponse],
         isSwitchable: (Account) -> Bool,
+        isUnusable: (Account) -> Bool = { _ in false },
         activeSampledThisCycle: Bool,
         threshold: (Account) -> Double,
         defaultThreshold: Double,
@@ -269,6 +294,15 @@ enum AutoSwitchEngine {
         drainWithin: TimeInterval = 24 * 3600,
         asOf now: Date = Date()
     ) -> (limit: Limit, trigger: Trigger, targets: [Account])? {
+        if isUnusable(active) {
+            let targets = rankedTargets(
+                active: active, candidates: candidates, usageByAccount: usageByAccount,
+                isSwitchable: isSwitchable, isUnusable: isUnusable, threshold: threshold, hysteresisPct: hysteresisPct,
+                limit: .windows, trigger: .noSubscription, strategy: strategy,
+                activeWeeklyReset: nil, drainWithin: drainWithin, watchFable: watchFable, asOf: now
+            )
+            return targets.isEmpty ? nil : (.windows, .noSubscription, targets)
+        }
         let activeRule = threshold(active)
         // Manual only on the active account: it was chosen by hand (or signed
         // in outside PixelSwitch), so it is left only at the default and never
@@ -288,7 +322,7 @@ enum AutoSwitchEngine {
             thresholdReached = true
             let targets = rankedTargets(
                 active: active, candidates: candidates, usageByAccount: usageByAccount,
-                isSwitchable: isSwitchable, threshold: threshold, hysteresisPct: hysteresisPct,
+                isSwitchable: isSwitchable, isUnusable: isUnusable, threshold: threshold, hysteresisPct: hysteresisPct,
                 limit: limit, trigger: .threshold, strategy: strategy,
                 activeWeeklyReset: nil, drainWithin: drainWithin, watchFable: watchFable, asOf: now
             )
@@ -301,7 +335,7 @@ enum AutoSwitchEngine {
         }
         let targets = rankedTargets(
             active: active, candidates: candidates, usageByAccount: usageByAccount,
-            isSwitchable: isSwitchable, threshold: threshold, hysteresisPct: hysteresisPct,
+            isSwitchable: isSwitchable, isUnusable: isUnusable, threshold: threshold, hysteresisPct: hysteresisPct,
             limit: .windows, trigger: .drainEarly, strategy: strategy,
             activeWeeklyReset: activeWeeklyReset, drainWithin: drainWithin, watchFable: watchFable, asOf: now
         )
@@ -315,6 +349,9 @@ enum AutoSwitchEngine {
     /// leave several cycles old. `AppState` verifies a candidate's usage before
     /// committing to a switch, and falls through the list when one fails.
     ///
+    /// An account with no active subscription (`isUnusable`) is never
+    /// eligible, whatever reading it still holds.
+    ///
     /// A candidate with no usable reading is NOT eligible: accounts are polled
     /// round-robin, so "no sample" usually means "not reached yet" rather than
     /// "idle" — treating it as a fallback let an automatic switch land on an
@@ -324,6 +361,7 @@ enum AutoSwitchEngine {
         candidates: [Account],
         usageByAccount: [UUID: UsageAPIResponse],
         isSwitchable: (Account) -> Bool,
+        isUnusable: (Account) -> Bool = { _ in false },
         threshold: (Account) -> Double,
         hysteresisPct: Double,
         limit: Limit,
@@ -355,7 +393,7 @@ enum AutoSwitchEngine {
             let usage = usageByAccount[candidate.id]
             let own = threshold(candidate)
             // The usage check comes first: `isSwitchable` reads the Keychain.
-            guard candidate.id != active.id,
+            guard candidate.id != active.id, !isUnusable(candidate),
                   let util = eligibleUtilization(usage, limit: limit, trigger: trigger, threshold: own,
                                                  hysteresisPct: hysteresisPct, activeWeeklyReset: activeWeeklyReset,
                                                  drainWithin: drainWithin, watchFable: watchFable, asOf: now),
@@ -397,9 +435,10 @@ enum AutoSwitchEngine {
 
 extension AutoSwitchEngine {
     /// The rule that produced a plan: the active account reached its
-    /// threshold, or (Resets soonest only) another account's weekly quota is
-    /// about to reset unused.
-    enum Trigger: String, Sendable { case threshold, drainEarly }
+    /// threshold, (Resets soonest only) another account's weekly quota is
+    /// about to reset unused, or the active account has no active
+    /// subscription and cannot be used at all.
+    enum Trigger: String, Sendable { case threshold, drainEarly, noSubscription }
 }
 
 /// Whether auto-switch also acts on the weekly Fable allowance. On by default;

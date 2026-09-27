@@ -15,6 +15,7 @@ import Foundation
     manualOnlyEngineTests()
     lowThresholdTests()
     thresholdStringsTests()
+    noSubscriptionTests()
 }
 
 /// Fixtures shared by every case in this file.
@@ -33,10 +34,11 @@ private enum Rules {
     static func plan(active: Account, candidates: [Account], _ usage: [UUID: UsageAPIResponse],
                      defaultThreshold: Double = 90, strategy: AutoSwitchStrategy = .mostRoom,
                      drainEarly: Bool = false, drainWithinHours: Double = 24, watchFable: Bool = true,
-                     switchable: (Account) -> Bool = { _ in true }, sampled: Bool = true) -> Plan? {
+                     switchable: (Account) -> Bool = { _ in true }, sampled: Bool = true,
+                     noSubscription: Set<UUID> = []) -> Plan? {
         AutoSwitchEngine.plan(
             active: active, candidates: candidates, usageByAccount: usage,
-            isSwitchable: switchable, activeSampledThisCycle: sampled,
+            isSwitchable: switchable, isUnusable: { noSubscription.contains($0.id) }, activeSampledThisCycle: sampled,
             threshold: { AutoSwitchSettings.effectiveThreshold(own: $0.switchThreshold, defaultThreshold: defaultThreshold) },
             defaultThreshold: defaultThreshold,
             hysteresisPct: AutoSwitchEngine.hysteresis, watchFable: watchFable, strategy: strategy,
@@ -634,4 +636,87 @@ private func sample(_ session: Double?, _ weekly: Double?,
     let leftover = retired.filter { key in tables.contains { $0[key] != nil } }
     check(missing.isEmpty && leftover.isEmpty, "l10n: the Manual only strings exist in all five languages and the retired ones are gone",
           "missing \(missing.count), leftover \(leftover.count)")
+}
+
+/// An active account with no active subscription (the usage endpoint answers
+/// 403 "OAuth authentication is currently not allowed for this organization")
+/// has no usage to wait for. Founder, 2026-09-26: it sat on one for over an
+/// hour; "if that happens, it needs to know to switch."
+@MainActor private func noSubscriptionTests() {
+    let a = Account(email: "a@x.com", displayName: "A", isActive: true)
+    let b = Account(email: "b@x.com", displayName: "B")
+    let c = Account(email: "c@x.com", displayName: "C")
+    let m0 = Account(email: "m@x.com", displayName: "M", switchThreshold: 0)
+    let mActive = Account(email: "m@x.com", displayName: "M", isActive: true, switchThreshold: 0)
+    let strategies: [AutoSwitchStrategy] = [.mostRoom, .myOrder, .resetsSoonest]
+    func describe(_ p: Rules.Plan?) -> String { Rules.describe(p) }
+    let dead: Set<UUID> = [a.id]
+
+    for s in strategies {
+        check(describe(Rules.plan(active: a, candidates: [b], [b.id: sample(50, 50)], strategy: s, noSubscription: dead)) == "windows/noSubscription: B",
+              "rules: no subscription: the active account is left with no usage reading at all (\(s.rawValue))")
+    }
+    check(describe(Rules.plan(active: a, candidates: [b], [a.id: sample(13, 3), b.id: sample(0, 26)], noSubscription: dead)) == "windows/noSubscription: B",
+          "rules: no subscription: left even when an older reading says it has room (the founder's case, 2026-09-27 02:56 UTC)")
+    check(describe(Rules.plan(active: a, candidates: [b], [b.id: sample(50, 50)])) == "stay",
+          "rules: no subscription: without the flag, no reading still means no move")
+    check(describe(Rules.plan(active: a, candidates: [b], [b.id: sample(50, 50)], strategy: .resetsSoonest, drainEarly: true, noSubscription: dead)) == "windows/noSubscription: B",
+          "rules: no subscription: it is the rule that fires, not the early drain")
+
+    func one(_ u: UsageAPIResponse) -> String { describe(Rules.plan(active: a, candidates: [b], [b.id: u], noSubscription: dead)) }
+    check(one(sample(85, 85)) == "windows/noSubscription: B" && one(sample(89, 0)) == "windows/noSubscription: B",
+          "rules: no subscription: any account with a point of room under its own threshold beats one that cannot be used")
+    check(one(sample(89.5, 0)) == "stay" && one(sample(90, 10)) == "stay" && one(sample(100, 100)) == "stay",
+          "rules: no subscription: never an account already at its threshold")
+
+    check(describe(Rules.plan(active: mActive, candidates: [c], [c.id: sample(50, 50)], noSubscription: [mActive.id])) == "windows/noSubscription: C",
+          "rules: no subscription: left even when it is Manual only")
+    check(describe(Rules.plan(active: a, candidates: [m0], [m0.id: sample(0, 0)], noSubscription: dead)) == "stay"
+          && describe(Rules.plan(active: a, candidates: [m0, c], [m0.id: sample(0, 0), c.id: sample(50, 50)], noSubscription: dead)) == "windows/noSubscription: C",
+          "rules: no subscription: a Manual only account is still never a target")
+
+    let deadB: Set<UUID> = [b.id]
+    check(describe(Rules.plan(active: a, candidates: [b, c], [a.id: sample(95, 40), b.id: sample(0, 0), c.id: sample(50, 50)], noSubscription: deadB)) == "windows/threshold: C"
+          && describe(Rules.plan(active: a, candidates: [b], [a.id: sample(95, 40), b.id: sample(0, 0)], noSubscription: deadB)) == "stay",
+          "rules: no subscription: never a target, even with an old 0% reading")
+    check(describe(Rules.plan(active: a, candidates: [b], [a.id: sample(30, 40), b.id: sample(10, 10, weeklyResetsIn: 12)],
+                              strategy: .resetsSoonest, drainEarly: true, noSubscription: deadB)) == "stay",
+          "rules: no subscription: never an early-drain target")
+    check(describe(Rules.plan(active: a, candidates: [b], [b.id: sample(0, 0)], noSubscription: [a.id, b.id])) == "stay",
+          "rules: no subscription: never moved from one dead account to another")
+    check(describe(Rules.plan(active: a, candidates: [b], [b.id: sample(0, 0)], switchable: { $0.id != b.id }, noSubscription: dead)) == "stay"
+          && describe(Rules.plan(active: a, candidates: [c], [:], noSubscription: dead)) == "stay",
+          "rules: no subscription: the target still needs a saved login and a reading")
+
+    let ranked: [UUID: UsageAPIResponse] = [b.id: sample(80, 80, weeklyResetsIn: 12), c.id: sample(20, 20)]
+    check(describe(Rules.plan(active: a, candidates: [b, c], ranked, strategy: .mostRoom, noSubscription: dead)) == "windows/noSubscription: C,B"
+          && describe(Rules.plan(active: a, candidates: [b, c], ranked, strategy: .myOrder, noSubscription: dead)) == "windows/noSubscription: B,C"
+          && describe(Rules.plan(active: a, candidates: [c, b], ranked, strategy: .resetsSoonest, noSubscription: dead)) == "windows/noSubscription: B,C",
+          "rules: no subscription: targets follow the user's strategy")
+    check(describe(Rules.plan(active: a, candidates: [b, c], [b.id: sample(10, 10, fable: 100), c.id: sample(40, 40, fable: 20)], noSubscription: dead)) == "windows/noSubscription: C,B"
+          && describe(Rules.plan(active: a, candidates: [b], [b.id: sample(10, 10, fable: 100)], noSubscription: dead)) == "windows/noSubscription: B",
+          "rules: no subscription: Fable to spare ranks first, but an account out of Fable still beats a dead one")
+
+    func verify(_ u: UsageAPIResponse, threshold: Double, limit: AutoSwitchEngine.Limit = .windows) -> Double? {
+        AutoSwitchEngine.eligibleUtilization(u, limit: limit, trigger: .noSubscription, threshold: threshold, hysteresisPct: 10,
+                                             activeWeeklyReset: nil, drainWithin: 24 * 3600, watchFable: true, asOf: Rules.now)
+    }
+    check(verify(sample(89, 0), threshold: 90) == 89 && verify(sample(89.5, 0), threshold: 90) == nil
+          && verify(sample(0, 0), threshold: 0) == nil && verify(sample(0, 0, fable: 0), threshold: 90, limit: .fable) == nil,
+          "rules: no subscription: verification applies the same rule (room left, never Manual only, session and weekly only)")
+    check(AutoSwitchEngine.Trigger.noSubscription.rawValue == "noSubscription",
+          "rules: no subscription: the autoSwitched event names the rule noSubscription")
+
+    let now = Rules.now
+    check(AutoSwitchEngine.cooldownHolds(lastSwitchAt: now.addingTimeInterval(-60), cooldown: 300, activeUnusable: false, asOf: now)
+          && !AutoSwitchEngine.cooldownHolds(lastSwitchAt: now.addingTimeInterval(-301), cooldown: 300, activeUnusable: false, asOf: now)
+          && !AutoSwitchEngine.cooldownHolds(lastSwitchAt: nil, cooldown: 300, activeUnusable: false, asOf: now),
+          "rules: cooldown: five minutes between automatic switches, as before")
+    check(!AutoSwitchEngine.cooldownHolds(lastSwitchAt: now.addingTimeInterval(-60), cooldown: 300, activeUnusable: true, asOf: now),
+          "rules: cooldown: never keeps you on an account with no subscription (nothing can bring you back to it)")
+
+    let key = "If the account you're using has no active subscription, PixelSwitch moves you right away to another account that still has room and is not Manual only."
+    let languages = ["en", "de", "fr", "ja", "zh-Hans"]
+    let missing = languages.filter { (NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String])?[key] == nil }
+    check(missing.isEmpty, "l10n: the no-subscription sentence exists in all five languages", missing.joined(separator: ", "))
 }
