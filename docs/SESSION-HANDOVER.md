@@ -1,13 +1,13 @@
 # PixelSwitch: session handover
 
-Read this first. Then read `docs/worklog/INDEX.md` for the full history; the newest entries are at the bottom of `docs/worklog/2026-09-26.md`.
-Last updated 2026-09-29 (morning, PDT): logged the next fix to build (a 503 from the usage server shows a raw Swift error; see "Next fix to build"). Before that, 2026-09-26: 1.6 released.
+Read this first. Then read `docs/worklog/INDEX.md` for the full history; the newest entries are at the bottom of `docs/worklog/2026-09-29.md`.
+Last updated 2026-09-29 (morning, PDT), after 1.7: auto-switch leaves a used-up account; usage errors in plain words with Retry.
 
 ## Current state
 
-- **Released: 1.6** (build 27, tag `v1.6`, CI run 36291176079), verified with `scripts/verify-release.sh v1.6` (its strings check now reads the UTF-16 file with `plutil`; before, it always printed 0). 1.5 (build 26) is what the founder's Mac runs until 1.6 installs itself (see below).
-- **Branches:** `main` holds everything. `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only` and `no-subscription-switch` are fully merged and can be deleted.
-- **Tests:** `bash Tests/run-unit-tests.sh` gives 597/597. `bash scripts/typecheck.sh` is clean for the app and the CLI, and also runs the target-name guard.
+- **Released: 1.7** (build 28, tag `v1.7`, CI run 36588489772), verified with `scripts/verify-release.sh v1.7`; the three new sentences are in the shipped app's strings (read from the mounted DMG with `plutil -p`). The Beeco Mac ran 1.6; at 15:18 UTC `pixelswitch update-check` opened its update window there (one click on Install), or it installs itself within about 6 hours.
+- **Branches:** `main` holds everything. `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only`, `no-subscription-switch` and `exhausted-switch-and-usage-errors` are fully merged and can be deleted.
+- **Tests:** `bash Tests/run-unit-tests.sh` gives 632/632. `bash scripts/typecheck.sh` is clean for the app and the CLI, and also runs the target-name guard.
 - **Users:** the founder is the only one. Release through the updater, then hand-check (memory: sole user). Versions are two-part: 1.5, then 1.6, …, 2.0.
 
 | Version | What it added |
@@ -17,10 +17,11 @@ Last updated 2026-09-29 (morning, PDT): logged the next fix to build (a 503 from
 | 1.4 | Update automatically is **on by default** (`SUAutomaticallyUpdate: true`). |
 | 1.5 | **Manual only (0%)** and per-account thresholds **1–100%**. Remote-control protocol 2 (`AccountInfo.manualOnly`). |
 | 1.6 | An active account whose usage request gets 403 ("OAuth authentication is currently not allowed for this organization", no active subscription) is left at the next refresh by rule `noSubscription`, cooldown or not, and is never a target. Decisions: `docs/decisions/2026-09-24-remote-control-answers.md`, last section. |
+| 1.7 | Rule `exhausted`: an active account at 100% of its session or week is left for any account a point under its own threshold when none is 10 points under. Usage errors in plain words (`UsageRequestError`), the last reading kept on a 5xx or no connection, **Retry** on the card, **Status** for a 5xx. |
 
 ## Waiting on the founder
 
-1. **Hand checks** (13 cards, one round, on 1.5 and 1.6; card 4 is the no-subscription fix): [docs/decisions/pixelswitch-hand-checks-2026-09-25.html](decisions/pixelswitch-hand-checks-2026-09-25.html). He pastes the Copy block back. Then:
+1. **Hand checks** (15 cards, one round, on 1.5, 1.6 and 1.7; card 4 is the no-subscription fix, cards 5 and 6 are 1.7): [docs/decisions/pixelswitch-hand-checks-2026-09-25.html](decisions/pixelswitch-hand-checks-2026-09-25.html). He pastes the Copy block back. Then:
    - record his answers verbatim in `docs/decisions/`;
    - mark the page answered;
    - fix any failure test-first and ship it as the next minor version.

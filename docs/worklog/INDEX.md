@@ -39,3 +39,4 @@ that file for the full entry. Start here to get up to speed on the project.
 
 ## 2026-09-29
 - [WL-2026-09-29-001](./2026-09-29.md) — Logged for a later session: a 503 from the usage server shows a raw Swift error ('UsageError error 0') — _research/done_
+- [WL-2026-09-29-002](./2026-09-29.md) — 1.7: auto-switch leaves a used-up account (Beeco bug); usage errors in plain words with Retry; released and verified — _fix/done_
