@@ -1,7 +1,7 @@
 # PixelSwitch: session handover
 
 Read this first. Then read `docs/worklog/INDEX.md` for the full history; the newest entries are at the bottom of `docs/worklog/2026-09-26.md`.
-Last updated 2026-09-26 (evening, PDT), after 1.6: auto-switch leaves an account with no active subscription.
+Last updated 2026-09-29 (morning, PDT): logged the next fix to build (a 503 from the usage server shows a raw Swift error; see "Next fix to build"). Before that, 2026-09-26: 1.6 released.
 
 ## Current state
 
@@ -39,6 +39,28 @@ Last updated 2026-09-26 (evening, PDT), after 1.6: auto-switch leaves an account
 
 - claude@pixelventures.ai was answering 403 as of 2026-09-27 03:06 UTC. Hand-check card 4 asks the founder to switch to it by hand; within about 5 minutes the app log (`~/Library/Logs/PixelSwitch-app.log`) should show `[autoSwitch] Rule noSubscription` and then `Switching to`.
 - If the founder pastes a time, read the log around it. If instead the log shows `has no active subscription, and no other account has room; staying put`, every other account was at or over its own threshold (a real state, not a bug).
+
+## Next fix to build: a server outage shows a raw Swift error (logged 2026-09-29, founder asked for it)
+
+**What the founder saw** on the ahamade@gmail.com card: `Could not fetch usage: The operation couldn't be completed. (PixelSwitch.ClaudeService.UsageError error 0.)` with a red ⊗. He couldn't tell what was wrong or what to do.
+
+**What actually happened.** Anthropic's usage endpoint (`api.anthropic.com/api/oauth/usage`) answered **HTTP 503** from 14:17 to 14:36 UTC on 2026-09-29. It failed for every account, not just this one (7 × 503 in `~/Library/Logs/PixelSwitch-app.log`, for ahmed@pixelventures.ai, ahmed@bespokewoodcraftstudio.com, claude@bespokewoodcraftstudio.com and ahamade@gmail.com). The account and its saved login were fine (`[diagnose] Backup [ahamade@gmail.com]: OK` every 5 min). It is an outage on Anthropic's side and clears by itself on the next good poll.
+
+**Why the message is unreadable (root cause).**
+1. `ClaudeService.getUsageLimits` ([ClaudeService.swift:244-262](../PixelSwitch/Services/ClaudeService.swift)) has its own error only for 401, 403 and 429. Any other status becomes `UsageError.network("HTTP 503")`.
+2. `UsageError` doesn't conform to `LocalizedError`, so `localizedDescription` drops the payload and Swift prints its generic "The operation couldn't be completed (… error N.)". In the bridged numbering, cases with a payload come first, so `error 0` is `.network`. It is **not** an HTTP code.
+3. The catch-all in `AppState.fetchUsage` ([AppState.swift:1549-1553](../PixelSwitch/AppState.swift)) puts that text on the card and also **clears the last reading** (`accountUsage` and `accountUsageSampledAt` = nil). A 429 instead keeps the stale sample with its "Updated Xm ago" label, which is the better behavior.
+4. The card's error row ([UsageDashboardView.swift:242-252](../PixelSwitch/Views/UsageDashboardView.swift)) is plain text with no action. The only retry is the ↻ in the popover header ([MainMenuView.swift:353](../PixelSwitch/Views/MainMenuView.swift)), and nothing points to it.
+
+**What the founder wants (his words, 2026-09-29):** "if that happens again, the person understands what they need to do just by a simple double-click or something like that, or by clicking the refresh." So the goal is a message that says in plain words what happened and whose problem it is, plus one obvious click that retries.
+
+**Proposed fix** (the building session decides the details; write the tests first):
+- **Name the failure.** Make `UsageError` a `LocalizedError`, or map it to messages in `AppState`, and split server errors (5xx) from network errors (no connection, timeout: `URLError`, which `URLSession.data(for:)` throws today and which also reaches the catch-all). Suggested wording: 5xx → "Anthropic's usage service is having trouble (HTTP 503). Your account is fine. Retrying automatically." Offline → "Can't reach Anthropic. Check your internet connection." An unknown 4xx or a decode error → "Unexpected reply from Anthropic (HTTP 4xx)." Never show "error 0" again.
+- **Keep the last reading on a 5xx or network error,** the same way a 429 does: keep `accountUsage` and its timestamp, and show a small warning line under the bars instead of replacing them. The timestamp stays honest ("Updated 12m ago"). Thresholds keep acting on the last known number, which is what they do after a 429. Confirm that's acceptable for auto-switch before shipping.
+- **One click to retry, on the card itself:** a "Retry" button (or make the whole error row clickable) that runs `appState.refresh()` for that account. Don't hide it behind a double-click: a menu-bar popover gives no hint that a double-click does anything. For a 5xx, add a "Status" link to https://status.claude.com.
+- **Other usage paths.** `getUsageLimits` has four call sites (AppState.swift:1207, 1255, 1265, 1297). Check that each maps the new cases the same way, the way the 403 gotcha below requires for `markNoSubscription`.
+- **Tests:** unit-test the status-to-message mapping (503, 500, 502, a `URLError.notConnectedToInternet`, a decode failure, an unknown 418), and that a 5xx keeps the previous sample. New strings go into all five `.strings` tables (a unit test checks they share one key set).
+- **Ship** as the next minor version (1.7) through `release.sh`. Add a hand-check card: with the network off, the card shows the offline message plus Retry, and the bars stay.
 
 ## Deferred defects (all minor; found by the 1.5 review, evidence in `docs/superpowers/reviews/2026-09-26-manual-only-review.json`)
 
