@@ -142,11 +142,11 @@
    html: true fields may carry links and <code>. Put the recommended option FIRST.
    ========================================================================================== */
 var PAGE = {
-  "key": "pixelswitch-hand-checks-1-5-2026-09-26",
-  "heading": "PIXELSWITCH: HAND CHECKS FOR 1.5 AND 1.6 (2026-09-26)",
-  "eyebrow": "PixelSwitch · hand checks · versions 1.5 and 1.6",
-  "title": "One round of hand checks on 1.5 and 1.6",
-  "lede": "<strong>1.5 installed itself this evening (proven from the log), and 1.6 should do the same tonight (card 2).</strong> 1.5 adds Manual only and thresholds below 50% (card 3). 1.6 stops auto-switch getting stuck on an account with no subscription (card 4). Everything that can be checked automatically already passed (597 checks, and GitHub builds, signs and notarizes each release). These are the things only a person can see; anything they find is fixed in the next version. On each card, do the steps, then pick what happened. Start with card 1 and paste your answers after it, so I can run the command-line checks while you do the rest.",
+  "key": "pixelswitch-hand-checks-1-5-to-1-7-2026-09-29",
+  "heading": "PIXELSWITCH: HAND CHECKS FOR 1.5, 1.6 AND 1.7 (2026-09-29)",
+  "eyebrow": "PixelSwitch · hand checks · versions 1.5 to 1.7",
+  "title": "One round of hand checks on 1.5, 1.6 and 1.7",
+  "lede": "<strong>Each version installs itself through the updater (card 2): 1.6 is on the Beeco Mac, and 1.7 follows within about 6 hours of its release on 2026-09-29.</strong> 1.5 adds Manual only and thresholds below 50% (card 3). 1.6 stops auto-switch getting stuck on an account with no subscription (card 4). 1.7 (2026-09-29) leaves an account that is used up even when every other account is nearly full (card 5), and a failed reading now says what happened with a Retry button (card 6). Everything that can be checked automatically already passed (632 checks, and GitHub builds, signs and notarizes each release). These are the things only a person can see; anything they find is fixed in the next version. On each card, do the steps, then pick what happened. Start with card 1 and paste your answers after it, so I can run the command-line checks while you do the rest.",
   "questions": [
     {
       "id": "install",
@@ -241,6 +241,61 @@ var PAGE = {
         "While claude@pixelventures.ai's card still says <b>No active subscription on this account (OAuth not allowed)</b>, double-click that card to switch to it by hand.",
         "Within about 5 minutes (the next refresh; no cooldown wait), the orange ring moves by itself to the account with the most room.",
         "It does not come back to claude@pixelventures.ai while that card shows the error. Tell me the time you switched, and I will read the log for the line <b>Rule noSubscription</b>."
+      ],
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
+      "recommend": "Do it and tell me what you saw",
+      "options": [
+        {
+          "label": "Passed: everything looked as described",
+          "note": "Pick this only if every step matched. (The template marks the first option; it is not a hint.)"
+        },
+        {
+          "label": "Something was wrong",
+          "note": "Say which step and what you saw in the comment box (a screenshot path helps)."
+        },
+        {
+          "label": "Skipped for now",
+          "note": "Fine for optional checks; I will ask again about the required ones."
+        }
+      ]
+    },
+    {
+      "id": "usedup",
+      "title": "Auto-switch leaves a used-up account (1.7)",
+      "what": "New in 1.7, the fix for the Beeco Mac: vkwok@gobeeco.com sat at 100% of its session while every other account was 92–99% of its week, and nothing moved. Needs <b>Version 1.7</b> in Settings → About on that Mac.",
+      "why": "Auto-switch only took an account 10 points under its threshold (88% or less at your 98%). Once the account you're on is used up, any account with a point of room now does. Nothing to set up: it happens the next time an account runs out.",
+      "steps": [
+        "Settings → General → Auto-switch: under the no-subscription line, a new line reads <b>If the account you're using is used up (100% of its 5-hour or weekly limit), PixelSwitch moves you to any other account with at least a point of room under its own threshold, not only one 10 points under it.</b>",
+        "The next time the account you're on reaches <b>Session 0% left</b> (or Weekly 0% left), within about 5 minutes the orange ring moves by itself to the account with the most room, even when every other account is above 88%.",
+        "Tell me roughly when it happened and on which Mac, and I will read the log for the line <b>Rule exhausted</b>."
+      ],
+      "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
+      "recommend": "Do it and tell me what you saw",
+      "options": [
+        {
+          "label": "Passed: everything looked as described",
+          "note": "Pick this only if every step matched. (The template marks the first option; it is not a hint.)"
+        },
+        {
+          "label": "Something was wrong",
+          "note": "Say which step and what you saw in the comment box (a screenshot path helps)."
+        },
+        {
+          "label": "Skipped for now",
+          "note": "Fine for optional checks; I will ask again about the required ones."
+        }
+      ]
+    },
+    {
+      "id": "usageerrors",
+      "title": "A failed reading says what happened, with Retry (1.7)",
+      "what": "New in 1.7: the card that said <i>Could not fetch usage: The operation couldn't be completed (… UsageError error 0.)</i> now says what went wrong in plain words, keeps the last numbers, and has a <b>Retry</b> button.",
+      "why": "Anthropic's outage this morning (HTTP 503) showed that unreadable line. The easiest way to see the new one is to go offline for a minute.",
+      "steps": [
+        "Turn Wi-Fi off. Open the popover and click ↻ in its header.",
+        "The active account's card keeps its bars. Under them: <b>Can't reach Anthropic. Check your internet connection; PixelSwitch keeps trying.</b> and a <b>Retry</b> button.",
+        "Turn Wi-Fi back on and click <b>Retry</b>. The line goes away and <b>Updated</b> says a few seconds ago. Clicking Retry never switches accounts.",
+        "If Anthropic is down when you look (HTTP 5xx), the line instead says <b>Anthropic's usage service isn't responding (HTTP 503). Your account is fine</b>, with a <b>Status</b> link that opens status.claude.com."
       ],
       "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",

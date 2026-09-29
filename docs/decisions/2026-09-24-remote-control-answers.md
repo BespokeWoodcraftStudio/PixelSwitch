@@ -173,3 +173,33 @@ Decisions NOT to do something (so a later session does not "fix" them):
 - **Not shown as "cannot be switched to" (`!` in `pixelswitch accounts`, `isSwitchable`).** That mark tells you to sign in again, which does not fix a missing subscription. The card's red "No active subscription" line already says what is wrong.
 - **With auto-switch off, nothing moves.** Off means off; the card still shows the error.
 - **No macOS notification.** PixelSwitch posts none today; the active ring moving in the menu bar is the feedback, as for every other automatic switch.
+
+## Leave a used-up account; usage errors in plain words, 2026-09-29
+
+In chat, first about a card on his own Mac reading `Could not fetch usage: The operation couldn't be completed. (PixelSwitch.ClaudeService.UsageError error 0.)`. Verbatim, after the diagnosis:
+
+> okay, log that error so that a different session can resolve it. The idea is, if that happens again, the person understands what they need to do just by a simple double-click or something like that, or by clicking the refresh. I don't know.
+
+Then, with four screenshots from the Beeco Mac (vkwok@gobeeco.com active, Session 0% left, 1.6, default threshold 98%, Most room left). Verbatim:
+
+> this is my Beeco work computer. You can go take a look at it, and it's not switching automatically. You need to debug it and figure out what's wrong with the program. It's running version 1.6, and then find whatever bug it is and fix the bug. Get you in there. Go ahead and do the update that I just had you log. Might as well get that done too, so the functionality you just logged
+
+What the Beeco log showed (`claadmin@claadmins-mac-mini`, over Tailscale, `~/Library/Logs/PixelSwitch-app.log`, UTC):
+- vkwok@gobeeco.com climbed from 69% of its session (13:27) to 100% (14:52), weekly 90%. Every other account was 92–99% of its week: racer3822 96, blargarticha 98, gobeeco@gmail 96, ahmed@pixelventures.ai 92, ahamade@gmail 99. support1.svc@gobeeco.com had no subscription (403), and blargart@gmail.com was rate-limited every time (429, about an hour each).
+- The last `[autoSwitch]` line of any kind was 2026-09-28 05:02. The engine's plan was empty, because no account was 10 points under the 98% default (88% or less), and an empty plan logged nothing.
+- The 503s on his own Mac (14:17–14:36) hit Beeco's accounts too, and showed the same "UsageError error 0".
+- 15:00 UTC: I switched Beeco to ahmed@pixelventures.ai by hand (`pixelswitch switch`), the account the fixed rule picks.
+
+What was built (release 1.7):
+- **New rule `exhausted`.** When the active account is at 100% of its session or week, and the 10-point rule finds no target, any account with a point of room under its own threshold is a target, ranked by his strategy and re-checked with a fresh reading first. The `autoSwitched` event's `trigger` is `exhausted`. Settings → General says so in one sentence, in all five languages.
+- **A stuck state is logged:** "at N% on windows (its threshold T%), but no other account has room …; staying put", once each time it changes.
+- **Usage errors in plain words** (`UsageRequestError`): 5xx says Anthropic's service isn't responding and the account is fine, with a Status link; offline says to check the connection; any other status says "Unexpected reply from Anthropic (HTTP n)". A 5xx or a network failure keeps the last reading, as a 429 does.
+- **Retry on the card:** one fresh reading for that account (the active one takes a full refresh).
+
+Decisions NOT to do something (so a later session does not "fix" them):
+- **Not for Fable.** An account out of Fable can still use the other models, and a switch for a few points of Fable is pointless (an existing test says the same: "Fable out everywhere, so no pointless switch").
+- **The 10-point rule still goes first.** When some account is 10 points under its threshold, it is chosen exactly as before; the used-up rule only fills the gap. That keeps every earlier behavior, and with "most room left" the roomiest account wins either way.
+- **Not at 99%.** Until the account is actually used up, the hysteresis holds. It guards against flip-flopping, and an account at 99% still works.
+- **The cooldown still applies to a used-up account** (at most 5 minutes). A switch that lands on an account that is used up within 5 minutes is rare, and bypassing the cooldown is kept for the no-subscription case, which nothing brings you back from.
+- **Retry is a button, not a double-click.** Double-clicking a card already switches to it (1.2), so a double-click can't also mean retry. The button never counts toward the card's double-click.
+- **No Retry for an expired login, no subscription, or a rate limit.** Signing in again (↻) or waiting out the server's deadline is the only fix, and the card already says so.
