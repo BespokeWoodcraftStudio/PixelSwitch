@@ -1,11 +1,11 @@
 # PixelSwitch: session handover
 
 Read this first. Then read `docs/worklog/INDEX.md` for the full history; the newest entries are at the bottom of `docs/worklog/2026-09-29.md`.
-Last updated 2026-09-29 (morning, PDT), after 1.7: auto-switch leaves a used-up account; usage errors in plain words with Retry.
+Last updated 2026-09-29 (PDT), after 1.8: auto-switch moves you at your number to any account under its own threshold.
 
 ## Current state
 
-- **Released: 1.7** (build 28, tag `v1.7`, CI run 36588489772), verified with `scripts/verify-release.sh v1.7`; the three new sentences are in the shipped app's strings (read from the mounted DMG with `plutil -p`). The Beeco Mac ran 1.6; at 15:18 UTC `pixelswitch update-check` opened its update window there (one click on Install), or it installs itself within about 6 hours.
+- **Released: 1.8** (build 29, tag `v1.8`, CI run 36615489903), verified with `scripts/verify-release.sh v1.8`; the new Settings sentence is in the shipped strings and the 10-point one is gone. The Beeco Mac installed 1.7 by itself; at about 16:40 UTC `pixelswitch update-check` opened its 1.8 window (one click on Install), or it installs itself within about 6 hours.
 - **Branches:** `main` holds everything. `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only`, `no-subscription-switch`, `exhausted-switch-and-usage-errors` and `switch-at-threshold` are fully merged and can be deleted.
 - **Tests:** `bash Tests/run-unit-tests.sh` gives 628/628. `bash scripts/typecheck.sh` is clean for the app and the CLI, and also runs the target-name guard.
 - **Users:** the founder is the only one. Release through the updater, then hand-check (memory: sole user). Versions are two-part: 1.5, then 1.6, …, 2.0.
