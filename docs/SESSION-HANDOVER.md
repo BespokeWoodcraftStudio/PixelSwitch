@@ -27,7 +27,8 @@ Last updated 2026-09-29 (morning, PDT), after 1.7: auto-switch leaves a used-up 
    - fix any failure test-first and ship it as the next minor version.
 
    Regenerate the page with `python3 scripts/hand-checks/gen-hand-checks.py`, and render it with `node scripts/hand-checks/render-hand-checks.cjs <out-dir>`.
-2. **Optional, his call:** a paid graphify refresh of this repo, estimated at about $2.38 to $8.27 by `~/.claude/graphify-smart/fleet-audit.py .`. Only the free AST update has been run.
+2. **When auto-switch moves him (asked 2026-09-29):** [docs/decisions/pixelswitch-switch-point-2026-09-29.html](decisions/pixelswitch-switch-point-2026-09-29.html). His question: "if I set my switch number to 98% or 99%, it should switch on that number, shouldn't it?" Today the threshold starts the search, but a target must be 10 points under its own threshold, so on a full week the switch waits for 100% (1.7). Recommended: drop the gap, so at his number it moves to any account at least a point under its own threshold. That is the `exhausted` ceiling (`drainMinimumRoom`) used for `.threshold` too, then 1.8, tests first; the Settings sentence "at least 10 points under" and the `ceiling`/tooltip numbers change with it. If he says nothing, 1.7 stands. Regenerate: `python3 scripts/decisions/gen-switch-point.py`; render: `node scripts/decisions/render-decision-page.cjs <page> <out-dir> switch-point`.
+3. **Optional, his call:** a paid graphify refresh of this repo, estimated at about $2.38 to $8.27 by `~/.claude/graphify-smart/fleet-audit.py .`. Only the free AST update has been run.
 
 ## Automatic updates: proven, and 1.6 is the second run
 
