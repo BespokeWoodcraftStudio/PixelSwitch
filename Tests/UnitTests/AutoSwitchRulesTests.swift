@@ -16,6 +16,7 @@ import Foundation
     lowThresholdTests()
     thresholdStringsTests()
     noSubscriptionTests()
+    exhaustedTests()
 }
 
 /// Fixtures shared by every case in this file.
@@ -719,4 +720,92 @@ private func sample(_ session: Double?, _ weekly: Double?,
     let languages = ["en", "de", "fr", "ja", "zh-Hans"]
     let missing = languages.filter { (NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String])?[key] == nil }
     check(missing.isEmpty, "l10n: the no-subscription sentence exists in all five languages", missing.joined(separator: ", "))
+}
+
+/// An active account that is used up (100% of its 5-hour or weekly window,
+/// or of Fable) cannot be used at all, so the 10-point hysteresis gives way
+/// to a point of room, as it does for an account with no subscription.
+/// Founder, 2026-09-29, on the Beeco Mac: vkwok@gobeeco.com sat at 100% of its
+/// session while every other account was at 92–99% of its week, none 10 points
+/// under the 98% default, so nothing moved: "it's not switching automatically."
+@MainActor private func exhaustedTests() {
+    func describe(_ p: Rules.Plan?) -> String { Rules.describe(p) }
+    let vk = Account(email: "vkwok@gobeeco.com", displayName: "VK", isActive: true)
+    let racer = Account(email: "racer3822@gmail.com", displayName: "Racer")
+    let blarg = Account(email: "blargarticha@gmail.com", displayName: "Blarg")
+    let gobeeco = Account(email: "gobeeco@gmail.com", displayName: "Gobeeco")
+    let pv = Account(email: "ahmed@pixelventures.ai", displayName: "PV")
+    let ahamade = Account(email: "ahamade@gmail.com", displayName: "Ahamade")
+    let others = [racer, blarg, gobeeco, pv, ahamade]
+    func beeco(_ active: UsageAPIResponse) -> [UUID: UsageAPIResponse] {
+        [vk.id: active, racer.id: sample(0, 96, fable: 11), blarg.id: sample(0, 98, fable: 34),
+         gobeeco.id: sample(0, 96, fable: 19), pv.id: sample(0, 92, fable: 0), ahamade.id: sample(0, 99, fable: 2)]
+    }
+
+    check(describe(Rules.plan(active: vk, candidates: others, beeco(sample(100, 90, fable: 0)), defaultThreshold: 98)) == "windows/exhausted: PV,Racer,Gobeeco",
+          "rules: used up: the Beeco case (session 100%, others 92–99% of their week at a 98% default) moves to the roomiest")
+    check(describe(Rules.plan(active: vk, candidates: others, beeco(sample(99, 90, fable: 0)), defaultThreshold: 98)) == "stay",
+          "rules: used up: at 99%, still usable, the 10-point hysteresis holds as before")
+    check(describe(Rules.plan(active: vk, candidates: others, beeco(sample(40, 100, fable: 0)), defaultThreshold: 98)) == "windows/exhausted: PV,Racer,Gobeeco",
+          "rules: used up: a used-up week counts the same as a used-up session")
+    for s: AutoSwitchStrategy in [.myOrder, .resetsSoonest] {
+        check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 90), pv.id: sample(0, 92)], defaultThreshold: 98, strategy: s)) == "windows/exhausted: PV",
+              "rules: used up: applies with every strategy (\(s.rawValue))")
+    }
+
+    // A target that clears the 10-point rule keeps the plan exactly as before.
+    let b = Account(email: "b@x.com", displayName: "B")
+    let c = Account(email: "c@x.com", displayName: "C")
+    check(describe(Rules.plan(active: vk, candidates: [b, c], [vk.id: sample(100, 50), b.id: sample(20, 20), c.id: sample(0, 85)])) == "windows/threshold: B",
+          "rules: used up: when an account is 10 points under its threshold, the threshold rule chooses as before")
+
+    func one(_ u: UsageAPIResponse, own: Double? = nil) -> String {
+        let t = Account(email: "t@x.com", displayName: "T", switchThreshold: own)
+        return describe(Rules.plan(active: vk, candidates: [t], [vk.id: sample(100, 60), t.id: u], defaultThreshold: 98))
+    }
+    check(one(sample(0, 97)) == "windows/exhausted: T" && one(sample(97, 0)) == "windows/exhausted: T",
+          "rules: used up: a point of room under the target's own threshold is enough")
+    check(one(sample(0, 97.5)) == "stay" && one(sample(0, 98)) == "stay" && one(sample(100, 0)) == "stay",
+          "rules: used up: never an account at or within a point of its own threshold")
+    check(one(sample(0, 0), own: 0) == "stay", "rules: used up: a Manual only account is still never a target")
+    check(one(sample(3, 3), own: 5) == "windows/exhausted: T" && one(sample(4.5, 0), own: 5) == "stay",
+          "rules: used up: a low threshold (5%) takes an account a point under it")
+    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 60), pv.id: sample(0, 92)], defaultThreshold: 98,
+                              switchable: { $0.id != pv.id })) == "stay"
+          && describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 60)], defaultThreshold: 98)) == "stay",
+          "rules: used up: the target still needs a saved login and a reading")
+    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 60), pv.id: sample(0, 92)], defaultThreshold: 98,
+                              noSubscription: [pv.id])) == "stay",
+          "rules: used up: never an account with no subscription")
+    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 60, sessionResetsIn: -1), pv.id: sample(0, 92)], defaultThreshold: 98)) == "stay",
+          "rules: used up: a session that has already reset is not used up")
+
+    let vkManual = Account(email: "vkwok@gobeeco.com", displayName: "VK", isActive: true, switchThreshold: 0)
+    check(describe(Rules.plan(active: vkManual, candidates: [pv], [vkManual.id: sample(100, 60), pv.id: sample(0, 92)], defaultThreshold: 98)) == "windows/exhausted: PV",
+          "rules: used up: a used-up Manual only account is left too")
+    let vk100 = Account(email: "vkwok@gobeeco.com", displayName: "VK", isActive: true, switchThreshold: 100)
+    check(describe(Rules.plan(active: vk100, candidates: [pv], [vk100.id: sample(100, 60), pv.id: sample(0, 92)], defaultThreshold: 98)) == "windows/exhausted: PV",
+          "rules: used up: an account set to 100% is left once it is empty")
+
+    // Not for Fable: out of Fable, the other models still work (main.swift:
+    // "Fable out everywhere, so no pointless switch").
+    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(10, 10, fable: 100), pv.id: sample(0, 92, fable: 95)], defaultThreshold: 98)) == "stay",
+          "rules: used up: out of Fable alone keeps the 10-point rule")
+    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 10, fable: 100), pv.id: sample(0, 92, fable: 95)], defaultThreshold: 98)) == "windows/exhausted: PV",
+          "rules: used up: a used-up session still moves, whatever Fable says")
+
+    func verify(_ u: UsageAPIResponse, threshold: Double, limit: AutoSwitchEngine.Limit = .windows) -> Double? {
+        AutoSwitchEngine.eligibleUtilization(u, limit: limit, trigger: .exhausted, threshold: threshold, hysteresisPct: 10,
+                                             activeWeeklyReset: nil, drainWithin: 24 * 3600, watchFable: true, asOf: Rules.now)
+    }
+    check(verify(sample(0, 92), threshold: 98) == 92 && verify(sample(0, 97.5), threshold: 98) == nil
+          && verify(sample(0, 0), threshold: 0) == nil
+          && verify(sample(0, 92, fable: 0), threshold: 98, limit: .fable) == nil,
+          "rules: used up: verification applies the same rule (session and weekly only)")
+    check(AutoSwitchEngine.Trigger.exhausted.rawValue == "exhausted", "rules: used up: the autoSwitched event names the rule exhausted")
+
+    let key = "If the account you're using is used up (100% of its 5-hour or weekly limit), PixelSwitch moves you to any other account with at least a point of room under its own threshold, not only one 10 points under it."
+    let languages = ["en", "de", "fr", "ja", "zh-Hans"]
+    let missing = languages.filter { (NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String])?[key] == nil }
+    check(missing.isEmpty, "l10n: the used-up sentence exists in all five languages", missing.joined(separator: ", "))
 }

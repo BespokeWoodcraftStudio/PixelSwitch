@@ -60,8 +60,14 @@ enum AutoSwitchEngine {
     /// watched limit, in percentage points. Deliberately not the 10-point
     /// hysteresis: the founder's example is an account with 5% left that
     /// should still be used up before its week resets. Also the room a target
-    /// needs when the active account has no subscription (`.noSubscription`).
+    /// needs when the active account has no subscription (`.noSubscription`)
+    /// or is used up (`.exhausted`).
     static let drainMinimumRoom: Double = 1.0
+
+    /// The reading at which an account is used up: at 100% of its session or
+    /// week it cannot be used until that window resets, so the room a target needs
+    /// drops from the hysteresis to `drainMinimumRoom` (`.exhausted`).
+    static let usedUp: Double = 100
 
     /// The binding utilization for an account = max of the windows we watch.
     /// We watch the 5-hour (session) and 7-day (weekly-all) windows — the two
@@ -212,6 +218,9 @@ enum AutoSwitchEngine {
         case .noSubscription:
             guard limit == .windows, let ceiling = Self.ceiling(threshold: threshold, room: drainMinimumRoom) else { return nil }
             return eligibleUtilization(usage, limit: .windows, ceiling: ceiling, asOf: now)
+        case .exhausted:
+            guard limit == .windows, let ceiling = Self.ceiling(threshold: threshold, room: drainMinimumRoom) else { return nil }
+            return eligibleUtilization(usage, limit: .windows, ceiling: ceiling, asOf: now)
         }
     }
 
@@ -327,6 +336,22 @@ enum AutoSwitchEngine {
                 activeWeeklyReset: nil, drainWithin: drainWithin, watchFable: watchFable, asOf: now
             )
             if !targets.isEmpty { return (limit, .threshold, targets) }
+            // Used up: at 100% of its session or week the active account cannot
+            // be used at all, so any account with a point of room beats it, as
+            // for an account with no subscription (founder, 2026-09-29:
+            // vkwok@gobeeco.com sat at 100% of its session while every other
+            // account was 92–99% of its week, none 10 points under the 98%
+            // default). Not for Fable: out of Fable, the other models still
+            // work, and a switch for a few points of Fable is pointless.
+            if limit == .windows, activeUtil >= Self.usedUp {
+                let usable = rankedTargets(
+                    active: active, candidates: candidates, usageByAccount: usageByAccount,
+                    isSwitchable: isSwitchable, isUnusable: isUnusable, threshold: threshold, hysteresisPct: hysteresisPct,
+                    limit: limit, trigger: .exhausted, strategy: strategy,
+                    activeWeeklyReset: nil, drainWithin: drainWithin, watchFable: watchFable, asOf: now
+                )
+                if !usable.isEmpty { return (limit, .exhausted, usable) }
+            }
         }
 
         guard !thresholdReached, !activeIsManualOnly, strategy == .resetsSoonest, drainEarly,
@@ -436,9 +461,10 @@ enum AutoSwitchEngine {
 extension AutoSwitchEngine {
     /// The rule that produced a plan: the active account reached its
     /// threshold, (Resets soonest only) another account's weekly quota is
-    /// about to reset unused, or the active account has no active
-    /// subscription and cannot be used at all.
-    enum Trigger: String, Sendable { case threshold, drainEarly, noSubscription }
+    /// about to reset unused, the active account has no active subscription
+    /// and cannot be used at all, or it is used up (100%) and no account is
+    /// the full hysteresis under its own threshold.
+    enum Trigger: String, Sendable { case threshold, drainEarly, noSubscription, exhausted }
 }
 
 /// Whether auto-switch also acts on the weekly Fable allowance. On by default;

@@ -220,48 +220,46 @@ final class ClaudeService: @unchecked Sendable {
 
     // MARK: - Usage API
 
-    enum UsageError: Error {
-        case expired
-        case network(String)
-        case decode(String)
-        case rateLimited(retryAfter: TimeInterval?)
-        /// 403 permission_error - e.g. "OAuth authentication is currently not
-        /// allowed for this organization" (no active Pro/Max subscription).
-        case forbidden(String)
-    }
+    /// Why a usage request failed; see `UsageRequestError` (its own file, so
+    /// the unit harness can test it without this class).
+    typealias UsageError = UsageRequestError
 
     /// Fetch usage for a specific access token
     func getUsageLimits(accessToken: String) async throws -> UsageAPIResponse {
-        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else { throw UsageError.network("invalid url") }
+        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else { throw UsageError.unexpected(status: 0) }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
 
         log.debug("[getUsageLimits] REQUEST URL: \(url.absoluteString)")
 
-        let (responseData, response) = try await URLSession.shared.data(for: request)
+        let responseData: Data
+        let response: URLResponse
+        do {
+            (responseData, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            log.error("[getUsageLimits] No reply: \(error.localizedDescription)")
+            throw UsageError.from(transportError: error)
+        }
         let httpResponse = response as? HTTPURLResponse
         guard httpResponse?.statusCode == 200 else {
+            let status = httpResponse?.statusCode ?? 0
             let responseString = String(data: responseData, encoding: .utf8) ?? ""
-            log.error("[getUsageLimits] HTTP \(httpResponse?.statusCode ?? 0)")
-
-            if httpResponse?.statusCode == 401 || responseString.contains("token_expired") {
-                throw UsageError.expired
-            }
-            if httpResponse?.statusCode == 429 {
-                let retryAfter = httpResponse?.value(forHTTPHeaderField: "Retry-After")
-                    .flatMap(TimeInterval.init)
+            log.error("[getUsageLimits] HTTP \(status)")
+            let error = UsageError.from(status: status, body: responseString,
+                                        retryAfter: httpResponse?.value(forHTTPHeaderField: "Retry-After"))
+            switch error {
+            case .rateLimited(let retryAfter):
                 log.warning("[getUsageLimits] 429, Retry-After: \(retryAfter.map { String(format: "%.0f", $0) } ?? "none")s")
-                throw UsageError.rateLimited(retryAfter: retryAfter)
-            }
-            if httpResponse?.statusCode == 403 {
+            case .forbidden:
                 // Typically: no active Pro/Max subscription on the account.
                 log.warning("[getUsageLimits] 403 permission error: \(responseString.prefix(200))")
-                throw UsageError.forbidden(responseString)
+            default:
+                break
             }
-            throw UsageError.network("HTTP \(httpResponse?.statusCode ?? 0)")
+            throw error
         }
-        
+
         do {
             let usage = try JSONDecoder().decode(UsageAPIResponse.self, from: responseData)
             log.info("[getUsageLimits] session=\(usage.fiveHour?.utilization ?? -1)%, weekly=\(usage.sevenDay?.utilization ?? -1)%, fable=\(usage.modelWeeklyLimit(named: "Fable")?.percent ?? -1)%")

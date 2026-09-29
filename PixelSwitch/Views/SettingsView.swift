@@ -125,6 +125,9 @@ struct SettingsView: View {
                     Text("If the account you're using has no active subscription, PixelSwitch moves you right away to another account that still has room and is not Manual only.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Text("If the account you're using is used up (100% of its 5-hour or weekly limit), PixelSwitch moves you to any other account with at least a point of room under its own threshold, not only one 10 points under it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 

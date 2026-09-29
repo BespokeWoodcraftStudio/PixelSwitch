@@ -41,9 +41,15 @@ final class AppState: ObservableObject {
         /// The usage request was refused with 403: the account has no active
         /// subscription, so auto-switch leaves it and never moves you to it.
         var isNoSubscription = false
+        /// The card offers Retry (`UsageRequestError.canRetry`).
+        var canRetry = false
+        /// The card links to status.claude.com (a 5xx from the usage service).
+        var offersStatusPage = false
     }
     
     @Published var accountUsageErrors: [UUID: UsageErrorState] = [:]
+    /// Accounts whose card's Retry is fetching right now.
+    @Published var retryingUsage: Set<UUID> = []
     /// The account a switch is currently moving to, so a card can show that it
     /// is the one being switched to. Nil when nothing is in flight. `isSwitching`
     /// below is the guard; this is purely what the interface reads.
@@ -114,6 +120,9 @@ final class AppState: ObservableObject {
 
     private var lastAutoSwitchAt: Date?
     private var isEvaluatingAutoSwitch = false
+    /// The last "threshold reached, nowhere to go" line logged, so a stuck
+    /// state is logged once when it starts rather than on every refresh.
+    private var lastStayingPutNote: String?
 
     /// The most recent automatic switch that completed in this launch, with
     /// the limit and the rule that fired. Nil until one happens. The control
@@ -1097,9 +1106,12 @@ final class AppState: ObservableObject {
         ) else {
             if activeUnusable {
                 log.warning("[autoSwitch] Active \(active.id) has no active subscription, and no other account has room; staying put")
+            } else {
+                noteStayingPut(active, sampledThisCycle: activeSampledThisCycle, watchFable: watchFable)
             }
             return
         }
+        lastStayingPutNote = nil
         let limit = plan.limit
         let trigger = plan.trigger
         let ranked = plan.targets
@@ -1183,6 +1195,29 @@ final class AppState: ObservableObject {
         case .threshold: log.info("[autoSwitch] Threshold reached but no candidate verified; staying put")
         case .drainEarly: log.info("[autoSwitch] Early drain found no verified candidate; staying put")
         case .noSubscription: log.info("[autoSwitch] No subscription on the active account, and no candidate verified; staying put")
+        case .exhausted: log.info("[autoSwitch] Active account is used up, and no candidate verified; staying put")
+        }
+    }
+
+    /// Log, once per change, that the active account has reached its threshold
+    /// but no other account has room: before 1.7 this state logged nothing, so
+    /// a stuck auto-switch looked the same as one that had nothing to do.
+    private func noteStayingPut(_ active: Account, sampledThisCycle: Bool, watchFable: Bool) {
+        let threshold = AutoSwitchSettings.leaveAtThreshold(rule: effectiveSwitchThreshold(for: active),
+                                                            defaultThreshold: AutoSwitchSettings.defaultThreshold)
+        let reached = (watchFable ? [AutoSwitchEngine.Limit.windows, .fable] : [.windows]).compactMap { limit -> String? in
+            guard let util = AutoSwitchEngine.utilization(accountUsage[active.id], limit: limit, requireKnownWindow: !sampledThisCycle),
+                  util >= threshold else { return nil }
+            return "\(String(format: "%.0f", util))% on \(limit.rawValue)"
+        }
+        guard !reached.isEmpty else {
+            lastStayingPutNote = nil
+            return
+        }
+        let note = "[autoSwitch] Active \(active.id) at \(reached.joined(separator: ", ")) (its threshold \(String(format: "%.0f", threshold))%), but no other account has room under its own threshold; staying put"
+        if note != lastStayingPutNote {
+            log.info(note)
+            lastStayingPutNote = note
         }
     }
 
@@ -1240,6 +1275,7 @@ final class AppState: ObservableObject {
             return nil
         } catch {
             log.warning("[fetchUsageNow] \(account.id): \(error.localizedDescription)")
+            recordUsageFailure(error, for: account)
             return nil
         }
     }
@@ -1288,6 +1324,44 @@ final class AppState: ObservableObject {
             isNoSubscription: true)
     }
 
+    /// A usage request that failed for a reason with no path of its own (not
+    /// 429, 403 or an expired token): say what happened in plain words, and
+    /// keep the last reading when the failure says nothing about the account
+    /// (a 5xx or no connection), as a 429 does. Every catch-all goes through
+    /// here, so no card shows Swift's "UsageError error 0" again.
+    private func recordUsageFailure(_ error: Error, for account: Account) {
+        let failure = error as? UsageRequestError
+        if failure?.keepsLastReading != true {
+            accountUsage[account.id] = nil
+            accountUsageSampledAt[account.id] = nil
+        }
+        accountUsageErrors[account.id] = UsageErrorState(
+            isExpired: false, isRateLimited: false,
+            message: failure?.message ?? String(localized: "Could not fetch usage: \(error.localizedDescription)", bundle: L10n.bundle),
+            canRetry: failure?.canRetry ?? true,
+            offersStatusPage: failure?.offersStatusPage ?? false)
+    }
+
+    /// The card's Retry: one fresh reading for this account now. The active
+    /// account takes a full refresh (its token is refreshed through Claude Code
+    /// there); any other takes one request, which a rate-limit park still
+    /// holds back. Auto-switch is evaluated on a new reading, as after a cycle.
+    func retryUsage(for account: Account) async {
+        guard !retryingUsage.contains(account.id) else { return }
+        retryingUsage.insert(account.id)
+        defer { retryingUsage.remove(account.id) }
+        log.info("[retryUsage] \(account.email): retry from the card")
+        if account.isActive {
+            await refresh()
+            return
+        }
+        guard let usage = await fetchUsageNow(for: account) else { return }
+        accountUsage[account.id] = usage
+        accountUsageSampledAt[account.id] = Date()
+        accountUsageErrors[account.id] = nil
+        if !isRefreshing { await evaluateAutoSwitch() }
+    }
+
     /// Fetch usage, honouring a 429 by parking the account. The post-refresh
     /// recovery paths previously wrapped this call in `try?`, which swallowed a
     /// 429 without parking it — leaking around the parking scheme and re-hitting
@@ -1306,6 +1380,7 @@ final class AppState: ObservableObject {
             return nil
         } catch {
             log.warning("[fetchUsage] Post-refresh retry failed for \(account.id): \(error.localizedDescription)")
+            recordUsageFailure(error, for: account)
             return nil
         }
     }
@@ -1547,9 +1622,7 @@ final class AppState: ObservableObject {
                 }
             } catch {
                 log.error("[fetchUsage] Failed to get usage for \(account.email): \(error.localizedDescription)")
-                accountUsage[account.id] = nil
-                accountUsageSampledAt[account.id] = nil
-                accountUsageErrors[account.id] = UsageErrorState(isExpired: false, isRateLimited: false, message: String(localized: "Could not fetch usage: \(error.localizedDescription)", bundle: L10n.bundle))
+                recordUsageFailure(error, for: account)
             }
         }
     }

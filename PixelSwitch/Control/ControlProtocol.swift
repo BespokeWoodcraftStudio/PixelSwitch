@@ -418,7 +418,7 @@ struct UsageReport: Codable, Equatable, Sendable {
 
 /// One pushed event. `type` is `activeAccountChanged`, `usageUpdated`,
 /// `autoSwitched`, `signInChanged` or `error`. An `autoSwitched` event's
-/// `trigger` is `threshold`, `drainEarly` or `noSubscription`.
+/// `trigger` is `threshold`, `drainEarly`, `noSubscription` or `exhausted` (1.7: the active account was used up).
 struct ControlEvent: Codable, Equatable, Sendable {
     let type: String
     let at: Date

@@ -238,16 +238,35 @@ struct UsageDashboardView: View {
             if let usage = usage {
                 usageBars(usage)
                 extraUsageRow(usage.extraUsage)
+                // A failed request that kept the last reading (the server's
+                // trouble, no connection): the bars stay, with what went wrong
+                // and one click to try again under them.
+                if let errorState = appState.accountUsageErrors[account.id] {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(.yellow)
+                            .font(.caption)
+                        Text(errorState.message)
+                            .font(.caption2)
+                            .foregroundStyle(.textSecondary)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 4)
+                        usageErrorActions(account, errorState)
+                    }
+                }
                 cardFooter(account)
             } else if let errorState = appState.accountUsageErrors[account.id] {
-                HStack {
+                HStack(alignment: .top) {
                     Image(systemName: errorState.isRateLimited ? "timer" : (errorState.isExpired ? "exclamationmark.triangle" : "xmark.circle"))
                         .foregroundStyle(errorState.isExpired ? .yellow : .red)
                     Text(errorState.message)
                         .font(.caption)
                         .foregroundStyle(.textSecondary)
-                        .lineLimit(2)
-                    Spacer()
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    usageErrorActions(account, errorState)
                 }
                 .padding(.top, 4)
             } else {
@@ -342,6 +361,37 @@ struct UsageDashboardView: View {
             pressedAccount = nil
             await appState.switchTo(account)
         }
+    }
+
+    /// Retry (and, for a 5xx, a link to status.claude.com) beside a failed
+    /// reading. Real buttons, so they never count toward the card's
+    /// double-click-to-switch.
+    @ViewBuilder
+    private func usageErrorActions(_ account: Account, _ errorState: AppState.UsageErrorState) -> some View {
+        HStack(spacing: 8) {
+            if errorState.offersStatusPage {
+                Link(String(localized: "Status", bundle: L10n.bundle), destination: UsageRequestError.statusPage)
+                    .font(.caption2)
+                    .accessibilityHint(String(localized: "Open status.claude.com", bundle: L10n.bundle))
+            }
+            if errorState.canRetry {
+                if appState.retryingUsage.contains(account.id) {
+                    ProgressView().controlSize(.small).scaleEffect(0.6)
+                        .frame(width: 16, height: 14)
+                } else {
+                    Button {
+                        Task { await appState.retryUsage(for: account) }
+                    } label: {
+                        Label(String(localized: "Retry", bundle: L10n.bundle), systemImage: "arrow.clockwise")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .buttonStyle(.borderless)
+                    .focusable(false)
+                    .accessibilityHint(String(localized: "Try again now", bundle: L10n.bundle))
+                }
+            }
+        }
+        .fixedSize()
     }
 
     /// Accounts are polled round-robin (active + one other per cycle), so a
