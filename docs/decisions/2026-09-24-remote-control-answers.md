@@ -203,3 +203,22 @@ Decisions NOT to do something (so a later session does not "fix" them):
 - **The cooldown still applies to a used-up account** (at most 5 minutes). A switch that lands on an account that is used up within 5 minutes is rare, and bypassing the cooldown is kept for the no-subscription case, which nothing brings you back from.
 - **Retry is a button, not a double-click.** Double-clicking a card already switches to it (1.2), so a double-click can't also mean retry. The button never counts toward the card's double-click.
 - **No Retry for an expired login, no subscription, or a rate limit.** Signing in again (↻) or waiting out the server's deadline is the only fix, and the card already says so.
+
+## Switch at his number to any account under its threshold, 2026-09-29
+
+His question in chat: "if I set my switch number to 98% or 99%, it should switch on that number, shouldn't it?" Asked on `docs/decisions/pixelswitch-switch-point-2026-09-29.html`. His pasted answer, verbatim:
+
+```
+PIXELSWITCH: WHEN AUTO-SWITCH MOVES YOU (2026-09-29)
+
+1. Switch at your number to any account with room [switch-point]
+   ANSWER: Switch at my number to any account with at least a point of room (the recommended one)
+   COMMENT: If I set the limit to 98% or 99% then it needs to switch to any account that is less than that number.
+```
+
+What it means, as built (release 1.8):
+- **The 10-point gap is gone.** When the active account reaches its threshold, a target is any account under ITS OWN threshold by at least a point (`AutoSwitchEngine.hysteresis` 10 → 1). Readings are whole percentages, so "at least a point under 98%" is exactly his "less than that number". For thresholds below 2%, the room is half the threshold, as before.
+- **"That number" is each account's own threshold.** With every account on the 98% default, as on both his Macs, it is his number. An account with its own threshold is judged against it, because auto-switch would leave it again at that number.
+- **It applies to Fable too.** He said "any account that is less than that number", with no exception. This replaces the older "Fable out everywhere, so no pointless switch" behavior: an account at 95% of Fable against 98% is now a target when you run out of Fable.
+- **The 1.7 `exhausted` rule is removed.** It was the 10-point rule's fallback at 100%, and with a one-point room it can never find anything the threshold rule didn't. The Settings sentence about it is gone; the main sentence now says "under its own threshold".
+- **Unchanged:** never to a Manual only account, one with no subscription, or one without a saved login or a reading. Every target is re-checked with a fresh reading first. The 5-minute cooldown stays; it and "leave only at or over, go only under" together rule out bouncing between two accounts.

@@ -16,7 +16,7 @@ import Foundation
     lowThresholdTests()
     thresholdStringsTests()
     noSubscriptionTests()
-    exhaustedTests()
+    switchAtThresholdTests()
 }
 
 /// Fixtures shared by every case in this file.
@@ -173,17 +173,17 @@ private func sample(_ session: Double?, _ weekly: Double?,
     check(Rules.describe(Rules.plan(active: a70, candidates: [c], [a70.id: sample(69, 40), c.id: sample(10, 10)])) == "stay",
           "rules: 69% under a 70% threshold stays put")
 
-    // Each CANDIDATE is judged against its own threshold minus the 10-point hysteresis.
+    // Each CANDIDATE is judged against its own threshold: at least a point under it (1.8).
     let mixed: [UUID: UsageAPIResponse] = [
         aDefault.id: sample(95, 40),
-        b70.id: sample(65, 20),   // over its own 60% ceiling
-        c.id: sample(75, 20),     // under the default 80% ceiling
+        b70.id: sample(70, 20),   // at its own 70% threshold
+        c.id: sample(75, 20),     // under the default 90%
     ]
     check(Rules.describe(Rules.plan(active: aDefault, candidates: [b70, c], mixed)) == "windows/threshold: C",
-          "rules: a candidate with its own 70% threshold must be at or under 60%", Rules.describe(Rules.plan(active: aDefault, candidates: [b70, c], mixed)))
-    let b70AtCeiling: [UUID: UsageAPIResponse] = [aDefault.id: sample(95, 40), b70.id: sample(60, 20)]
+          "rules: a candidate with its own 70% threshold must be under 70%", Rules.describe(Rules.plan(active: aDefault, candidates: [b70, c], mixed)))
+    let b70AtCeiling: [UUID: UsageAPIResponse] = [aDefault.id: sample(95, 40), b70.id: sample(69, 20)]
     check(Rules.describe(Rules.plan(active: aDefault, candidates: [b70], b70AtCeiling)) == "windows/threshold: B",
-          "rules: exactly at its own ceiling is still eligible")
+          "rules: exactly at its own ceiling (69% for 70%) is still eligible")
 
     // Fable triggers on the active account's own threshold too.
     let fableAt75: [UUID: UsageAPIResponse] = [a70.id: sample(10, 20, fable: 75), c.id: sample(5, 10, fable: 20)]
@@ -195,15 +195,15 @@ private func sample(_ session: Double?, _ weekly: Double?,
           "rules: an active account on 100% stays at 99%")
     check(Rules.describe(Rules.plan(active: a100, candidates: [c], [a100.id: sample(100, 50), c.id: sample(10, 10)])) == "windows/threshold: C",
           "rules: an active account on 100% moves once it is empty")
-    check(Rules.describe(Rules.plan(active: aDefault, candidates: [d100], [aDefault.id: sample(95, 40), d100.id: sample(90, 90)])) == "windows/threshold: D",
-          "rules: a candidate on 100% is eligible up to 90%")
-    check(Rules.describe(Rules.plan(active: aDefault, candidates: [d100], [aDefault.id: sample(95, 40), d100.id: sample(91, 20)])) == "stay",
-          "rules: a candidate on 100% at 91% is not")
+    check(Rules.describe(Rules.plan(active: aDefault, candidates: [d100], [aDefault.id: sample(95, 40), d100.id: sample(99, 90)])) == "windows/threshold: D",
+          "rules: a candidate on 100% is eligible up to 99%")
+    check(Rules.describe(Rules.plan(active: aDefault, candidates: [d100], [aDefault.id: sample(95, 40), d100.id: sample(100, 20)])) == "stay",
+          "rules: a candidate on 100% at 100% is not")
 
     // Review focus: an account with no usage sample yet, and nobody eligible.
     check(Rules.describe(Rules.plan(active: aDefault, candidates: [fresh], [aDefault.id: sample(95, 40)])) == "stay",
           "rules: an account with no usage sample yet is never chosen")
-    let nobody: [UUID: UsageAPIResponse] = [aDefault.id: sample(95, 40), b70.id: sample(61, 20), c.id: sample(81, 20)]
+    let nobody: [UUID: UsageAPIResponse] = [aDefault.id: sample(95, 40), b70.id: sample(70, 20), c.id: sample(90, 20)]
     check(Rules.plan(active: aDefault, candidates: [b70, c], nobody) == nil,
           "rules: when no candidate is eligible the plan is to stay put")
 }
@@ -343,10 +343,10 @@ private func sample(_ session: Double?, _ weekly: Double?,
           "rules: drain ranks targets by the soonest reset")
 
     // Review focus: a threshold reached with nowhere to go is still "reached": the drain stays out of it.
-    check(drain([a.id: sample(92, 40), y.id: sample(10, 85, weeklyResetsIn: 12)]) == "stay",
+    check(drain([a.id: sample(92, 40), y.id: sample(10, 90, weeklyResetsIn: 12)]) == "stay",
           "rules: drain never fires once the active account has reached its threshold")
-    check(drain([a.id: sample(92, 40), y.id: sample(10, 85, weeklyResetsIn: 12), z.id: sample(10, 70, weeklyResetsIn: 50)], candidates: [y, z]) == "windows/threshold: Z",
-          "rules: at the threshold the threshold rule, with its hysteresis, decides")
+    check(drain([a.id: sample(92, 40), y.id: sample(10, 90, weeklyResetsIn: 12), z.id: sample(10, 70, weeklyResetsIn: 50)], candidates: [y, z]) == "windows/threshold: Z",
+          "rules: at the threshold the threshold rule decides (Y is at its threshold)")
 
     // Ping-pong. Drained onto Y; Y reaches its threshold; the threshold rule moves you on...
     let yFull: [UUID: UsageAPIResponse] = [y.id: sample(10, 90, weeklyResetsIn: 12), a.id: activeA]
@@ -458,11 +458,11 @@ private func sample(_ session: Double?, _ weekly: Double?,
 @MainActor private func tooltipNumbersTests() {
     let e = AutoSwitchSettings.explanation
     let dflt = e(nil, 90, .mostRoom, true)
-    check(dflt?.leaveAt == 90 && dflt?.arriveAt == 80 && dflt?.drainArriveAt == nil,
-          "tooltip: a default account is left at 90% and taken at 80% or less")
+    check(dflt?.leaveAt == 90 && dflt?.arriveAt == 89 && dflt?.drainArriveAt == nil,
+          "tooltip: a default account is left at 90% and taken at 89% or less")
     let low = e(10, 90, .resetsSoonest, true)
-    check(low?.leaveAt == 10 && low?.arriveAt == 5 && low?.drainArriveAt == 9,
-          "tooltip: with Resets soonest and early switching on, it also states the early-switch number")
+    check(low?.leaveAt == 10 && low?.arriveAt == 9 && low?.drainArriveAt == nil,
+          "tooltip: the early-switch number is left out when it equals the switch-to number (1.8: both a point under)")
     check(e(90, 90, .resetsSoonest, false)?.drainArriveAt == nil && e(90, 90, .myOrder, true)?.drainArriveAt == nil,
           "tooltip: no early-switch number when early switching is off or another strategy is chosen")
     check(e(0, 90, .resetsSoonest, true) == nil && e(nil, 30, .mostRoom, true)?.leaveAt == 50,
@@ -471,7 +471,7 @@ private func sample(_ session: Double?, _ weekly: Double?,
 
 @MainActor private func ceilingTests() {
     let ceiling = AutoSwitchEngine.ceiling
-    check(AutoSwitchEngine.hysteresis == 10, "rules: the hysteresis is 10 points")
+    check(AutoSwitchEngine.hysteresis == 1, "rules: a target needs one point of room (founder, 2026-09-29)")
     check(ceiling(100, 10) == 90 && ceiling(50, 10) == 40 && ceiling(20, 10) == 10 && ceiling(19, 10) == 9.5
           && ceiling(10, 10) == 5 && ceiling(5, 10) == 2.5 && ceiling(1, 10) == 0.5,
           "rules: ceiling: 10 points under from 20% up, half the threshold below")
@@ -549,7 +549,7 @@ private func sample(_ session: Double?, _ weekly: Double?,
     check(describe(Rules.plan(active: mActive, candidates: [c], [c.id: sample(50, 50)])) == "stay"
           && describe(Rules.plan(active: mActive, candidates: [c], [mActive.id: sample(95, 95, weeklyResetsIn: nil, sessionResetsIn: nil), c.id: sample(50, 50)], sampled: false)) == "stay",
           "rules: manual only, active: no reading, no move")
-    check(Rules.plan(active: mActive, candidates: [c], [mActive.id: sample(95, 40), c.id: sample(85, 85)]) == nil,
+    check(Rules.plan(active: mActive, candidates: [c], [mActive.id: sample(95, 40), c.id: sample(90, 90)]) == nil,
           "rules: manual only, active: stays when nobody has room")
     let pingPong = strategies.allSatisfy {
         describe(Rules.plan(active: bActive, candidates: [m0], [bActive.id: sample(95, 40), m0.id: sample(0, 0)], strategy: $0)) == "stay"
@@ -566,10 +566,10 @@ private func sample(_ session: Double?, _ weekly: Double?,
         describe(Rules.plan(active: aDefault, candidates: [b], [aDefault.id: sample(95, 40), b.id: u]))
     }
     let b20 = target(20), b10 = target(10), b1 = target(1)
-    check(one(b20, sample(10, 10)) == "windows/threshold: B" && one(b20, sample(11, 5)) == "stay",
-          "rules: low thresholds: a 20% candidate is eligible at 10%, not at 11%")
-    check(one(b10, sample(5, 5)) == "windows/threshold: B" && one(b10, sample(6, 0)) == "stay",
-          "rules: low thresholds: a 10% candidate is eligible at 5%, not at 6%")
+    check(one(b20, sample(19, 10)) == "windows/threshold: B" && one(b20, sample(20, 5)) == "stay",
+          "rules: low thresholds: a 20% candidate is eligible at 19%, not at 20%")
+    check(one(b10, sample(9, 5)) == "windows/threshold: B" && one(b10, sample(10, 0)) == "stay",
+          "rules: low thresholds: a 10% candidate is eligible at 9%, not at 10%")
     check(one(b1, sample(0.5, 0)) == "windows/threshold: B" && one(b1, sample(1, 0)) == "stay",
           "rules: low thresholds: a 1% candidate only at 0.5% or less")
 
@@ -580,9 +580,9 @@ private func sample(_ session: Double?, _ weekly: Double?,
           "rules: low thresholds: an active account on 5% leaves at 5% and stays at 4%")
     let bActive = Account(email: "b@x.com", displayName: "B", isActive: true)
     let a6 = target(6, "A")
-    check(describe(Rules.plan(active: bActive, candidates: [a6], [bActive.id: sample(95, 40), a6.id: sample(3.5, 0)])) == "stay"
-          && describe(Rules.plan(active: bActive, candidates: [a6], [bActive.id: sample(95, 40), a6.id: sample(3, 0)])) == "windows/threshold: A",
-          "rules: low thresholds: an account left at 6% is a target again only at 3% or less")
+    check(describe(Rules.plan(active: bActive, candidates: [a6], [bActive.id: sample(95, 40), a6.id: sample(5.5, 0)])) == "stay"
+          && describe(Rules.plan(active: bActive, candidates: [a6], [bActive.id: sample(95, 40), a6.id: sample(5, 0)])) == "windows/threshold: A",
+          "rules: low thresholds: an account left at 6% is a target again only at 5% or less")
     let A5 = Account(email: "a@x.com", displayName: "A", isActive: true, switchThreshold: 5)
     let B5 = Account(email: "b@x.com", displayName: "B", switchThreshold: 5)
     let B5active = Account(id: B5.id, email: "b@x.com", displayName: "B", isActive: true, switchThreshold: 5)
@@ -599,8 +599,8 @@ private func sample(_ session: Double?, _ weekly: Double?,
           "rules: low thresholds: drain: a 1% account needs 0.5% or less; a 10% account at 9% has room")
     let x10 = target(10, "X"), yy10 = target(10, "Y")
     check(describe(Rules.plan(active: aDefault, candidates: [x10, yy10],
-                              [aDefault.id: sample(95, 40, fable: 50), x10.id: sample(1, 1, fable: 4), yy10.id: sample(0, 0, fable: 6)])) == "windows/threshold: X,Y",
-          "rules: low thresholds: the Fable preference uses the same halved room")
+                              [aDefault.id: sample(95, 40, fable: 50), x10.id: sample(1, 1, fable: 4), yy10.id: sample(0, 0, fable: 9.5)])) == "windows/threshold: X,Y",
+          "rules: low thresholds: the Fable preference uses the same room (Y at 9.5% of a 10% Fable is out)")
     let y90 = target(90, "Y")
     check(describe(Rules.plan(active: aDefault, candidates: [x10, y90],
                               [aDefault.id: sample(95, 40), x10.id: sample(2, 2), y90.id: sample(70, 70)])) == "windows/threshold: Y,X",
@@ -625,9 +625,10 @@ private func sample(_ session: Double?, _ weekly: Double?,
         "Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only. Manual only accounts are never switched to automatically; you can still switch to them yourself.",
         "Auto-switch never moves you to this account. You can still switch to it here.",
         "Any account can have its own threshold in Settings → Accounts, from 1% to 100%, or be Manual only so auto-switch never moves you to it. 100% uses an account until it is empty.",
-        "When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold (at or under half of it, for thresholds below 20%) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.",
+        "When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is under its own threshold (at least a point under) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.",
     ]
     let retired = [
+        "When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold (at or under half of it, for thresholds below 20%) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.",
         "When this account's usage reaches this level, auto-switch moves you to another account.",
         "Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only.",
         "Any account can have its own threshold in Settings → Accounts. 100% uses an account until it is empty.",
@@ -722,13 +723,12 @@ private func sample(_ session: Double?, _ weekly: Double?,
     check(missing.isEmpty, "l10n: the no-subscription sentence exists in all five languages", missing.joined(separator: ", "))
 }
 
-/// An active account that is used up (100% of its 5-hour or weekly window,
-/// or of Fable) cannot be used at all, so the 10-point hysteresis gives way
-/// to a point of room, as it does for an account with no subscription.
-/// Founder, 2026-09-29, on the Beeco Mac: vkwok@gobeeco.com sat at 100% of its
-/// session while every other account was at 92–99% of its week, none 10 points
-/// under the 98% default, so nothing moved: "it's not switching automatically."
-@MainActor private func exhaustedTests() {
+/// At its threshold the active account is left for any account under ITS OWN
+/// threshold by at least a point. Founder, 2026-09-29: "If I set the limit to
+/// 98% or 99% then it needs to switch to any account that is less than that
+/// number." Before 1.8 a target had to be 10 points under, so on the Beeco Mac
+/// (every other account at 92–99% of its week) nothing moved until 100%.
+@MainActor private func switchAtThresholdTests() {
     func describe(_ p: Rules.Plan?) -> String { Rules.describe(p) }
     let vk = Account(email: "vkwok@gobeeco.com", displayName: "VK", isActive: true)
     let racer = Account(email: "racer3822@gmail.com", displayName: "Racer")
@@ -741,71 +741,55 @@ private func sample(_ session: Double?, _ weekly: Double?,
         [vk.id: active, racer.id: sample(0, 96, fable: 11), blarg.id: sample(0, 98, fable: 34),
          gobeeco.id: sample(0, 96, fable: 19), pv.id: sample(0, 92, fable: 0), ahamade.id: sample(0, 99, fable: 2)]
     }
-
-    check(describe(Rules.plan(active: vk, candidates: others, beeco(sample(100, 90, fable: 0)), defaultThreshold: 98)) == "windows/exhausted: PV,Racer,Gobeeco",
-          "rules: used up: the Beeco case (session 100%, others 92–99% of their week at a 98% default) moves to the roomiest")
-    check(describe(Rules.plan(active: vk, candidates: others, beeco(sample(99, 90, fable: 0)), defaultThreshold: 98)) == "stay",
-          "rules: used up: at 99%, still usable, the 10-point hysteresis holds as before")
-    check(describe(Rules.plan(active: vk, candidates: others, beeco(sample(40, 100, fable: 0)), defaultThreshold: 98)) == "windows/exhausted: PV,Racer,Gobeeco",
-          "rules: used up: a used-up week counts the same as a used-up session")
-    for s: AutoSwitchStrategy in [.myOrder, .resetsSoonest] {
-        check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 90), pv.id: sample(0, 92)], defaultThreshold: 98, strategy: s)) == "windows/exhausted: PV",
-              "rules: used up: applies with every strategy (\(s.rawValue))")
-    }
-
-    // A target that clears the 10-point rule keeps the plan exactly as before.
-    let b = Account(email: "b@x.com", displayName: "B")
-    let c = Account(email: "c@x.com", displayName: "C")
-    check(describe(Rules.plan(active: vk, candidates: [b, c], [vk.id: sample(100, 50), b.id: sample(20, 20), c.id: sample(0, 85)])) == "windows/threshold: B",
-          "rules: used up: when an account is 10 points under its threshold, the threshold rule chooses as before")
+    check(AutoSwitchEngine.hysteresis == 1, "rules: at your number: a target needs one point of room, not ten")
+    check(describe(Rules.plan(active: vk, candidates: others, beeco(sample(98, 90, fable: 0)), defaultThreshold: 98)) == "windows/threshold: PV,Racer,Gobeeco",
+          "rules: at your number: the Beeco case switches at 98% to every account under 98%, roomiest first")
+    check(describe(Rules.plan(active: vk, candidates: others, beeco(sample(99, 90, fable: 0)), defaultThreshold: 99)) == "windows/threshold: PV,Racer,Gobeeco,Blarg",
+          "rules: at your number: at 99%, an account at 98% qualifies too")
+    check(describe(Rules.plan(active: vk, candidates: others, beeco(sample(97, 90, fable: 0)), defaultThreshold: 98)) == "stay",
+          "rules: at your number: under it, nothing moves")
+    check(describe(Rules.plan(active: vk, candidates: others, beeco(sample(40, 98, fable: 0)), defaultThreshold: 98)) == "windows/threshold: PV,Racer,Gobeeco",
+          "rules: at your number: the weekly limit counts the same as the session")
 
     func one(_ u: UsageAPIResponse, own: Double? = nil) -> String {
         let t = Account(email: "t@x.com", displayName: "T", switchThreshold: own)
-        return describe(Rules.plan(active: vk, candidates: [t], [vk.id: sample(100, 60), t.id: u], defaultThreshold: 98))
+        return describe(Rules.plan(active: vk, candidates: [t], [vk.id: sample(98, 60), t.id: u], defaultThreshold: 98))
     }
-    check(one(sample(0, 97)) == "windows/exhausted: T" && one(sample(97, 0)) == "windows/exhausted: T",
-          "rules: used up: a point of room under the target's own threshold is enough")
+    check(one(sample(0, 97)) == "windows/threshold: T" && one(sample(97, 0)) == "windows/threshold: T",
+          "rules: at your number: an account a point under its threshold is a target")
     check(one(sample(0, 97.5)) == "stay" && one(sample(0, 98)) == "stay" && one(sample(100, 0)) == "stay",
-          "rules: used up: never an account at or within a point of its own threshold")
-    check(one(sample(0, 0), own: 0) == "stay", "rules: used up: a Manual only account is still never a target")
-    check(one(sample(3, 3), own: 5) == "windows/exhausted: T" && one(sample(4.5, 0), own: 5) == "stay",
-          "rules: used up: a low threshold (5%) takes an account a point under it")
-    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 60), pv.id: sample(0, 92)], defaultThreshold: 98,
-                              switchable: { $0.id != pv.id })) == "stay"
-          && describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 60)], defaultThreshold: 98)) == "stay",
-          "rules: used up: the target still needs a saved login and a reading")
-    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 60), pv.id: sample(0, 92)], defaultThreshold: 98,
-                              noSubscription: [pv.id])) == "stay",
-          "rules: used up: never an account with no subscription")
-    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 60, sessionResetsIn: -1), pv.id: sample(0, 92)], defaultThreshold: 98)) == "stay",
-          "rules: used up: a session that has already reset is not used up")
+          "rules: at your number: never an account at its own threshold")
+    check(one(sample(79, 0), own: 80) == "windows/threshold: T" && one(sample(80, 0), own: 80) == "stay",
+          "rules: at your number: an account with its own threshold is judged against its own number")
+    check(one(sample(0, 0), own: 0) == "stay", "rules: at your number: a Manual only account is still never a target")
+    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(98, 60), pv.id: sample(0, 92)], defaultThreshold: 98,
+                              noSubscription: [pv.id])) == "stay"
+          && describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(98, 60), pv.id: sample(0, 92)], defaultThreshold: 98,
+                                 switchable: { $0.id != pv.id })) == "stay"
+          && describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(98, 60)], defaultThreshold: 98)) == "stay",
+          "rules: at your number: never an account with no subscription, no saved login or no reading")
 
-    let vkManual = Account(email: "vkwok@gobeeco.com", displayName: "VK", isActive: true, switchThreshold: 0)
-    check(describe(Rules.plan(active: vkManual, candidates: [pv], [vkManual.id: sample(100, 60), pv.id: sample(0, 92)], defaultThreshold: 98)) == "windows/exhausted: PV",
-          "rules: used up: a used-up Manual only account is left too")
-    let vk100 = Account(email: "vkwok@gobeeco.com", displayName: "VK", isActive: true, switchThreshold: 100)
-    check(describe(Rules.plan(active: vk100, candidates: [pv], [vk100.id: sample(100, 60), pv.id: sample(0, 92)], defaultThreshold: 98)) == "windows/exhausted: PV",
-          "rules: used up: an account set to 100% is left once it is empty")
+    // Fable: "any account that is less than that number", Fable included.
+    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(10, 10, fable: 98), pv.id: sample(0, 92, fable: 95)], defaultThreshold: 98)) == "fable/threshold: PV",
+          "rules: at your number: out of Fable moves to an account under its threshold on Fable and on session and weekly")
+    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(10, 10, fable: 98), pv.id: sample(0, 98, fable: 50)], defaultThreshold: 98)) == "stay",
+          "rules: at your number: a Fable target must also be under its threshold on session and weekly")
 
-    // Not for Fable: out of Fable, the other models still work (main.swift:
-    // "Fable out everywhere, so no pointless switch").
-    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(10, 10, fable: 100), pv.id: sample(0, 92, fable: 95)], defaultThreshold: 98)) == "stay",
-          "rules: used up: out of Fable alone keeps the 10-point rule")
-    check(describe(Rules.plan(active: vk, candidates: [pv], [vk.id: sample(100, 10, fable: 100), pv.id: sample(0, 92, fable: 95)], defaultThreshold: 98)) == "windows/exhausted: PV",
-          "rules: used up: a used-up session still moves, whatever Fable says")
+    // Flip-flop: you leave only at or over a threshold and go only under one.
+    let a = Account(email: "a@x.com", displayName: "A", isActive: true)
+    let b = Account(email: "b@x.com", displayName: "B")
+    check(describe(Rules.plan(active: a, candidates: [b], [a.id: sample(98, 50), b.id: sample(98, 50)], defaultThreshold: 98)) == "stay",
+          "rules: at your number: two accounts at the number never swap")
 
-    func verify(_ u: UsageAPIResponse, threshold: Double, limit: AutoSwitchEngine.Limit = .windows) -> Double? {
-        AutoSwitchEngine.eligibleUtilization(u, limit: limit, trigger: .exhausted, threshold: threshold, hysteresisPct: 10,
-                                             activeWeeklyReset: nil, drainWithin: 24 * 3600, watchFable: true, asOf: Rules.now)
-    }
-    check(verify(sample(0, 92), threshold: 98) == 92 && verify(sample(0, 97.5), threshold: 98) == nil
-          && verify(sample(0, 0), threshold: 0) == nil
-          && verify(sample(0, 92, fable: 0), threshold: 98, limit: .fable) == nil,
-          "rules: used up: verification applies the same rule (session and weekly only)")
-    check(AutoSwitchEngine.Trigger.exhausted.rawValue == "exhausted", "rules: used up: the autoSwitched event names the rule exhausted")
-
-    let key = "If the account you're using is used up (100% of its 5-hour or weekly limit), PixelSwitch moves you to any other account with at least a point of room under its own threshold, not only one 10 points under it."
+    check(AutoSwitchEngine.Trigger(rawValue: "exhausted") == nil,
+          "rules: at your number: 1.7's used-up rule is gone (the threshold rule covers it)")
+    let key = "When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is under its own threshold (at least a point under) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping."
+    let retired = [
+        "When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold (at or under half of it, for thresholds below 20%) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.",
+        "If the account you're using is used up (100% of its 5-hour or weekly limit), PixelSwitch moves you to any other account with at least a point of room under its own threshold, not only one 10 points under it.",
+    ]
     let languages = ["en", "de", "fr", "ja", "zh-Hans"]
-    let missing = languages.filter { (NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String])?[key] == nil }
-    check(missing.isEmpty, "l10n: the used-up sentence exists in all five languages", missing.joined(separator: ", "))
+    let tables = languages.map { NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String] ?? [:] }
+    check(tables.allSatisfy { $0[key] != nil } && !tables.contains { t in retired.contains { t[$0] != nil } },
+          "l10n: the auto-switch explanation says \"under its own threshold\" in all five languages, and the 10-point wording is gone")
 }

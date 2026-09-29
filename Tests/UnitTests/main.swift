@@ -315,7 +315,7 @@ do {
     func plan(_ byAccount: [UUID: UsageAPIResponse], candidates: [Account]? = nil, switchable: @escaping (Account) -> Bool = { _ in true }, sampled: Bool = true, watchFable: Bool = true) -> (limit: AutoSwitchEngine.Limit, trigger: AutoSwitchEngine.Trigger, targets: [Account])? {
         AutoSwitchEngine.plan(active: active, candidates: candidates ?? [b, c, d, e], usageByAccount: byAccount,
                               isSwitchable: switchable, activeSampledThisCycle: sampled,
-                              threshold: { _ in 98 }, defaultThreshold: 90, hysteresisPct: 10, watchFable: watchFable, asOf: now)
+                              threshold: { _ in 98 }, defaultThreshold: 90, hysteresisPct: AutoSwitchEngine.hysteresis, watchFable: watchFable, asOf: now)
     }
     func names(_ p: (limit: AutoSwitchEngine.Limit, trigger: AutoSwitchEngine.Trigger, targets: [Account])?) -> String {
         guard let p else { return "stay" }
@@ -327,23 +327,30 @@ do {
                         b.id: usage(session: 50, weekly: 40, fable: 99),
                         c.id: usage(session: 20, weekly: 10, fable: nil),
                         d.id: usage(session: 90, weekly: 10, fable: 0)])
-    check(names(windows) == "windows: C,B", "auto-switch: session at 99% switches on session/weekly, most room first", names(windows))
+    // 1.8: every account under 98% is a target; Fable left ranks first (D), then most room.
+    check(names(windows) == "windows: D,C,B", "auto-switch: session at 99% switches on session/weekly, Fable left first, then most room", names(windows))
 
     // Fable at the threshold switches to the account with the most Fable left.
     let fable = plan([active.id: usage(session: 10, weekly: 50, fable: 99),
                       b.id: usage(session: 5, weekly: 30, fable: 60),
-                      c.id: usage(session: 5, weekly: 95, fable: 5),   // weekly too high: excluded
+                      c.id: usage(session: 5, weekly: 95, fable: 5),   // weekly 95 is under 98: a target (1.8)
                       d.id: usage(session: 5, weekly: 10, fable: nil), // no Fable allowance: excluded
                       e.id: usage(session: 5, weekly: 10, fable: 20)])
-    check(names(fable) == "fable: E,B", "auto-switch: Fable at 99% switches to the most Fable left, with session and weekly room", names(fable))
+    check(names(fable) == "fable: C,E,B", "auto-switch: Fable at 99% switches to the most Fable left, with session and weekly under the threshold", names(fable))
 
     let below = plan([active.id: usage(session: 10, weekly: 50, fable: 97), e.id: usage(session: 5, weekly: 10, fable: 20)])
     check(names(below) == "stay", "auto-switch: Fable at 97% (under a 98% threshold) stays put", names(below))
 
+    // Founder, 2026-09-29 (1.8): "switch to any account that is less than that
+    // number", Fable included; before, an account at 95% of Fable was "pointless".
+    let under = plan([active.id: usage(session: 10, weekly: 50, fable: 100),
+                      b.id: usage(session: 5, weekly: 10, fable: 95),
+                      d.id: usage(session: 5, weekly: 10, fable: nil)])
+    check(names(under) == "fable: B", "auto-switch: out of Fable, an account under its threshold on Fable is a target", names(under))
     let nowhere = plan([active.id: usage(session: 10, weekly: 50, fable: 100),
-                        b.id: usage(session: 5, weekly: 10, fable: 95),
+                        b.id: usage(session: 5, weekly: 10, fable: 98),
                         d.id: usage(session: 5, weekly: 10, fable: nil)])
-    check(names(nowhere) == "stay", "auto-switch: Fable out everywhere, so no pointless switch", names(nowhere))
+    check(names(nowhere) == "stay", "auto-switch: Fable at its threshold everywhere, so nowhere to go", names(nowhere))
 
     let expired = plan([active.id: usage(session: 10, weekly: 50, fable: 100, fableResets: past), e.id: usage(session: 5, weekly: 10, fable: 20)])
     check(names(expired) == "stay", "auto-switch: a Fable reading from a week that has reset never triggers", names(expired))
@@ -368,7 +375,7 @@ do {
     check(names(plan(retained, sampled: true)) == "fable: E", "auto-switch: a fresh Fable reading with no reset time does trigger", names(plan(retained, sampled: true)))
 
     var keychainReads = 0
-    _ = plan([active.id: usage(session: 10, weekly: 50, fable: 99), b.id: usage(session: 5, weekly: 10, fable: 95), c.id: usage(session: 5, weekly: 10, fable: 97)],
+    _ = plan([active.id: usage(session: 10, weekly: 50, fable: 99), b.id: usage(session: 5, weekly: 10, fable: 98), c.id: usage(session: 5, weekly: 10, fable: 99)],
              switchable: { _ in keychainReads += 1; return true })
     check(keychainReads == 0, "auto-switch: accounts that fail on usage are never checked in the Keychain", "\(keychainReads)")
 

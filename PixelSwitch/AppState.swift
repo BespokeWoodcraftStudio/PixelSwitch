@@ -1195,7 +1195,6 @@ final class AppState: ObservableObject {
         case .threshold: log.info("[autoSwitch] Threshold reached but no candidate verified; staying put")
         case .drainEarly: log.info("[autoSwitch] Early drain found no verified candidate; staying put")
         case .noSubscription: log.info("[autoSwitch] No subscription on the active account, and no candidate verified; staying put")
-        case .exhausted: log.info("[autoSwitch] Active account is used up, and no candidate verified; staying put")
         }
     }
 

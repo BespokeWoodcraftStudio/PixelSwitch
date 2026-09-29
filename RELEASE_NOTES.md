@@ -1,20 +1,15 @@
-## PixelSwitch 1.7
+## PixelSwitch 1.8
 
-### Fixed
+### Changed
 
-- **Auto-switch no longer stays on an account that is used up.** When the account you're on reaches 100% of its 5-hour or weekly limit, Claude Code can't use it until that limit resets.
-  - Before, auto-switch only moved you to an account at least 10 points under its own threshold. If every account was nearly full (92–99% of its week against a 98% threshold), it stayed on the empty one.
-  - Now, once the account you're on is used up, any other account with at least a point of room under its own threshold will do. It's chosen the way you set in Settings → General.
-  - When an account 10 points under exists, it's chosen exactly as before.
-  - Running out of Fable alone doesn't count, because the other models still work.
-  - Settings → General says so under Auto-switch.
-- **A failed usage reading now says what happened, with a Retry button.** An error from Anthropic's side used to show "The operation couldn't be completed (… UsageError error 0.)". Now each kind of failure has its own message:
-  - Anthropic's service is down: "Anthropic's usage service isn't responding (HTTP 503). Your account is fine; PixelSwitch keeps trying." It also has a **Status** link to status.claude.com.
-  - You're offline: "Can't reach Anthropic. Check your internet connection."
-  - Anything else: "Unexpected reply from Anthropic (HTTP …)".
-- **The last reading stays on the card during an outage or while you're offline**, the way it already did for a rate limit. The card shows the bars and their "Updated … ago" time, with the problem under them.
-- **Retry** on the card takes a fresh reading of that account straight away. It's a real button, so clicking it never switches accounts (double-clicking a card still does).
+- **Auto-switch now switches at your number.** With a 98% threshold, when the account you're on reaches 98%, PixelSwitch moves you to any account below 98% (at least a point under its own threshold), choosing it the way you set in Settings → General.
+  - Before, the other account had to be 10 points under its threshold (88% or less at 98%). On a week when every account was nearly full, that meant no switch until your session ran out.
+  - This covers the 5-hour, weekly and Fable limits. With the Fable switch off, Fable is still only a reading.
+  - It can't bounce you back and forth: it leaves an account only at or over its threshold, moves only to one under it, and waits at least 5 minutes between automatic switches.
+  - It still never moves you to a Manual only account, to one with no subscription, or to one it can't read. The chosen account is re-checked with a fresh reading first.
+  - An account with its own threshold (Settings → Accounts) is judged against its own number.
+- Settings → General and the Settings → Accounts tooltips say so. 1.7's separate line about a used-up account is gone, because the main rule now covers it.
 
 Your accounts, settings and saved logins carry over as they are.
 
-**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.6...v1.7
+**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v1.7...v1.8

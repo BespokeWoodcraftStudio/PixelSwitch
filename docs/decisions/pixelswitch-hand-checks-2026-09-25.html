@@ -142,11 +142,11 @@
    html: true fields may carry links and <code>. Put the recommended option FIRST.
    ========================================================================================== */
 var PAGE = {
-  "key": "pixelswitch-hand-checks-1-5-to-1-7-2026-09-29",
-  "heading": "PIXELSWITCH: HAND CHECKS FOR 1.5, 1.6 AND 1.7 (2026-09-29)",
-  "eyebrow": "PixelSwitch · hand checks · versions 1.5 to 1.7",
-  "title": "One round of hand checks on 1.5, 1.6 and 1.7",
-  "lede": "<strong>Each version installs itself through the updater (card 2): 1.6 is on the Beeco Mac, and 1.7 follows within about 6 hours of its release on 2026-09-29.</strong> 1.5 adds Manual only and thresholds below 50% (card 3). 1.6 stops auto-switch getting stuck on an account with no subscription (card 4). 1.7 (2026-09-29) leaves an account that is used up even when every other account is nearly full (card 5), and a failed reading now says what happened with a Retry button (card 6). Everything that can be checked automatically already passed (632 checks, and GitHub builds, signs and notarizes each release). These are the things only a person can see; anything they find is fixed in the next version. On each card, do the steps, then pick what happened. Start with card 1 and paste your answers after it, so I can run the command-line checks while you do the rest.",
+  "key": "pixelswitch-hand-checks-1-5-to-1-8-2026-09-29",
+  "heading": "PIXELSWITCH: HAND CHECKS FOR 1.5 TO 1.8 (2026-09-29)",
+  "eyebrow": "PixelSwitch · hand checks · versions 1.5 to 1.8",
+  "title": "One round of hand checks on 1.5 to 1.8",
+  "lede": "<strong>Each version installs itself through the updater (card 2): 1.6 is on the Beeco Mac, and 1.8 follows within about 6 hours of its release on 2026-09-29.</strong> 1.5 adds Manual only and thresholds below 50% (card 3). 1.6 stops auto-switch getting stuck on an account with no subscription (card 4). 1.7 (2026-09-29) says what happened when a reading fails, with a Retry button (card 6), and 1.8 (same day) moves you at your number to any account below it (card 5). Everything that can be checked automatically already passed (628 checks, and GitHub builds, signs and notarizes each release). These are the things only a person can see; anything they find is fixed in the next version. On each card, do the steps, then pick what happened. Start with card 1 and paste your answers after it, so I can run the command-line checks while you do the rest.",
   "questions": [
     {
       "id": "install",
@@ -261,13 +261,14 @@ var PAGE = {
     },
     {
       "id": "usedup",
-      "title": "Auto-switch leaves a used-up account (1.7)",
-      "what": "New in 1.7, the fix for the Beeco Mac: vkwok@gobeeco.com sat at 100% of its session while every other account was 92–99% of its week, and nothing moved. Needs <b>Version 1.7</b> in Settings → About on that Mac.",
-      "why": "Auto-switch only took an account 10 points under its threshold (88% or less at your 98%). Once the account you're on is used up, any account with a point of room now does. Nothing to set up: it happens the next time an account runs out.",
+      "title": "Auto-switch moves you at your number (1.8)",
+      "what": "New in 1.8, your answer on the switch-point page: at your threshold (98%), auto-switch moves you to any account below it. Needs <b>Version 1.8</b> in Settings → About on the Mac you check.",
+      "why": "Before, the other account had to be 10 points under (88% or less), so on the Beeco Mac's full week nothing moved until the session was empty. Nothing to set up: it happens the next time an account reaches your number.",
       "steps": [
-        "Settings → General → Auto-switch: under the no-subscription line, a new line reads <b>If the account you're using is used up (100% of its 5-hour or weekly limit), PixelSwitch moves you to any other account with at least a point of room under its own threshold, not only one 10 points under it.</b>",
-        "The next time the account you're on reaches <b>Session 0% left</b> (or Weekly 0% left), within about 5 minutes the orange ring moves by itself to the account with the most room, even when every other account is above 88%.",
-        "Tell me roughly when it happened and on which Mac, and I will read the log for the line <b>Rule exhausted</b>."
+        "Settings → General → Auto-switch: the long explanation says <b>switches to another account that is under its own threshold (at least a point under)</b>, and no longer mentions 10 points.",
+        "Settings → Accounts: hovering an account's threshold says it moves you to it only while it is at <b>97% or less</b> (for 98%).",
+        "The next time the account you're on reaches 98% (checked every 5 minutes, so 98–100%), the orange ring moves by itself to the account with the most room below 98%.",
+        "Tell me roughly when it happened and on which Mac, and I will read the log for the <b>Switching to</b> line and the percentage it moved at."
       ],
       "nothing": "Counted as not checked yet. Anything a check finds is fixed in the next version, which reaches you by itself.",
       "recommend": "Do it and tell me what you saw",

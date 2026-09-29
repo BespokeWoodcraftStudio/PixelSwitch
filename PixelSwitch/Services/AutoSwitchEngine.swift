@@ -19,9 +19,8 @@ enum AutoSwitchStrategy: String, CaseIterable, Codable, Sendable {
 /// Mirrors the proven design in `claude-swap` (threshold + hysteresis): when the
 /// active account's *binding window* (the higher of its 5h / weekly utilization)
 /// reaches ITS OWN threshold, pick a same-provider account that sits at least
-/// `hysteresisPct` below ITS OWN threshold (half its own threshold, for
-/// thresholds below 20%), so two accounts hovering at the line never
-/// ping-pong. An account on 0 (Manual only) is never switched to. Which eligible account comes first is the user's
+/// `hysteresisPct` (one point since 1.8) below ITS OWN threshold, so two
+/// accounts hovering at the line never ping-pong. An account on 0 (Manual only) is never switched to. Which eligible account comes first is the user's
 /// `AutoSwitchStrategy`. All guardrails that need state (cooldown, re-entrancy,
 /// verification) live in `AppState`; this stays a pure function.
 ///
@@ -43,8 +42,13 @@ enum AutoSwitchEngine {
     static let fableModelName = "Fable"
 
     /// How far below its own threshold a threshold-triggered target must sit,
-    /// in percentage points (half its threshold below 20%: see `ceiling`).
-    static let hysteresis: Double = 10
+    /// in percentage points (half its threshold below 2%: see `ceiling`).
+    /// 10 until 1.8. Founder, 2026-09-29: "If I set the limit to 98% or 99%
+    /// then it needs to switch to any account that is less than that number."
+    /// Readings are whole percentages, so a point under is "less than". Two
+    /// accounts still cannot ping-pong: you leave only at or over a threshold,
+    /// go only under one, and the 5-minute cooldown sits between switches.
+    static let hysteresis: Double = 1
 
     /// The highest use at which an account may be switched TO: `room` under
     /// its own threshold, or half the threshold when that is smaller, so a low
@@ -57,17 +61,11 @@ enum AutoSwitchEngine {
     }
 
     /// How far below its own threshold an early-drain target must sit on every
-    /// watched limit, in percentage points. Deliberately not the 10-point
-    /// hysteresis: the founder's example is an account with 5% left that
-    /// should still be used up before its week resets. Also the room a target
-    /// needs when the active account has no subscription (`.noSubscription`)
-    /// or is used up (`.exhausted`).
+    /// watched limit, in percentage points. The founder's example is an
+    /// account with 5% left that should still be used up before its week
+    /// resets. Equal to `hysteresis` since 1.8. Also the room a target
+    /// needs when the active account has no subscription (`.noSubscription`).
     static let drainMinimumRoom: Double = 1.0
-
-    /// The reading at which an account is used up: at 100% of its session or
-    /// week it cannot be used until that window resets, so the room a target needs
-    /// drops from the hysteresis to `drainMinimumRoom` (`.exhausted`).
-    static let usedUp: Double = 100
 
     /// The binding utilization for an account = max of the windows we watch.
     /// We watch the 5-hour (session) and 7-day (weekly-all) windows — the two
@@ -193,8 +191,8 @@ enum AutoSwitchEngine {
     ///   and never without the active account's weekly reset.
     /// - `.noSubscription`: at least `drainMinimumRoom` below its threshold on
     ///   session and weekly. Any account with room beats one that cannot be
-    ///   used at all, so the hysteresis does not apply; Fable is left to the
-    ///   ranking, which prefers accounts with Fable to spare.
+    ///   used at all; Fable is left to the ranking, which prefers accounts
+    ///   with Fable to spare.
     /// A threshold of 0 (Manual only) is never eligible, by any rule.
     static func eligibleUtilization(
         _ usage: UsageAPIResponse?,
@@ -216,9 +214,6 @@ enum AutoSwitchEngine {
             return drainEligibleUtilization(usage, threshold: threshold, activeWeeklyReset: activeWeeklyReset,
                                             drainWithin: drainWithin, watchFable: watchFable, asOf: now)
         case .noSubscription:
-            guard limit == .windows, let ceiling = Self.ceiling(threshold: threshold, room: drainMinimumRoom) else { return nil }
-            return eligibleUtilization(usage, limit: .windows, ceiling: ceiling, asOf: now)
-        case .exhausted:
             guard limit == .windows, let ceiling = Self.ceiling(threshold: threshold, room: drainMinimumRoom) else { return nil }
             return eligibleUtilization(usage, limit: .windows, ceiling: ceiling, asOf: now)
         }
@@ -336,22 +331,6 @@ enum AutoSwitchEngine {
                 activeWeeklyReset: nil, drainWithin: drainWithin, watchFable: watchFable, asOf: now
             )
             if !targets.isEmpty { return (limit, .threshold, targets) }
-            // Used up: at 100% of its session or week the active account cannot
-            // be used at all, so any account with a point of room beats it, as
-            // for an account with no subscription (founder, 2026-09-29:
-            // vkwok@gobeeco.com sat at 100% of its session while every other
-            // account was 92–99% of its week, none 10 points under the 98%
-            // default). Not for Fable: out of Fable, the other models still
-            // work, and a switch for a few points of Fable is pointless.
-            if limit == .windows, activeUtil >= Self.usedUp {
-                let usable = rankedTargets(
-                    active: active, candidates: candidates, usageByAccount: usageByAccount,
-                    isSwitchable: isSwitchable, isUnusable: isUnusable, threshold: threshold, hysteresisPct: hysteresisPct,
-                    limit: limit, trigger: .exhausted, strategy: strategy,
-                    activeWeeklyReset: nil, drainWithin: drainWithin, watchFable: watchFable, asOf: now
-                )
-                if !usable.isEmpty { return (limit, .exhausted, usable) }
-            }
         }
 
         guard !thresholdReached, !activeIsManualOnly, strategy == .resetsSoonest, drainEarly,
@@ -461,10 +440,11 @@ enum AutoSwitchEngine {
 extension AutoSwitchEngine {
     /// The rule that produced a plan: the active account reached its
     /// threshold, (Resets soonest only) another account's weekly quota is
-    /// about to reset unused, the active account has no active subscription
-    /// and cannot be used at all, or it is used up (100%) and no account is
-    /// the full hysteresis under its own threshold.
-    enum Trigger: String, Sendable { case threshold, drainEarly, noSubscription, exhausted }
+    /// about to reset unused, or the active account has no active
+    /// subscription and cannot be used at all. (1.7's `exhausted`, a fallback
+    /// at 100% for the old 10-point room, went in 1.8: with one point of room
+    /// the threshold rule already takes every account it could.)
+    enum Trigger: String, Sendable { case threshold, drainEarly, noSubscription }
 }
 
 /// Whether auto-switch also acts on the weekly Fable allowance. On by default;
@@ -576,8 +556,10 @@ enum AutoSwitchSettings {
                             drainEarly: Bool) -> (leaveAt: Double, arriveAt: Double, drainArriveAt: Double?)? {
         let rule = effectiveThreshold(own: own, defaultThreshold: defaultThreshold)
         guard let arriveAt = AutoSwitchEngine.ceiling(threshold: rule, room: AutoSwitchEngine.hysteresis) else { return nil }
+        // Only stated when it says something: since 1.8 both rules need the
+        // same point of room, so the early-switch number equals `arriveAt`.
         let drain = strategy == .resetsSoonest && drainEarly
-            ? AutoSwitchEngine.ceiling(threshold: rule, room: AutoSwitchEngine.drainMinimumRoom) : nil
+            ? AutoSwitchEngine.ceiling(threshold: rule, room: AutoSwitchEngine.drainMinimumRoom).flatMap { $0 > arriveAt ? $0 : nil } : nil
         return (rule, arriveAt, drain)
     }
 }

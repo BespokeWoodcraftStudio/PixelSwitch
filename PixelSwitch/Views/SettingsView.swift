@@ -119,13 +119,10 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Text("When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is at least 10 points under its own threshold (at or under half of it, for thresholds below 20%) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.")
+                    Text("When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is under its own threshold (at least a point under) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text("If the account you're using has no active subscription, PixelSwitch moves you right away to another account that still has room and is not Manual only.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("If the account you're using is used up (100% of its 5-hour or weekly limit), PixelSwitch moves you to any other account with at least a point of room under its own threshold, not only one 10 points under it.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

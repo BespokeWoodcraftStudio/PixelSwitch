@@ -4,7 +4,7 @@ import Foundation
 /// control API use, with the values it accepts. Pure: `SettingsStore` reads
 /// and writes the real values; this only knows their shape.
 ///
-/// The hysteresis (10 points) and the cooldown (300 s) are not settings, in
+/// The room a target needs (1 point since 1.8) and the cooldown (300 s) are not settings, in
 /// the window or here.
 enum SettingKey: String, CaseIterable, Sendable {
     case refreshInterval = "refreshInterval"
