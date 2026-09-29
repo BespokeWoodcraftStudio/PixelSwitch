@@ -6,8 +6,8 @@ Last updated 2026-09-29 (morning, PDT), after 1.7: auto-switch leaves a used-up 
 ## Current state
 
 - **Released: 1.7** (build 28, tag `v1.7`, CI run 36588489772), verified with `scripts/verify-release.sh v1.7`; the three new sentences are in the shipped app's strings (read from the mounted DMG with `plutil -p`). The Beeco Mac ran 1.6; at 15:18 UTC `pixelswitch update-check` opened its update window there (one click on Install), or it installs itself within about 6 hours.
-- **Branches:** `main` holds everything. `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only`, `no-subscription-switch` and `exhausted-switch-and-usage-errors` are fully merged and can be deleted.
-- **Tests:** `bash Tests/run-unit-tests.sh` gives 632/632. `bash scripts/typecheck.sh` is clean for the app and the CLI, and also runs the target-name guard.
+- **Branches:** `main` holds everything. `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only`, `no-subscription-switch`, `exhausted-switch-and-usage-errors` and `switch-at-threshold` are fully merged and can be deleted.
+- **Tests:** `bash Tests/run-unit-tests.sh` gives 628/628. `bash scripts/typecheck.sh` is clean for the app and the CLI, and also runs the target-name guard.
 - **Users:** the founder is the only one. Release through the updater, then hand-check (memory: sole user). Versions are two-part: 1.5, then 1.6, …, 2.0.
 
 | Version | What it added |
@@ -18,17 +18,17 @@ Last updated 2026-09-29 (morning, PDT), after 1.7: auto-switch leaves a used-up 
 | 1.5 | **Manual only (0%)** and per-account thresholds **1–100%**. Remote-control protocol 2 (`AccountInfo.manualOnly`). |
 | 1.6 | An active account whose usage request gets 403 ("OAuth authentication is currently not allowed for this organization", no active subscription) is left at the next refresh by rule `noSubscription`, cooldown or not, and is never a target. Decisions: `docs/decisions/2026-09-24-remote-control-answers.md`, last section. |
 | 1.7 | Rule `exhausted`: an active account at 100% of its session or week is left for any account a point under its own threshold when none is 10 points under. Usage errors in plain words (`UsageRequestError`), the last reading kept on a 5xx or no connection, **Retry** on the card, **Status** for a 5xx. |
+| 1.8 | Auto-switch moves you **at your number** to any account at least a point under its own threshold (`AutoSwitchEngine.hysteresis` 10 → 1), on session, weekly and Fable; 1.7's `exhausted` rule removed. The founder's answer on `docs/decisions/pixelswitch-switch-point-2026-09-29.html` (answered). |
 
 ## Waiting on the founder
 
-1. **Hand checks** (15 cards, one round, on 1.5, 1.6 and 1.7; card 4 is the no-subscription fix, cards 5 and 6 are 1.7): [docs/decisions/pixelswitch-hand-checks-2026-09-25.html](decisions/pixelswitch-hand-checks-2026-09-25.html). He pastes the Copy block back. Then:
+1. **Hand checks** (15 cards, one round, on 1.5 to 1.8; card 4 is the no-subscription fix, card 5 is 1.8's switch at your number, card 6 is 1.7's Retry): [docs/decisions/pixelswitch-hand-checks-2026-09-25.html](decisions/pixelswitch-hand-checks-2026-09-25.html). He pastes the Copy block back. Then:
    - record his answers verbatim in `docs/decisions/`;
    - mark the page answered;
    - fix any failure test-first and ship it as the next minor version.
 
    Regenerate the page with `python3 scripts/hand-checks/gen-hand-checks.py`, and render it with `node scripts/hand-checks/render-hand-checks.cjs <out-dir>`.
-2. **When auto-switch moves him (asked 2026-09-29):** [docs/decisions/pixelswitch-switch-point-2026-09-29.html](decisions/pixelswitch-switch-point-2026-09-29.html). His question: "if I set my switch number to 98% or 99%, it should switch on that number, shouldn't it?" Today the threshold starts the search, but a target must be 10 points under its own threshold, so on a full week the switch waits for 100% (1.7). Recommended: drop the gap, so at his number it moves to any account at least a point under its own threshold. That is the `exhausted` ceiling (`drainMinimumRoom`) used for `.threshold` too, then 1.8, tests first; the Settings sentence "at least 10 points under" and the `ceiling`/tooltip numbers change with it. If he says nothing, 1.7 stands. Regenerate: `python3 scripts/decisions/gen-switch-point.py`; render: `node scripts/decisions/render-decision-page.cjs <page> <out-dir> switch-point`.
-3. **Optional, his call:** a paid graphify refresh of this repo, estimated at about $2.38 to $8.27 by `~/.claude/graphify-smart/fleet-audit.py .`. Only the free AST update has been run.
+2. **Optional, his call:** a paid graphify refresh of this repo, estimated at about $2.38 to $8.27 by `~/.claude/graphify-smart/fleet-audit.py .`. Only the free AST update has been run.
 
 ## Automatic updates: proven, and 1.6 is the second run
 
@@ -46,6 +46,7 @@ Last updated 2026-09-29 (morning, PDT), after 1.7: auto-switch leaves a used-up 
 
 Both built the same day, on the founder's word. Decisions and his words, verbatim: `docs/decisions/2026-09-24-remote-control-answers.md`, last section.
 
+- **Superseded by 1.8 the same day:** the founder chose to drop the 10-point gap entirely, so the `exhausted` rule below was removed. Kept here for the history.
 - **The auto-switch bug (Beeco Mac).** vkwok@gobeeco.com sat at 100% of its session. Every other account was 92–99% of its week, none 10 points under the 98% default, so `AutoSwitchEngine.plan` returned nil and nothing was logged. New rule **`exhausted`**: when the 10-point rule finds nothing and the active account is at 100% of its session or week, any account a point under its own threshold is a target. Not for Fable. A stuck "threshold reached, nowhere to go" state is now logged once per change (`noteStayingPut`).
 - **The error text.** `UsageRequestError` (its own file, unit-tested; `ClaudeService.UsageError` is a typealias to it) maps 5xx → `server`, no reply → `network(offline:)`, other status → `unexpected`. Each has a plain sentence (`message`, also its `LocalizedError` text). `AppState.recordUsageFailure` is the one catch-all. A 5xx or network failure keeps the last reading, as a 429 does. The card shows **Retry** (`AppState.retryUsage`) and, for a 5xx, **Status** → status.claude.com.
 - **Reaching the Beeco Mac:** `ssh claadmin@100.125.33.35` (Tailscale, `claadmins-mac-mini`). Its log: `~/Library/Logs/PixelSwitch-app.log`. Its CLI: `/Applications/PixelSwitch.app/Contents/Helpers/pixelswitch` (`accounts`, `status`, `switch`).
