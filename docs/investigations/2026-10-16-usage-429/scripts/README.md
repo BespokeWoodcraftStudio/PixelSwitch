@@ -46,3 +46,10 @@ Run each script from its own folder, because they use relative paths.
 - `fitall.py`: the same rule over all five accounts, with and without counting profile 401s. With them it predicts all 49 429s.
 - `list16.py`: lists the usage, profile, switch and reconcile lines from 2026-10-15 19:40Z onward, for reading the
   founder's re-authentication and switch attempts in order.
+
+## Type-check helper
+
+- `typecheck-reordered.sh <repo-root>`: type-checks `PixelSwitch/` and `Shared/` with every file that uses SwiftUI
+  property-wrapper macros (`@State`, `@Binding`, `@Environment`, `#Preview` and so on) sorted last. On Swift 6.4 Command Line
+  Tools `scripts/typecheck.sh` stops at the first SwiftUIMacros error in `PixelSwitchApp.swift`, so files after it are never
+  checked. This order checks all non-view files first. It is a stand-in; the real compile proof is the CI build.
