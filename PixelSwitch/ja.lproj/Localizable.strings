@@ -139,7 +139,8 @@
 "Switched to %@, but the Claude CLI is authenticating via %@ instead of the stored login, so it will not use this account." = "%1$@ に切り替えましたが、Claude CLI は保存されたログインではなく %2$@ で認証しているため、このアカウントは使用されません。";
 "Token expired. Switch to refresh." = "トークンが期限切れです。切り替えて更新してください。";
 "Token expired. Switch to this account to refresh." = "トークンが期限切れです。このアカウントに切り替えて更新してください。";
-"API Rate Limited. Try again later." = "API レート制限中。後でもう一度お試しください。";
+"Usage reading paused until %@. Claude Code itself is not affected." = "使用量の取得を %@ まで一時停止しています。Claude Code 自体には影響ありません。";
+"Waiting for Claude Code to renew this login. It renews the next time a session runs." = "Claude Code がこのログインを更新するのを待っています。次にセッションが実行されたときに更新されます。";
 "Could not fetch usage: %@" = "使用量を取得できませんでした：%@";
 
 /* Promo */

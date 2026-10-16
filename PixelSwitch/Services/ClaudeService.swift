@@ -16,6 +16,12 @@ struct DetectedClaudePath: Hashable, Identifiable {
 final class ClaudeService: @unchecked Sendable {
     static let shared = ClaudeService()
 
+    /// Decides whether an access token may be sent to Anthropic at all (usage,
+    /// profile). AppState asks it before every usage request; the profile
+    /// lookups below ask it themselves, so no caller can forget. See
+    /// `UsageRequestGuard`.
+    let requestGuard = UsageRequestGuard()
+
     private let lock = NSLock()
     private var _claudePath: String
     /// Monotonic counter to detect out-of-order setPath completions.
@@ -282,7 +288,17 @@ final class ClaudeService: @unchecked Sendable {
     /// The account an access token belongs to, from the API
     /// (`/api/oauth/profile`), or nil if the token is expired or the call fails.
     /// This is the only proof of ownership; see `CredentialOwnership`.
-    func accountIdentity(forAccessToken accessToken: String) async -> AccountIdentity? {
+    ///
+    /// Nothing is sent for a token the guard knows is dead (expired by its
+    /// `expiresAt`, refused with a 401 before, or inside a 429 park or
+    /// cool-down): the profile endpoint counts refused calls the same way the
+    /// usage endpoint does. A 401 or 429 from here is recorded for `account`
+    /// (nil when the token's owner is not yet known).
+    func accountIdentity(forAccessToken accessToken: String, expiresAt: Double? = nil, account: UUID? = nil) async -> AccountIdentity? {
+        guard requestGuard.mayUse(accessToken: accessToken, expiresAt: expiresAt) else {
+            log.info("[accountIdentity] Not asking: token \(TokenFingerprint.forLog(TokenFingerprint.of(accessToken))) is expired, was refused, or is cooling down")
+            return nil
+        }
         guard let url = URL(string: "https://api.anthropic.com/api/oauth/profile") else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
@@ -290,15 +306,22 @@ final class ClaudeService: @unchecked Sendable {
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let http = response as? HTTPURLResponse
+            let status = http?.statusCode ?? 0
+            if status == 401 {
+                requestGuard.recordRejected(account: account, accessToken: accessToken)
+            } else if status == 429 {
+                let retryAfter = http?.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
+                if let account { requestGuard.recordRateLimited(account: account, accessToken: accessToken, retryAfter: retryAfter) }
+            }
             guard status == 200,
                   let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-                  let account = object["account"] as? [String: Any] else {
+                  let profile = object["account"] as? [String: Any] else {
                 log.warning("[accountIdentity] Profile lookup failed (HTTP \(status))")
                 return nil
             }
-            let uuid = account["uuid"] as? String
-            let email = account["email"] as? String ?? account["email_address"] as? String
+            let uuid = profile["uuid"] as? String
+            let email = profile["email"] as? String ?? profile["email_address"] as? String
             guard uuid != nil || email != nil else {
                 log.warning("[accountIdentity] Profile response names no account")
                 return nil
@@ -449,7 +472,7 @@ final class ClaudeService: @unchecked Sendable {
            let fresh = freshCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }) {
             if CredentialOwnership.sameGrant(verified, fresh) {
                 provenFresh = true
-            } else if let identity = await accountIdentity(forAccessToken: fresh.accessToken),
+            } else if let identity = await accountIdentity(forAccessToken: fresh.accessToken, expiresAt: fresh.expiresAt, account: owner.id),
                       CredentialOwnership.detailsBelong(uuid: identity.uuid, email: identity.email,
                                                         toOwnerUuid: liveOwnerIdentity?.uuid, ownerEmail: owner.email) {
                 // The CLI renewed the login during the checks; the API confirms it is
@@ -591,7 +614,7 @@ final class ClaudeService: @unchecked Sendable {
         let fileUuid = oauthAccount["accountUuid"]?.value as? String
         let fileEmail = oauthAccount["emailAddress"]?.value as? String
         if let login = CredentialOwnership.login(fromCredential: token),
-           let identity = await accountIdentity(forAccessToken: login.accessToken) {
+           let identity = await accountIdentity(forAccessToken: login.accessToken, expiresAt: login.expiresAt, account: account.id) {
             guard identity.email?.caseInsensitiveCompare(account.email) == .orderedSame else {
                 log.error("[capture] REFUSED: the live login belongs to \(identity.email ?? "another account"), not \(account.email)")
                 return false

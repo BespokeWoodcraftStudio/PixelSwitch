@@ -43,8 +43,10 @@ swiftc -swift-version 6 \
   Tests/UnitTests/ControlTests.swift \
   PixelSwitch/Services/AutoUpdatePolicy.swift \
   Tests/UnitTests/AutoUpdateTests.swift \
+  PixelSwitch/Services/UsageRequestGuard.swift \
   PixelSwitch/Services/UsageRequestError.swift \
   Tests/UnitTests/UsageErrorTests.swift \
+  Tests/UnitTests/UsageGuardTests.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
 "$OUT/pixelswitch-unit-tests"

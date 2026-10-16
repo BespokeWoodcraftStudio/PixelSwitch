@@ -83,11 +83,24 @@ enum UsageRequestError: Error, Equatable {
             return String(localized: "Unexpected reply from Anthropic (HTTP \(status)).", bundle: L10n.bundle)
         case .decode:
             return String(localized: "Anthropic sent usage data PixelSwitch couldn't read.", bundle: L10n.bundle)
-        case .rateLimited:
-            return String(localized: "API Rate Limited. Try again later.", bundle: L10n.bundle)
+        case .rateLimited(let retryAfter):
+            // Never "API Rate Limited. Try again later.": a 429 on the usage
+            // lookup says nothing about Claude Code, and the card says when
+            // the app will ask again.
+            let wait = min(max(retryAfter ?? UsageRequestGuard.defaultPark, UsageRequestGuard.shortestPark), UsageRequestGuard.longestPark)
+            return Self.pausedMessage(until: Date().addingTimeInterval(wait))
         case .forbidden:
             return String(localized: "No active subscription on this account (OAuth not allowed).", bundle: L10n.bundle)
         }
+    }
+
+    /// What the card says while the app waits out a 429 on the usage lookup
+    /// (founder, 2026-10-16: the old "API Rate Limited. Try again later."
+    /// sat over cards whose Claude Code was working). `until` is shown in the
+    /// reader's local short time.
+    static func pausedMessage(until: Date) -> String {
+        let time = until.formatted(date: .omitted, time: .shortened)
+        return String(localized: "Usage reading paused until \(time). Claude Code itself is not affected.", bundle: L10n.bundle)
     }
 
     /// The link a server outage offers.

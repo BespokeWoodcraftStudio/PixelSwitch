@@ -139,7 +139,8 @@
 "Switched to %@, but the Claude CLI is authenticating via %@ instead of the stored login, so it will not use this account." = "已切换到 %1$@，但 Claude CLI 正在通过 %2$@ 认证，而不是使用已保存的登录，因此不会使用此账号。";
 "Token expired. Switch to refresh." = "令牌已过期。切换以刷新。";
 "Token expired. Switch to this account to refresh." = "令牌已过期。切换到此账户以刷新。";
-"API Rate Limited. Try again later." = "API 请求频率受限。请稍后重试。";
+"Usage reading paused until %@. Claude Code itself is not affected." = "用量读取已暂停，将于 %@ 恢复。Claude Code 本身不受影响。";
+"Waiting for Claude Code to renew this login. It renews the next time a session runs." = "正在等待 Claude Code 更新此登录。下次运行会话时会自动更新。";
 "Could not fetch usage: %@" = "无法获取用量：%@";
 
 /* Promo */
