@@ -959,7 +959,7 @@ final class AppState: ObservableObject {
                     identity = await claudeService.accountIdentity(forAccessToken: renewedLogin.accessToken, expiresAt: renewedLogin.expiresAt, account: account.id)
                 }
                 return nil
-            case .storeUnavailable:
+            case .storeUnavailable, .unreachable:
                 // A blip (network, rate limit, locked Keychain): nothing was
                 // spent, so go ahead as before; Claude Code renews it on first use.
                 log.warning("[switchTo] Could not renew \(account.email)'s expired login right now; switching anyway")
@@ -982,13 +982,22 @@ final class AppState: ObservableObject {
         case .request:
             identity = await claudeService.accountIdentity(forAccessToken: login.accessToken, expiresAt: login.expiresAt, account: account.id)
             // A 401 just now means the token was refused: renew it and ask again.
-            if identity == nil, requestGuard.decision(for: account.id, isActive: false, login: login) == .refreshFirst {
+            // The guard has already put a cool-down on it, so `decision` would
+            // answer "cooling down"; ask what it recorded instead.
+            if identity == nil, requestGuard.wasRejected(account: account.id, accessToken: login.accessToken) {
                 if let problem = await renewAndIdentify() { return .failure(problem) }
             }
         case .parked, .coolingDown, .waitForClaudeCode:
-            // Not asking now; the lineage check below still refuses a login
-            // that is also saved under another account.
-            log.info("[switchTo] Not asking the API about \(account.email)'s saved login right now; checking lineage only")
+            // Not asking the usage or profile endpoint now. An expired or
+            // refused login can still be renewed (a POST to the token endpoint,
+            // outside both limits), as it always was for an expired target.
+            if login.isExpired || requestGuard.wasRejected(account: account.id, accessToken: login.accessToken) {
+                if let problem = await renewAndIdentify() { return .failure(problem) }
+            } else {
+                // The lineage check below still refuses a login that is also
+                // saved under another account.
+                log.info("[switchTo] Not asking the API about \(account.email)'s saved login right now; checking lineage only")
+            }
         }
 
         if let identity {
@@ -1430,6 +1439,11 @@ final class AppState: ObservableObject {
             // cannot be renewed from here.
             showResign(for: account)
             return nil
+        case .unreachable:
+            // The token endpoint gave no verdict (offline, a 5xx, a 429): the
+            // same honest line the usage request gives, and the reading stays.
+            recordUsageFailure(UsageRequestError.network(offline: false), for: account)
+            return nil
         case .storeUnavailable:
             // Nothing was spent and nothing is lost; this heals by itself on a
             // later cycle. Keep the stale sample.
@@ -1593,9 +1607,9 @@ final class AppState: ObservableObject {
             let live = keychain.readClaudeToken().flatMap { CredentialOwnership.login(fromCredential: $0) }
             let others = (savedLogins() ?? [:]).filter { $0.key != accountId }
             let isLive = live.map { CredentialOwnership.sameGrant($0, login) } ?? false
-            if isLive || !CredentialOwnership.lineageMatches(login, in: others).isEmpty {
+            if let refusal = BackupRefreshOutcome.localRefusal(isLive: isLive, sharesLineage: !CredentialOwnership.lineageMatches(login, in: others).isEmpty) {
                 log.error("[refreshBackup] \(account.id)'s saved login is the same grant as \(isLive ? "the live login" : "another account's"); not refreshing it")
-                return .sameGrantAsAnotherLogin
+                return refusal
             }
         }
 
@@ -1639,7 +1653,7 @@ final class AppState: ObservableObject {
 
         case .transient:
             log.warning("[refreshBackup] Refresh attempt for \(account.id) failed transiently (network/server); will retry")
-            return .storeUnavailable
+            return .unreachable
         }
     }
 
@@ -1665,6 +1679,9 @@ final class AppState: ObservableObject {
                 showNotice(decision, for: account)
             }
         }
+        // `decision` clears a flag that had no token when the account turned out
+        // to be the active one; keep the saved copy in step.
+        persistNeedsReauth()
 
         // Pick this cycle's targets: the active account (when it may be asked)
         // + one other in round-robin order. An account whose credential just

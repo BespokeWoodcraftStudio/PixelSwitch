@@ -195,7 +195,7 @@ import Foundation
     do {
         let flags: [(BackupRefreshOutcome, Bool)] = [
             (.grantRejected, true), (.rotationLost, true), (.belongsToAnotherAccount("x@y.z"), true),
-            (.sameGrantAsAnotherLogin, false), (.noBackup, false), (.storeUnavailable, false), (.refreshed("{}"), false),
+            (.sameGrantAsAnotherLogin, false), (.unreachable, false), (.noBackup, false), (.storeUnavailable, false), (.refreshed("{}"), false),
         ]
         check(flags.allSatisfy { $0.0.requiresReauth == $0.1 }, "guard: only invalid_grant, a lost rotation and another account's login mean sign in again")
         check(!BackupRefreshOutcome.sameGrantAsAnotherLogin.requiresReauth,
@@ -205,6 +205,56 @@ import Foundation
         // What a same-grant refusal does to the guard: nothing at all.
         check(g.decision(for: id, isActive: false, login: login("EXPIRED", expiresIn: -hour), now: t0) == .refreshFirst && !g.isNeedsReauth(id),
               "guard: an expired saved login is renewable, not flagged")
+    }
+
+    // MARK: a flag with no token never takes the live login (review finding P1, 2026-10-16)
+
+    do {
+        // The flag came from a removed backup (no token). The account later
+        // becomes the active one through a sign-in PixelSwitch never hooked.
+        let id = UUID()
+        let g = UsageRequestGuard()
+        g.markNeedsReauth(account: id, accessToken: nil)
+        check(g.decision(for: id, isActive: true, login: login("LIVE", expiresIn: 8 * hour), now: t0) == .request,
+              "guard: a no-token needs-reauth flag plus an active account with a valid token gives request")
+        check(!g.isNeedsReauth(id), "guard: ...and the flag is gone, so it is not saved again")
+        check(g.decision(for: id, isActive: true, login: login("LIVE", expiresIn: 8 * hour), now: t0.addingTimeInterval(4 * hour)) == .request,
+              "guard: ...and four hours later the live login is still read")
+        // The same after a relaunch (restored flag, no token).
+        let r = UsageRequestGuard(needsReauth: [id])
+        check(r.decision(for: id, isActive: true, login: login("LIVE", expiresIn: 8 * hour), now: t0) == .request,
+              "guard: a restored flag does not latch onto the active account's live token")
+        // A saved login still adopts the first token it sees, then clears on a change.
+        let b = UsageRequestGuard(needsReauth: [id])
+        check(b.decision(for: id, isActive: false, login: login("DEAD", expiresIn: -hour), now: t0) == .needsReauth,
+              "guard: a restored flag still holds a saved login")
+        check(b.decision(for: id, isActive: false, login: login("NEW", expiresIn: 8 * hour), now: t0) == .request,
+              "guard: ...until that saved login changes")
+        // A flag tied to a token keeps holding the active account on that very token.
+        let t = UsageRequestGuard()
+        t.markNeedsReauth(account: id, accessToken: "LIVE")
+        check(t.decision(for: id, isActive: true, login: login("LIVE", expiresIn: 8 * hour), now: t0) == .needsReauth,
+              "guard: a flag tied to the token it was raised on still holds")
+    }
+
+    // MARK: the local same-grant refusal, and the rejected-token question the switch asks
+
+    do {
+        check(BackupRefreshOutcome.localRefusal(isLive: true, sharesLineage: false) == .sameGrantAsAnotherLogin
+              && BackupRefreshOutcome.localRefusal(isLive: false, sharesLineage: true) == .sameGrantAsAnotherLogin,
+              "guard: the same grant as the live login or another account's is refused locally as sameGrantAsAnotherLogin")
+        check(BackupRefreshOutcome.localRefusal(isLive: false, sharesLineage: false) == nil,
+              "guard: an own grant is not refused locally")
+        check(BackupRefreshOutcome.localRefusal(isLive: true, sharesLineage: true)?.requiresReauth == false,
+              "guard: the local refusal never means sign in again")
+        check(!BackupRefreshOutcome.unreachable.requiresReauth, "guard: an unreachable token endpoint does not flag the account")
+        let g = UsageRequestGuard()
+        let id = UUID()
+        g.recordRejected(account: id, accessToken: "T", now: t0)
+        check(g.wasRejected(account: id, accessToken: "T") && !g.wasRejected(account: id, accessToken: "U"),
+              "guard: after a 401 the switch can tell the token was refused")
+        check(g.decision(for: id, isActive: false, login: login("T", expiresIn: 5 * hour), now: t0) != .refreshFirst,
+              "guard: ...even though decision() answers cooling down, which is why the switch asks wasRejected")
     }
 
     // MARK: the measured histories, replayed

@@ -104,6 +104,11 @@ final class UsageRequestGuard: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let fingerprint = TokenFingerprint.of(login.accessToken)
         var state = states[account] ?? State()
+        // The live login is Claude Code's own, never the saved login a flag
+        // was raised about. A flag that holds no token (its backup was removed,
+        // or it was restored after a relaunch) must not adopt the live token
+        // as the dead one: it goes, and the live login is judged on its own.
+        if isActive, state.needsReauth, state.needsReauthFingerprint == nil { state.needsReauth = false }
         Self.dropWhatIsNotAboutThisToken(&state, fingerprint: fingerprint)
         states[account] = state
 
@@ -136,6 +141,14 @@ final class UsageRequestGuard: @unchecked Sendable {
             if let cooldown = state.cooldown, cooldown.fingerprint == fingerprint, cooldown.until > now { return false }
         }
         return true
+    }
+
+    /// Whether this exact token already got a 401 for this account. Lets a
+    /// caller that just saw a lookup fail tell "refused" from a blip, without
+    /// asking `decision` (which a cool-down answers first).
+    func wasRejected(account: UUID, accessToken: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return states[account]?.rejectedFingerprint == TokenFingerprint.of(accessToken)
     }
 
     /// Rule b: an `expiresAt` (milliseconds since 1970) that is known and past,
@@ -328,6 +341,10 @@ enum BackupRefreshOutcome: Equatable {
     /// Nothing was sent and the server said nothing, so the account is healthy
     /// as far as anyone knows and is NOT flagged `needsReauth`.
     case sameGrantAsAnotherLogin
+    /// The refresh request never got a verdict: no connection, a timeout, a 5xx
+    /// or a 429 from the token endpoint. Nothing was spent; the card keeps its
+    /// last reading and says Anthropic could not be reached.
+    case unreachable
     /// No stored backup exists for this account at all.
     case noBackup
     /// The store cannot be read or written right now (or the network failed).
@@ -350,7 +367,14 @@ enum BackupRefreshOutcome: Equatable {
     var requiresReauth: Bool {
         switch self {
         case .grantRejected, .rotationLost, .belongsToAnotherAccount: return true
-        case .refreshed, .sameGrantAsAnotherLogin, .noBackup, .storeUnavailable: return false
+        case .refreshed, .sameGrantAsAnotherLogin, .unreachable, .noBackup, .storeUnavailable: return false
         }
+    }
+
+    /// PixelSwitch's own refusal to spend a refresh token, decided before any
+    /// request: the saved login is the same grant as the live login or as
+    /// another account's. Never a server verdict, so never `requiresReauth`.
+    static func localRefusal(isLive: Bool, sharesLineage: Bool) -> BackupRefreshOutcome? {
+        (isLive || sharesLineage) ? .sameGrantAsAnotherLogin : nil
     }
 }
