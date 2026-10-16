@@ -31,7 +31,7 @@ Last updated 2026-10-16 (PDT), after 1.9: PixelSwitch stops causing the usage 42
    - fix any failure test-first and ship it as the next minor version.
 
    Regenerate the page with `python3 scripts/hand-checks/gen-hand-checks.py`, and render it with `node scripts/hand-checks/render-hand-checks.cjs <out-dir>`.
-2. **Optional, his call:** a paid graphify refresh of this repo, estimated at about $2.38 to $8.27 by `~/.claude/graphify-smart/fleet-audit.py .`. Only the free AST update has been run.
+2. **Optional, his call:** a paid graphify refresh of this repo, estimated at $3.10 to $10.43 (163 files would be sent) by `~/.claude/graphify-smart/fleet-audit.py .` on 2026-10-16. Only the free AST update has been run (latest 2026-10-16 after 1.9: 2,325 nodes, 5,271 edges).
 
 ## Automatic updates: proven, and 1.6 is the second run
 
