@@ -42,3 +42,6 @@ that file for the full entry. Start here to get up to speed on the project.
 - [WL-2026-09-29-002](./2026-09-29.md) — 1.7: auto-switch leaves a used-up account (Beeco bug); usage errors in plain words with Retry; released and verified — _fix/done_
 - [WL-2026-09-29-003](./2026-09-29.md) — Question page: should auto-switch always move at the founder's number (drop the 10-point gap)? — _decision/wip_
 - [WL-2026-09-29-004](./2026-09-29.md) — 1.8: auto-switch moves at the founder's number to any account under its own threshold (gap 10 → 1); released and verified — _feature/done_
+
+## 2026-10-16
+- [WL-2026-10-16-001](./2026-10-16.md) — 1.9: the 'API Rate Limited' banner was PixelSwitch resending refused logins; diagnosed, fixed, released and verified — _fix/done_
