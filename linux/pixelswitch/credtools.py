@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .finite import finite_number
-from .logins import live_login_changed, login_problem
+from .logins import live_login_changed, login_problem  # noqa: F401  (live_login_changed is re-exported)
 
 
 def unusable_reason(credential: "str | None") -> str | None:

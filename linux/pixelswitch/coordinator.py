@@ -38,7 +38,7 @@ from .accounts import (
     with_legacy_threshold, with_window_thresholds,
 )
 from .claude_cli import AuthStatus, ClaudeCli, ClaudeError
-from .claude_login import ClaudeLogin, HeldRefresh, LiveLoginBusy, LockLost, LoginWriteError, WRITE_LOCK_WAIT_SECONDS
+from .claude_login import ClaudeLogin, HeldRefresh, LiveLoginBusy, LockLost, LoginWriteError
 from .claude_service import ClaudeService, Identity
 from .credtools import gate_target_problem, is_usable_login, live_login_changed, unusable_reason
 from .logfile import CategoryLog, Log

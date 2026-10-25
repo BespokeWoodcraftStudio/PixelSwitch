@@ -7,7 +7,6 @@ import os
 import shutil
 import socket
 import tempfile
-import threading
 import time
 import unittest
 from unittest import mock

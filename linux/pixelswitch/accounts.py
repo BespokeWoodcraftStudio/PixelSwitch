@@ -17,7 +17,6 @@ seconds since 2001-01-01, and nothing in the core reads it.
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -29,7 +28,6 @@ from .engine import (
     window_value,
 )
 from .finite import finite_number
-from .usage_model import is_number
 
 PRIORITY_RANGE = (1, 99)
 

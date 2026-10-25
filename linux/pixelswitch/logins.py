@@ -12,7 +12,6 @@ reads a file, and no message or exception text ever carries a token.
 from __future__ import annotations
 
 import json
-import math
 import time
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping

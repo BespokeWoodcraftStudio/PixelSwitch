@@ -17,11 +17,10 @@ from pixelswitch.coordinator import (
     ActionError, BUSY_MESSAGE, LIVE_CHANGED_MESSAGE, LIVE_NOT_SAVED_MESSAGE, LIVE_UNREADABLE_MESSAGE,
     NO_ACCOUNTS_MESSAGE, SHUTTING_DOWN_MESSAGE,
 )
-from pixelswitch.protocol import ControlError
 from pixelswitch.stores import BackupStore
 from pixelswitch.usage_guard import fingerprint_of
 
-from .lb_support import Rig, credential_text, read_file, read_json, wait_for
+from .lb_support import Rig, credential_text, read_file, read_json
 from .mock_api import R, fabricated
 
 SENTENCE = removal.REFUSAL_SENTENCE
@@ -576,9 +575,13 @@ class ShutdownTests(unittest.TestCase):
 
     def test_no_renewal_starts(self):
         rig, app, a, b = self.build()
+        saves = []
+        real_save = app.backups.save
+        app.backups.save = lambda *args, **kw: (saves.append(1), real_save(*args, **kw))[1]
         app.begin_shutdown()
         self.assertEqual(app.refresh_backup_in_place(app.account_by_id(b.id)).kind, "unreachable")
         self.assertEqual(rig.api.calls_to("token"), [])
+        self.assertEqual(saves, [], "not even the writability probe before a renewal")
 
     def test_no_usage_request_starts(self):
         rig, app, a, b = self.build()
@@ -710,6 +713,34 @@ class StateRaceTests(unittest.TestCase):
         self.assertEqual(app.account_by_id(b.id).custom_label, "mine")
         self.assertEqual(app.active_account().id, "NEW")
         self.assertEqual([r["id"] for r in read_json(rig.paths.accounts) if r.get("isActive")], ["NEW"])
+
+
+class ReadModifyWriteTests(unittest.TestCase):
+    def test_a_change_that_reads_the_list_cannot_be_overtaken_by_another_writer(self):
+        """The list is read, changed and installed under ONE lock: while the label change is still
+        working on the list it read, a sign-in's new account waits, and neither is lost."""
+        rig = Rig(self)
+        a = rig.seed_account("a@example.invalid", active=True)
+        b = rig.seed_account("b@example.invalid")
+        app = rig.build()
+        inside = threading.Event()
+
+        def slow_label(current):
+            inside.set()
+            time.sleep(0.3)                                   # still holding the list it read
+            return [replace(x, custom_label="mine") if x.id == b.id else x for x in current], True
+
+        newcomer = Account(id="NEW", email="new@example.invalid", display_name="N")
+        first = threading.Thread(target=lambda: app._modify_accounts(slow_label))
+        first.start()
+        inside.wait(2)
+        second = threading.Thread(target=lambda: app._modify_accounts(lambda current: ([*current, newcomer], True)))
+        second.start()
+        first.join(5)
+        second.join(5)
+        self.assertEqual(app.account_by_id(b.id).custom_label, "mine")
+        self.assertIsNotNone(app.account_by_id("NEW"), "the new account was not overwritten by the older list")
+        self.assertEqual({r["id"] for r in read_json(rig.paths.accounts)}, {a.id, b.id, "NEW"})
 
 
 class GateWaitTests(unittest.TestCase):

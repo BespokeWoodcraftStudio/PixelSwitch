@@ -590,10 +590,7 @@ def phase_removal(work: str) -> None:
     write_accounts(rig)
     fsio.atomic_write(rig.paths.settings, json.dumps({"claudeBinaryPathPreference": rig.stub}))
     good = read_json(rig.paths.backups)
-    broken = dict(good)
-    for seed in (b, c):   # both saved logins are dead (blank accessToken): no fallback can work
-        broken[seed.id] = {"token": json.dumps({"claudeAiOauth": {"accessToken": "", "refreshToken": "r", "expiresAt": 9_999_999_999_999}}),
-                           "oauthAccount": seed.oauth_account}
+    broken = {key: value for key, value in good.items() if key == a.id}   # bob's and carol's saved logins are gone
     fsio.atomic_write(rig.paths.backups, json.dumps(broken))
     daemon = Daemon(rig, os.path.join(rig.tmp, "xdg"))
     try:
@@ -608,14 +605,16 @@ def phase_removal(work: str) -> None:
               wait_for(lambda: daemon.call("status.get").get("activeAccountEmail") is None, 60))
         events = [e for e in read_events(watcher, 3) if e["type"] == "error"]
         check("the last failure is shown as an error event",
-              bool(events) and "has expired and could not be renewed" in events[-1]["data"]["message"], str(events))
+              bool(events) and events[-1]["data"]["message"].startswith("No stored credentials for"), str(events))
         remaining = daemon.call("accounts.list")["accounts"]
         check("two accounts remain and none is active", len(remaining) == 2 and not any(x["isActive"] for x in remaining))
         record = os.path.join(rig.paths.state_dir, "removed-logins.json")
         check("the removed account's login is remembered as fingerprints only, in a 0600 file",
               os.path.exists(record) and mode(record) == 0o600 and a.refresh not in open(record).read()
               and a.access not in open(record).read() and len(read_json(record)) >= 1)
-        fsio.atomic_write(rig.paths.backups, json.dumps(good))   # bob signs in again
+        restored = read_json(rig.paths.backups)
+        restored[b.id] = good[b.id]
+        fsio.atomic_write(rig.paths.backups, json.dumps(restored))   # bob's saved login is back
         switched = daemon.error_of("accounts.switch", {"account": "bob@example.invalid"})
         check("a switch with no active account is allowed (the live login is the removed account's) and succeeds",
               switched is None, str(switched))
