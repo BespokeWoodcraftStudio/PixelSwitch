@@ -150,8 +150,17 @@ private func withScratchDefaults(_ body: (UserDefaults) -> Void) {
           "split: 0, a value that rounds to 0, a negative and NaN are refused")
     check(AutoSwitchSettings.applyingWindowEdits(to: seventy, session: .set(0.5), weekly: .leave)?.sessionThreshold == 1
           && AutoSwitchSettings.applyingWindowEdits(to: seventy, session: .set(100.4), weekly: .leave)?.sessionThreshold == 100
-          && AutoSwitchSettings.applyingWindowEdits(to: seventy, session: .set(150), weekly: .leave)?.sessionThreshold == 100,
-          "split: 0.5 rounds up to 1, 100.4 is 100, and 150 stops at 100")
+          && AutoSwitchSettings.applyingWindowEdits(to: seventy, session: .set(99.5), weekly: .leave)?.sessionThreshold == 100,
+          "split: 0.5 rounds up to 1, 100.4 and 99.5 round to 100")
+    check(AutoSwitchSettings.applyingWindowEdits(to: seventy, session: .set(150), weekly: .leave) == nil
+          && AutoSwitchSettings.applyingWindowEdits(to: seventy, session: .leave, weekly: .set(100.5)) == nil
+          && AutoSwitchSettings.applyingWindowEdits(to: seventy, session: .set(60), weekly: .set(101)) == nil
+          && AutoSwitchSettings.applyingWindowEdits(to: seventy, session: .set(.infinity), weekly: .leave) == nil,
+          "split: a window value above 100 once rounded is refused (spec 4), never clamped, and refuses the whole write")
+    check(AutoSwitchSettings.validWindowWrite(1) == 1 && AutoSwitchSettings.validWindowWrite(100) == 100 && AutoSwitchSettings.validWindowWrite(49.6) == 50
+          && AutoSwitchSettings.validWindowWrite(0.4) == nil && AutoSwitchSettings.validWindowWrite(100.5) == nil
+          && AutoSwitchSettings.validWindowWrite(-3) == nil && AutoSwitchSettings.validWindowWrite(.nan) == nil,
+          "split: the write-side check accepts a whole number from 1 to 100 once rounded and nothing else")
     check(AutoSwitchSettings.applyingWindowEdits(to: seventy, session: .set(45), weekly: .set(0)) == nil,
           "split: one bad number refuses the whole write")
 
@@ -197,9 +206,19 @@ private func withScratchDefaults(_ body: (UserDefaults) -> Void) {
         check(AutoSwitchSettings.setDefaultThreshold(.session, to: 90.4, in: defaults)
               && AutoSwitchSettings.storedThreshold(forKey: session, in: defaults) == 90,
               "writers: a session default is stored as a whole number")
-        check(AutoSwitchSettings.setDefaultThreshold(.weekly, to: 20, in: defaults)
+        check(AutoSwitchSettings.setDefaultThreshold(.weekly, to: 50, in: defaults)
               && AutoSwitchSettings.storedThreshold(forKey: weekly, in: defaults) == 50,
-              "writers: a weekly default stays within 50–100")
+              "writers: 50 is the lowest weekly default")
+        check(!AutoSwitchSettings.setDefaultThreshold(.weekly, to: 20, in: defaults)
+              && !AutoSwitchSettings.setDefaultThreshold(.weekly, to: 101, in: defaults)
+              && !AutoSwitchSettings.setDefaultThreshold(.session, to: 49.4, in: defaults)
+              && AutoSwitchSettings.storedThreshold(forKey: weekly, in: defaults) == 50
+              && AutoSwitchSettings.storedThreshold(forKey: session, in: defaults) == 90,
+              "writers: a default outside 50–100 is refused and nothing is stored, not clamped")
+        check(AutoSwitchSettings.setDefaultThreshold(.session, to: 49.6, in: defaults)
+              && AutoSwitchSettings.storedThreshold(forKey: session, in: defaults) == 50,
+              "writers: a default that rounds into 50–100 is stored as that whole number")
+        AutoSwitchSettings.setDefaultThreshold(.session, to: 90, in: defaults)
         check(!AutoSwitchSettings.setDefaultThreshold(.weekly, to: .nan, in: defaults)
               && AutoSwitchSettings.storedThreshold(forKey: weekly, in: defaults) == 50,
               "writers: a default that is not a number writes nothing")
@@ -214,6 +233,11 @@ private func withScratchDefaults(_ body: (UserDefaults) -> Void) {
         check(!AutoSwitchSettings.setBaseThreshold(.infinity, in: defaults)
               && AutoSwitchSettings.storedThreshold(forKey: AutoSwitchSettings.thresholdKey, in: defaults) == 97,
               "writers: a base that is not finite writes nothing")
+        AutoSwitchSettings.setDefaultThreshold(.weekly, to: 60, in: defaults)
+        check(!AutoSwitchSettings.setBaseThreshold(30, in: defaults) && !AutoSwitchSettings.setBaseThreshold(120, in: defaults)
+              && AutoSwitchSettings.storedThreshold(forKey: AutoSwitchSettings.thresholdKey, in: defaults) == 97
+              && AutoSwitchSettings.storedThreshold(forKey: weekly, in: defaults) == 60,
+              "writers: a base outside 50–100 is refused, and the stored base and window defaults are untouched")
     }
 }
 
@@ -306,32 +330,37 @@ private func withScratchDefaults(_ body: (UserDefaults) -> Void) {
 // MARK: - Rule 8: equal rules reproduce 1.9
 
 @MainActor private func equivalenceTests() {
+    // Rule 8 proper (the 2.0 entry points against a FROZEN copy of the 1.9 engine,
+    // over a seeded grid) is Engine19OracleTests.swift. What is left here is the
+    // compatibility overload: it must forward to planWindowed with equal rules, and
+    // is never relaxed. (This was once named "the two-window plan is the 1.9 plan",
+    // which it could not show: the overload IS a call to planWindowed.)
     let now = ISO8601DateFormatter().date(from: "2026-10-24T12:00:00Z")!
     func usage(_ session: Double, _ weekly: Double) -> UsageAPIResponse {
         let json = #"{"five_hour":{"utilization":\#(session),"resets_at":"2026-10-24T15:00:00Z"},"seven_day":{"utilization":\#(weekly),"resets_at":"2026-10-27T12:00:00Z"}}"#
         return try! JSONDecoder().decode(UsageAPIResponse.self, from: Data(json.utf8))
     }
     let active = windowAccount("active"), b = windowAccount("b"), c = windowAccount("c")
-    var allEqual = true
+    var forwards = true
     for threshold in [50.0, 90, 98, 100] {
         for s in stride(from: 0.0, through: 100, by: 10) {
             for w in stride(from: 0.0, through: 100, by: 20) {
                 let byAccount = [active.id: usage(s, w), b.id: usage(100 - s, 100 - w), c.id: usage(w, s)]
-                let old = AutoSwitchEngine.plan(active: active, candidates: [b, c], usageByAccount: byAccount,
-                                                isSwitchable: { _ in true }, activeSampledThisCycle: true,
-                                                threshold: { _ in threshold }, defaultThreshold: threshold,
-                                                hysteresisPct: AutoSwitchEngine.hysteresis, asOf: now)
+                let compat = AutoSwitchEngine.plan(active: active, candidates: [b, c], usageByAccount: byAccount,
+                                                   isSwitchable: { _ in true }, activeSampledThisCycle: true,
+                                                   threshold: { _ in threshold }, defaultThreshold: threshold,
+                                                   hysteresisPct: AutoSwitchEngine.hysteresis, asOf: now)
                 let windowed = AutoSwitchEngine.planWindowed(active: active, candidates: [b, c], usageByAccount: byAccount,
                                                              isSwitchable: { _ in true }, activeSampledThisCycle: true,
                                                              rule: { _ in .both(threshold) }, defaults: .init(both: threshold),
                                                              hysteresisPct: AutoSwitchEngine.hysteresis, asOf: now)
-                let same = old?.targets.map(\.id) == windowed?.targets.map(\.id) && old?.limit == windowed?.limit
-                    && old?.trigger == windowed?.trigger && windowed?.relaxed != true
-                if !same { allEqual = false }
+                let same = compat?.targets.map(\.id) == windowed?.targets.map(\.id) && compat?.limit == windowed?.limit
+                    && compat?.trigger == windowed?.trigger && windowed?.relaxed != true
+                if !same { forwards = false }
             }
         }
     }
-    check(allEqual, "rule 8: with equal session and weekly rules the two-window plan is the 1.9 plan and never relaxed")
+    check(forwards, "compat: the single-threshold overload forwards to planWindowed with equal rules and is never relaxed")
     let relaxedRule = AutoSwitchEngine.WindowRule(session: 90, weekly: 50, manualOnly: false).relaxed
     check(relaxedRule.weekly == 90 && relaxedRule.session == 90 && AutoSwitchEngine.WindowRule.manualOnlyRule.relaxed == .manualOnlyRule,
           "rule 9: the relaxed rule raises the weekly limit to the session limit and leaves Manual only alone")

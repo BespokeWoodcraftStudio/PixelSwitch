@@ -373,6 +373,41 @@ extension AutoSwitchEngine {
         return firedWindow(activeUsage, leaveAt: leave, asOf: now, requireKnownWindow: !activeSampledThisCycle) != nil
     }
 
+    /// What the "staying put" log line should say about an active account that
+    /// has reached a limit while no candidate was chosen.
+    enum StayingPut: Equatable, Sendable {
+        /// The active account has not reached a limit on a watched window.
+        case notAtLimit
+        /// It is at a limit and no account has room under its own limits (the
+        /// 1.9 sentence). With equal windows this is always the answer once a
+        /// limit is reached.
+        case noRoom
+        /// It reached its STRICT limit but is still under its RELAXED limits
+        /// (weekly raised to the session limit), and even the relaxed plan found
+        /// nobody: it stays until the session limit (rule 10).
+        case waitingForSessionLimit
+    }
+
+    /// Rule 10's wording choice, as one pure function: the overflow sentence
+    /// applies only when overflow holds AND the active account is still under
+    /// its relaxed limits. Past them (always the case with equal windows, where
+    /// relaxed equals strict) the account is not "staying until the session
+    /// limit": it already passed it, and the true reason is that nobody has room.
+    static func stayingPutKind(activeUsage: UsageAPIResponse?, activeRule: WindowRule, defaults: WindowPair,
+                               activeSampledThisCycle: Bool, watchFable: Bool, asOf now: Date = Date()) -> StayingPut {
+        let strict = AutoSwitchSettings.leaveAtPair(rule: activeRule, defaults: defaults)
+        let strictFire = firedWindow(activeUsage, leaveAt: strict, asOf: now, requireKnownWindow: !activeSampledThisCycle) != nil
+        let fableFire = watchFable
+            && fableReached(activeUsage, leaveAt: strict, asOf: now, requireKnownWindow: !activeSampledThisCycle)
+        guard strictFire || fableFire else { return .notAtLimit }
+        // A Fable-only trigger never makes overflow hold.
+        guard strictFire else { return .noRoom }
+        let relaxed = AutoSwitchSettings.leaveAtPair(rule: activeRule.relaxed, defaults: defaults.relaxed)
+        let relaxedFire = firedWindow(activeUsage, leaveAt: relaxed, asOf: now, requireKnownWindow: !activeSampledThisCycle) != nil
+            || (watchFable && fableReached(activeUsage, leaveAt: relaxed, asOf: now, requireKnownWindow: !activeSampledThisCycle))
+        return relaxedFire ? .noRoom : .waitingForSessionLimit
+    }
+
     /// A candidate's readings when it under both ceilings, else nil. Needs at
     /// least one usable window reading; judges every usable one (rule 3).
     private static func readingsUnder(_ usage: UsageAPIResponse?, session: Double, weekly: Double, asOf now: Date) -> WindowReadings? {
@@ -838,6 +873,25 @@ enum AutoSwitchSettings {
         return whole <= 0 ? nil : min(whole, accountThresholdRange.upperBound)
     }
 
+    /// The write-side check for one window's own value (spec 4: out of range is
+    /// refused, not clamped). The whole number it rounds to (half away from
+    /// zero) when that is 1–100; nil for NaN, infinity, anything that rounds to
+    /// 0 or below, and anything above 100. `normalizedWindowThreshold` is for
+    /// RESOLVING stored values, which clamps above 100; this is for writes.
+    static func validWindowWrite(_ value: Double) -> Double? {
+        guard value.isFinite else { return nil }
+        let whole = value.rounded()
+        return (1.0...accountThresholdRange.upperBound).contains(whole) ? whole : nil
+    }
+
+    /// The write-side check for a global default (base, session or weekly):
+    /// the whole number it rounds to when that is within 50–100, else nil.
+    static func validDefaultWrite(_ value: Double) -> Double? {
+        guard value.isFinite else { return nil }
+        let whole = value.rounded()
+        return thresholdRange.contains(whole) ? whole : nil
+    }
+
     /// One account's resolved rule (spec 2.2): Manual only wins; otherwise each
     /// window takes its own value, else the account's both-windows value, else
     /// the global default for that window.
@@ -898,8 +952,9 @@ enum AutoSwitchSettings {
     }
 
     /// `account` after a per-window write (spec 2.1), or nil when a `.set`
-    /// value is not a number from 1 to 100 once rounded (the account is then
-    /// unchanged by the caller).
+    /// value is not a number from 1 to 100 once rounded (`validWindowWrite`: a
+    /// value above 100 is refused, never clamped; the account is then unchanged
+    /// by the caller).
     ///
     /// - Both edits `.leave`: nothing changes.
     /// - Manual only: only a number clears it, which sets that window and
@@ -908,9 +963,10 @@ enum AutoSwitchSettings {
     ///   each window that has none, and the both-windows value goes, then the
     ///   edits apply. So `clear` always means the global window default.
     static func applyingWindowEdits(to account: Account, session: WindowEdit, weekly: WindowEdit) -> Account? {
-        // A `.set` that is not a usable number refuses the whole write.
+        // A `.set` that is not a whole number from 1 to 100 once rounded refuses
+        // the whole write (spec 4: invalidValue), before anything changes.
         for edit in [session, weekly] {
-            if let number = edit.number, normalizedWindowThreshold(number) == nil { return nil }
+            if let number = edit.number, validWindowWrite(number) == nil { return nil }
         }
         if session == .leave && weekly == .leave { return account }
 
@@ -928,12 +984,12 @@ enum AutoSwitchSettings {
         switch session {
         case .leave: break
         case .clear: result.sessionThreshold = nil
-        case .set(let number): result.sessionThreshold = normalizedWindowThreshold(number)
+        case .set(let number): result.sessionThreshold = validWindowWrite(number)
         }
         switch weekly {
         case .leave: break
         case .clear: result.weeklyThreshold = nil
-        case .set(let number): result.weeklyThreshold = normalizedWindowThreshold(number)
+        case .set(let number): result.weeklyThreshold = validWindowWrite(number)
         }
         return result
     }
@@ -961,7 +1017,8 @@ enum AutoSwitchSettings {
 
     /// Writes one global window default: a whole number within 50–100, or nil
     /// to remove the key so the window follows the base again. False, and
-    /// nothing written, for a value that is not a finite number.
+    /// nothing written, for a value that is not a finite number or that rounds
+    /// outside 50–100 (refused, not clamped: what is stored is what the caller asked for).
     @discardableResult
     static func setDefaultThreshold(_ window: AutoSwitchEngine.Window, to value: Double?, in defaults: UserDefaults = .standard) -> Bool {
         let key = window == .session ? sessionThresholdKey : weeklyThresholdKey
@@ -969,18 +1026,19 @@ enum AutoSwitchSettings {
             defaults.removeObject(forKey: key)
             return true
         }
-        guard value.isFinite else { return false }
-        defaults.set(clampedThreshold(value.rounded()), forKey: key)
+        guard let whole = validDefaultWrite(value) else { return false }
+        defaults.set(whole, forKey: key)
         return true
     }
 
     /// Writes the base default (`autoSwitchThreshold`, 50–100) and removes both
     /// window keys, so a legacy "both" write is never held back by an old
-    /// window value (D8). False, nothing written, for a value that is not finite.
+    /// window value (D8). False, nothing written, for a value that is not finite
+    /// or that rounds outside 50–100.
     @discardableResult
     static func setBaseThreshold(_ value: Double, in defaults: UserDefaults = .standard) -> Bool {
-        guard value.isFinite else { return false }
-        defaults.set(clampedThreshold(value.rounded()), forKey: thresholdKey)
+        guard let whole = validDefaultWrite(value) else { return false }
+        defaults.set(whole, forKey: thresholdKey)
         defaults.removeObject(forKey: sessionThresholdKey)
         defaults.removeObject(forKey: weeklyThresholdKey)
         return true
