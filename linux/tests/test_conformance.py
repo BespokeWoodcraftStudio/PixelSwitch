@@ -5,8 +5,8 @@ The file is the contract between the Swift engine (macOS) and this one (Linux). 
 from here: a case believed wrong is reported with the reasoning.
 
 Where the file is: the environment variable PIXELSWITCH_VECTORS if set (an error when it points at
-nothing), else <repo root>/Tests/conformance/autoswitch-vectors.json (skipped, with the path, if a
-checkout without Tests/ runs these tests).
+nothing), else <repo root>/Tests/conformance/autoswitch-vectors.json. A missing file FAILS the
+tests (it never skips), so a misplaced file cannot pass silently in CI.
 """
 from __future__ import annotations
 
@@ -154,8 +154,7 @@ def _describe(plan) -> str:
 class ConformanceFileTests(unittest.TestCase):
     def test_the_file_shape_and_constants(self):
         data = load_vectors()
-        if data is None:
-            self.skipTest(f"no vectors at {DEFAULT_PATH}")
+        self.assertIsNotNone(data, f"the conformance vectors are missing: expected {DEFAULT_PATH}")
         self.assertEqual(data["version"], 1)
         self.assertEqual(data["hysteresisDefault"], engine.HYSTERESIS)
         self.assertEqual(data["drainMinimumRoom"], engine.DRAIN_MINIMUM_ROOM)
@@ -165,8 +164,7 @@ class ConformanceFileTests(unittest.TestCase):
 
     def test_every_case_has_every_expect_field(self):
         data = load_vectors()
-        if data is None:
-            self.skipTest(f"no vectors at {DEFAULT_PATH}")
+        self.assertIsNotNone(data, f"the conformance vectors are missing: expected {DEFAULT_PATH}")
         for case in data["cases"]:
             expect = case["expect"]
             self.assertEqual(sorted(expect), ["order", "plan", "rules"], case["name"])
@@ -194,7 +192,15 @@ class ConformanceCases(unittest.TestCase):
 
 
 try:
-    _install(load_vectors())
+    _vectors = load_vectors()
+    if _vectors is None:
+        # Lane LB: a misplaced or missing file must FAIL, never skip, so CI cannot pass silently.
+        def _missing_default(self):
+            self.fail(f"the conformance vectors are missing: expected {DEFAULT_PATH}")
+
+        ConformanceCases.test_vectors_file_exists = _missing_default
+    else:
+        _install(_vectors)
 except FileNotFoundError as error:  # an explicit PIXELSWITCH_VECTORS that does not exist
     def _missing(self, error=error):
         raise error

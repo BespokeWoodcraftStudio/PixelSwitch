@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
+from .protocol import trim_whitespace_and_newlines
 from .usage_model import is_number
 
 
@@ -53,7 +54,9 @@ def login_problem(credential: "str | bytes | Mapping | None") -> str | None:
     a non-empty string, and ``expiresAt`` (when present) a number greater than 0. Missing,
     null or wrongly typed values count as blank: an ``expiresAt`` that is present but null
     or not a number is therefore NOT usable (only an absent one is allowed). A bool is not
-    a number. The phrases name the field, never a value.
+    a number. A token made only of whitespace or newlines is blank too, exactly as the Mac's
+    ``CredentialOwnership.unusableReason`` trims ``.whitespacesAndNewlines`` (lane LB fix,
+    2026-10-24). The phrases name the field, never a value.
     """
     obj = _as_object(credential)
     if obj is None:
@@ -62,10 +65,10 @@ def login_problem(credential: "str | bytes | Mapping | None") -> str | None:
     if not isinstance(oauth, dict):
         return "the credential has no claudeAiOauth object"
     access = oauth.get("accessToken")
-    if not isinstance(access, str) or access == "":
+    if not isinstance(access, str) or trim_whitespace_and_newlines(access) == "":
         return "accessToken is missing or blank"
     refresh = oauth.get("refreshToken")
-    if not isinstance(refresh, str) or refresh == "":
+    if not isinstance(refresh, str) or trim_whitespace_and_newlines(refresh) == "":
         return "refreshToken is missing or blank"
     if "expiresAt" in oauth:
         expires = oauth["expiresAt"]
