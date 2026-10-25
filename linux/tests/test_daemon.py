@@ -256,6 +256,17 @@ class RunningDaemonTests(unittest.TestCase):
         self.assertEqual({k: v for k, v in after.items() if k in before}, before)
         self.proc.client().call("status.get")  # the first is undisturbed
 
+    def test_self_check_runs_beside_the_live_daemon_without_disturbing_it(self):
+        state_dir = self.proc.paths.state_dir
+        before = {n: os.stat(os.path.join(state_dir, n)).st_mtime_ns for n in os.listdir(state_dir) if n != "pixelswitch.log"}
+        done = subprocess.run([sys.executable, "-I", "-c", CODE, "--self-check"], env=self.proc.env, capture_output=True,
+                              text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertRegex(done.stdout.strip(), r"^pixelswitchd [0-9]+\.[0-9]+ \(build [0-9]+\)$")
+        after = {n: os.stat(os.path.join(state_dir, n)).st_mtime_ns for n in os.listdir(state_dir) if n != "pixelswitch.log"}
+        self.assertEqual({k: v for k, v in after.items() if k in before}, before, "it touched nothing")
+        self.assertEqual(self.proc.client().call("status.get")["accountCount"], 2, "and the daemon still answers")
+
     def test_sigterm_exits_0_and_cleans_up(self):
         paths = self.proc.paths
         client = self.proc.client()

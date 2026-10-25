@@ -52,6 +52,13 @@ Read on the laptop with `grep -a`-style scans of `/home/ahmed/.local/share/claud
 JavaScript executable). Nothing was run with arguments that change state. Names below are the minified function
 names in that build, so they will differ in other builds; the strings and numbers are what matter.
 
+To read it again (read-only, any machine with the same Claude Code): memory-map the version file and print a few
+thousand characters around each match of these byte strings, one at a time: `.oauth_refresh.lock` (then the
+function that builds the lock options and the one that takes the lock), `ELOCKED` and `Lock file is already being
+held` (the bundled `proper-lockfile`), `holder released it without removing` (the takeover reasons), `.storage-write`,
+`saveConfigWithLock` (the `~/.claude.json.lock` save) and `.credentials.json` (the store and the mtime comparison).
+No command was run with arguments that change state, and no credential file was opened.
+
 ### The refresh lock (spec 5.3: confirmed, so it is implemented)
 
 * **Path.** `<claudeDir>/.oauth_refresh.lock`, where `claudeDir` is `~/.claude` (`O0()`). Options (`Anr`):

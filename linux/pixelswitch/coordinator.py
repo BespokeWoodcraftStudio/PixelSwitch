@@ -179,6 +179,7 @@ class Coordinator(UsageMixin):
         self.on_check_for_updates: Callable[[], None] = lambda: None
         self._init_usage_state()
         self._announced_needs_reauth: set[str] = set()
+        self._workers: list[threading.Thread] = []
         self._accounts: list[Account] = []
         self._active: Account | None = None
         self._last_active_id: str | None = None
@@ -650,11 +651,28 @@ class Coordinator(UsageMixin):
             self._back_up_before_sign_in(purpose)
             session.start()
 
-        threading.Thread(target=begin, name="signin-backup", daemon=True).start()
+        self._spawn(begin, "signin-backup")
         return session
 
     def current_sign_in(self) -> SignInSession | None:
         return self._current_sign_in
+
+    def _spawn(self, target: Callable[..., None], name: str, *args: Any) -> None:
+        """A background step (the backup before a sign-in, the switch after a removal), remembered so
+        shutdown can wait for it instead of leaving it writing after the daemon has let go of its lock."""
+        thread = threading.Thread(target=target, args=args, name=name, daemon=True)
+        with self._state_lock:
+            self._workers = [t for t in self._workers if t.is_alive()]
+            self._workers.append(thread)
+        thread.start()
+
+    def join_workers(self, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        with self._state_lock:
+            workers = list(self._workers)
+        for thread in workers:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        return not any(t.is_alive() for t in workers)
 
     def dismiss_sign_in(self) -> None:
         if self._current_sign_in is not None and self._current_sign_in.is_finished:
@@ -918,8 +936,7 @@ class Coordinator(UsageMixin):
         finally:
             self.gate.end("remove")
         if fallbacks:
-            threading.Thread(target=self._switch_after_removal, args=(account.id, [a.id for a in fallbacks]),
-                             name="switch-after-removal", daemon=True).start()
+            self._spawn(self._switch_after_removal, "switch-after-removal", account.id, [a.id for a in fallbacks])
 
     def _switch_after_removal(self, removed_id: str, candidates: list[str]) -> None:
         """Switches Claude Code to the first of ``candidates`` that works. A busy switch or sign-in
@@ -1601,7 +1618,9 @@ class Coordinator(UsageMixin):
         session = self._current_sign_in
         if session is not None:
             session.join(max(0.0, min(8.0, deadline - time.monotonic())))
-        return self.renewals_in_flight() == 0 and not self.gate.busy and (thread is None or not thread.is_alive())
+        workers_done = self.join_workers(max(0.0, deadline - time.monotonic()))
+        return (self.renewals_in_flight() == 0 and not self.gate.busy and (thread is None or not thread.is_alive())
+                and workers_done)
 
 
 def _same_credential(a: str, b: str) -> bool:

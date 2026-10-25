@@ -204,6 +204,11 @@ class Rig:
             return ""
 
     def close(self) -> None:
+        coordinator = self.coordinator
+        if coordinator is not None:
+            # Let every background step end before the folder goes, or one writes into a recreated tree.
+            coordinator.begin_shutdown()
+            coordinator.finish_shutdown(timeout=5.0)
         self.api.stop()
         self.log.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
