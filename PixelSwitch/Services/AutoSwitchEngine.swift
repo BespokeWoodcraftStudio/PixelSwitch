@@ -6,8 +6,10 @@ enum AutoSwitchStrategy: String, CaseIterable, Codable, Sendable {
     /// Fable room first, then the most room left under each account's own
     /// threshold (with equal thresholds, the lowest use). The default.
     case mostRoom
-    /// The accounts list's own order, always from the top: a higher account
-    /// that has freed up again beats the next one down.
+    /// Shown as "Priority (lowest number first)" since 2.0: the accounts list's
+    /// own order (sorted by priority number), always from the top, so a higher
+    /// account that has freed up again beats the next one down. The raw value
+    /// is persisted and on the wire and never changes.
     case myOrder
     /// The earliest weekly reset first, so quota about to expire is used
     /// before it is lost. Ties go to most room; an unknown reset ranks last.
@@ -16,18 +18,24 @@ enum AutoSwitchStrategy: String, CaseIterable, Codable, Sendable {
 
 /// Pure, UI-agnostic auto-switch decision logic.
 ///
-/// Mirrors the proven design in `claude-swap` (threshold + hysteresis): when the
-/// active account's *binding window* (the higher of its 5h / weekly utilization)
-/// reaches ITS OWN threshold, pick a same-provider account that sits at least
-/// `hysteresisPct` (one point since 1.8) below ITS OWN threshold, so two
-/// accounts hovering at the line never ping-pong. An account on 0 (Manual only) is never switched to. Which eligible account comes first is the user's
-/// `AutoSwitchStrategy`. All guardrails that need state (cooldown, re-entrancy,
-/// verification) live in `AppState`; this stays a pure function.
+/// Mirrors the proven design in `claude-swap` (threshold + hysteresis), with
+/// separate limits for the 5-hour session window and the 7-day weekly window
+/// since 2.0: when the active account reaches ITS OWN limit on either window,
+/// pick a same-provider account that sits at least `hysteresisPct` (one point
+/// since 1.8) below ITS OWN limit on both, so two accounts hovering at the line
+/// never ping-pong. An account on Manual only is never switched to. Which
+/// eligible account comes first is the user's `AutoSwitchStrategy`. All
+/// guardrails that need state (cooldown, re-entrancy, verification) live in
+/// `AppState`; this stays a pure function.
 ///
 /// Two limits are watched, in order: the session/weekly pair (`.windows`), then
-/// the weekly Fable allowance (`.fable`), which runs out on its own schedule.
-/// With "Resets soonest" and early switching on, one more rule can move the
-/// user before any threshold is reached: see `drainEligibleUtilization`.
+/// the weekly Fable allowance (`.fable`), which follows the weekly limit. With
+/// "Resets soonest" and early switching on, one more rule can move the user
+/// before any limit is reached. When no account under its weekly limit can take
+/// the user, the weekly limit rises to the session limit for the whole plan
+/// (spec 2.3 rule 9). The 1.9 single-threshold `plan` and `eligibleUtilization`
+/// remain for the tests that predate the split and only map onto the two-window
+/// engine in the extension at the end of this file.
 enum AutoSwitchEngine {
 
     /// A limit auto-switch watches.
@@ -334,6 +342,15 @@ extension AutoSwitchEngine {
         if let s = reading(usage.fiveHour, asOf: now, requireKnownWindow: requireKnownWindow), s >= leaveAt.session { return .session }
         if let w = reading(usage.sevenDay, asOf: now, requireKnownWindow: requireKnownWindow), w >= leaveAt.weekly { return .weekly }
         return nil
+    }
+
+    /// One window's reading under the engine's expiry rules (nil with none): for
+    /// the decision log and the staying-put note, so they show the number the
+    /// engine judged.
+    static func windowUtilization(_ usage: UsageAPIResponse?, window: Window, asOf now: Date = Date(),
+                                  requireKnownWindow: Bool = false) -> Double? {
+        guard let usage else { return nil }
+        return reading(window == .session ? usage.fiveHour : usage.sevenDay, asOf: now, requireKnownWindow: requireKnownWindow)
     }
 
     /// Whether the active account's Fable use has reached its limit (the weekly one).

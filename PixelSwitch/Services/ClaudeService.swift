@@ -411,6 +411,9 @@ final class ClaudeService: @unchecked Sendable {
             if let newRefresh = resp["refresh_token"] as? String, !newRefresh.isEmpty {
                 oauth["refreshToken"] = newRefresh
             }
+            // Keep `refreshTokenExpiresAt` honest (2.0): Claude Code treats a past
+            // value as signed out, so a renewed login must not carry one.
+            oauth = CredentialOwnership.applyingRenewalExpiry(to: oauth, refreshTokenExpiresIn: resp["refresh_token_expires_in"] as? Double)
             // `scopes` is deliberately NOT rewritten from the refresh response.
             // The CLI (verified against claude 2.1.220) decides whether it
             // recognises a stored login by checking that `scopes` contains
@@ -461,44 +464,62 @@ final class ClaudeService: @unchecked Sendable {
     func switchAccount(liveOwner: Account?, liveOwnerIdentity: AccountIdentity?, verifiedLiveCredential: String?, to targetAccount: Account, targetBackup: AccountBackup) async throws -> SwitchOutcome {
         let keychain = KeychainService.shared
 
+        // Spec D12, last line of defence (target validation has already failed an
+        // unusable login with the re-sign message): never write one to Claude
+        // Code's live store, whoever called.
+        if let reason = LoginGate.targetProblem(backupToken: targetBackup.token) {
+            log.error("[switchAccount] ABORT: the target's saved login is not a usable login (\(reason)); nothing was written")
+            throw ClaudeServiceError.targetLoginUnusable(target: targetAccount.email)
+        }
+
         log.info("[switchAccount] Switching to \(targetAccount.id); live login belongs to \(liveOwner?.id.uuidString ?? "an unproven account")")
 
-        // 1. Back up the live login under the account it belongs to.
-        log.info("[switchAccount] Step 1: Backing up the live login...")
-        let freshCredential = keychain.readClaudeToken()
-        var provenFresh = false
-        if let owner = liveOwner,
-           let verified = verifiedLiveCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }),
-           let fresh = freshCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }) {
-            if CredentialOwnership.sameGrant(verified, fresh) {
-                provenFresh = true
-            } else if let identity = await accountIdentity(forAccessToken: fresh.accessToken, expiresAt: fresh.expiresAt, account: owner.id),
-                      CredentialOwnership.detailsBelong(uuid: identity.uuid, email: identity.email,
-                                                        toOwnerUuid: liveOwnerIdentity?.uuid, ownerEmail: owner.email) {
-                // The CLI renewed the login during the checks; the API confirms it is
-                // still the owner's, and this is the only copy of the newest login.
-                provenFresh = true
+        // 1. Back up the live login under the account it belongs to. Returns the
+        // live credential this step looked at and whether it was saved for its
+        // owner. Run again if Claude Code renews the login before the write
+        // (the re-read below), this time with the API's proof of the new login.
+        func backUpLiveLogin() async -> (seen: String?, saved: Bool) {
+            // `saved` is also true when there was nothing worth saving: a live
+            // login that is not a usable login is never saved (spec D12).
+            log.info("[switchAccount] Step 1: Backing up the live login...")
+            let freshCredential = keychain.readClaudeToken()
+            var provenFresh = false
+            if let owner = liveOwner,
+               let verified = verifiedLiveCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }),
+               let fresh = freshCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }) {
+                if CredentialOwnership.sameGrant(verified, fresh) {
+                    provenFresh = true
+                } else if let identity = await accountIdentity(forAccessToken: fresh.accessToken, expiresAt: fresh.expiresAt, account: owner.id),
+                          CredentialOwnership.detailsBelong(uuid: identity.uuid, email: identity.email,
+                                                            toOwnerUuid: liveOwnerIdentity?.uuid, ownerEmail: owner.email) {
+                    // The CLI renewed the login during the checks; the API confirms it is
+                    // still the owner's, and this is the only copy of the newest login.
+                    provenFresh = true
+                }
             }
-        }
-        if let owner = liveOwner, let liveToken = freshCredential, provenFresh {
-            // Save identity details only if they describe the owner: running
-            // sessions can leave another account's in ~/.claude.json.
-            func belongs(_ details: [String: AnyCodable]?) -> Bool {
-                CredentialOwnership.detailsBelong(uuid: details?["accountUuid"]?.value as? String,
-                                                  email: details?["emailAddress"]?.value as? String,
-                                                  toOwnerUuid: liveOwnerIdentity?.uuid, ownerEmail: owner.email)
-            }
-            let fileIdentity = keychain.readOAuthAccount()
-            let backupIdentity = keychain.getAccountBackup(forAccountId: owner.id.uuidString)?.oauthAccount
-            if let identity = belongs(fileIdentity) ? fileIdentity : (belongs(backupIdentity) ? backupIdentity : nil) {
-                let saved = keychain.saveAccountBackup(token: liveToken, oauthAccount: identity, forAccountId: owner.id.uuidString)
-                log.info("[switchAccount] Step 1: Backup saved for its owner: \(saved)")
+            var saved = false
+            if let owner = liveOwner, let liveToken = freshCredential, provenFresh {
+                // Save identity details only if they describe the owner: running
+                // sessions can leave another account's in ~/.claude.json.
+                func belongs(_ details: [String: AnyCodable]?) -> Bool {
+                    CredentialOwnership.detailsBelong(uuid: details?["accountUuid"]?.value as? String,
+                                                      email: details?["emailAddress"]?.value as? String,
+                                                      toOwnerUuid: liveOwnerIdentity?.uuid, ownerEmail: owner.email)
+                }
+                let fileIdentity = keychain.readOAuthAccount()
+                let backupIdentity = keychain.getAccountBackup(forAccountId: owner.id.uuidString)?.oauthAccount
+                if let identity = belongs(fileIdentity) ? fileIdentity : (belongs(backupIdentity) ? backupIdentity : nil) {
+                    saved = keychain.saveAccountBackup(token: liveToken, oauthAccount: identity, forAccountId: owner.id.uuidString)
+                    log.info("[switchAccount] Step 1: Backup saved for its owner: \(saved)")
+                } else {
+                    log.warning("[switchAccount] Step 1: No identity details on record that match the owner; skipping backup")
+                }
             } else {
-                log.warning("[switchAccount] Step 1: No identity details on record that match the owner; skipping backup")
+                log.warning("[switchAccount] Step 1: The live login's owner is not proven (or it changed since it was checked); skipping the backup so no account's backup is overwritten with another's login")
             }
-        } else {
-            log.warning("[switchAccount] Step 1: The live login's owner is not proven (or it changed since it was checked); skipping the backup so no account's backup is overwritten with another's login")
+            return (freshCredential, saved || !CredentialOwnership.isUsableLogin(credential: freshCredential))
         }
+        var step1 = await backUpLiveLogin()
 
         // 2. Target backup was resolved and validated by the caller.
         log.info("[switchAccount] Step 2: Using caller-resolved backup for target account")
@@ -507,8 +528,22 @@ final class ClaudeService: @unchecked Sendable {
         // Only the Claude login comes from the backup; this Mac's MCP server
         // logins (and any other key) stay as they are in the live item.
         log.info("[switchAccount] Step 3: Writing target credentials...")
+        // Re-read the live login immediately before writing (spec 5.3). If Claude
+        // Code renewed it since step 1 looked, the copy saved for its owner holds
+        // a refresh token the server has rotated: write nothing, look again with
+        // proof once, and give up with nothing written if it is still moving.
+        var liveNow = keychain.readClaudeToken()
+        if CredentialOwnership.liveLoginChanged(savedAtStep4: step1.seen, now: liveNow) {
+            log.warning("[switchAccount] Step 3: The live login changed since it was backed up; backing it up again before writing")
+            step1 = await backUpLiveLogin()
+            liveNow = keychain.readClaudeToken()
+            if CredentialOwnership.liveLoginChanged(savedAtStep4: step1.seen, now: liveNow) || (liveOwner != nil && !step1.saved) {
+                log.error("[switchAccount] Step 3: ABORT: the live login is still changing or could not be saved; nothing was written")
+                throw ClaudeServiceError.liveLoginChanged
+            }
+        }
         let credential: String
-        switch ClaudeCredentialMerge.credentialForSwitch(live: keychain.readClaudeToken(), target: targetBackup.token) {
+        switch ClaudeCredentialMerge.credentialForSwitch(live: liveNow, target: targetBackup.token) {
         case .merged(let merged, let kept):
             credential = merged
             log.info("[switchAccount] Step 3: claudeAiOauth from the target backup; kept this Mac's \(kept.isEmpty ? "(nothing else)" : kept.joined(separator: ", ")) from the live credential")
@@ -861,6 +896,8 @@ enum ClaudeServiceError: LocalizedError {
     case switchWrongAccount(expected: String, actual: String)
     case timedOut(String)
     case targetLoginBelongsElsewhere(target: String, owner: String)
+    case liveLoginChanged
+    case targetLoginUnusable(target: String)
 
     var errorDescription: String? {
         switch self {
@@ -884,6 +921,10 @@ enum ClaudeServiceError: LocalizedError {
             return "Claude CLI did not answer in time (\(what))"
         case .targetLoginBelongsElsewhere(let target, let owner):
             return "The login saved for \(target) belongs to \(owner). Re-authenticate \(target) to fix it."
+        case .targetLoginUnusable(let target):
+            return "The saved login for \(target) can't be used. Re-authenticate \(target) to fix it."
+        case .liveLoginChanged:
+            return "Claude Code renewed its login while PixelSwitch was switching. Nothing was changed. Try again in a moment."
         }
     }
 }

@@ -210,7 +210,17 @@ final class KeychainService: Sendable {
 
     // MARK: - Account Backup Operations (token + oauthAccount)
 
+    /// The ONE function every path saves a login through (capture, reconcile,
+    /// the switch snapshot, sign-in, add-current, renewal), so the usable-login
+    /// rule (spec D12) is enforced here and nowhere else needs to remember it.
+    /// A credential that is not a usable login is refused: Claude Code blanks a
+    /// dead login on disk, and saving that over a good backup would lose the
+    /// account's only way back in.
     func saveAccountBackup(token: String, oauthAccount: [String: AnyCodable], forAccountId accountId: String) -> Bool {
+        if case .refused(let reason) = LoginGate.save(token: token) {
+            log.error("[saveBackup] REFUSED for \(accountId): not a usable login (\(reason)); the saved login is left as it is")
+            return false
+        }
         let email = (oauthAccount["emailAddress"]?.value as? String) ?? "?"
         log.info("[saveBackup] Saving for \(accountId) (\(email)), token length=\(token.count)")
         storeLock.lock()
