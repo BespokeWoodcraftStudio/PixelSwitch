@@ -369,6 +369,26 @@ enum ControlSnapshots {
         )
     }
 
+    /// What `AccountInfo` carries apart from usage, as stored on the list. A
+    /// change in this (and only this) is an `accountsChanged` event; a usage
+    /// reading is not part of it. The list of these also changes when the
+    /// order does.
+    struct AccountFields: Equatable {
+        let id: UUID, email: String, label: String?, subscription: String?, isActive: Bool
+        let threshold: Double?, session: Double?, weekly: Double?, priority: Int?
+        init(_ account: Account) {
+            id = account.id; email = account.email; label = account.customLabel; subscription = account.subscriptionType
+            isActive = account.isActive; threshold = account.switchThreshold; session = account.sessionThreshold
+            weekly = account.weeklyThreshold; priority = account.priority
+        }
+    }
+
+    /// The global defaults every account's effective thresholds depend on; a
+    /// change here is also an `accountsChanged` event.
+    struct DefaultFields: Equatable {
+        let base: Double, session: Double, weekly: Double
+    }
+
     /// The data of an `autoSwitched` event. `window` is left out unless a
     /// window's limit fired; `relaxed` is always sent.
     static func autoSwitchedData(from: UUID, to: UUID, limit: AutoSwitchEngine.Limit, trigger: AutoSwitchEngine.Trigger,

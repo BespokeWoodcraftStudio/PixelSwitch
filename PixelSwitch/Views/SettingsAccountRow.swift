@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// What the Session or Weekly menu on an account row can choose.
 enum ThresholdMenuChoice: Equatable {
@@ -30,12 +31,45 @@ enum AccountRowThresholds {
     }
 }
 
+/// How wide the Session and Weekly columns must be for the language in use.
+/// The pop-ups size to their text and German or French labels are longer than
+/// English, so a fixed width would let them draw over the next column. The
+/// width is measured from the widest label ("Switch at 100%" with its
+/// stepper, "Default (100%)", "Manual only") in the language's string table,
+/// in the pop-up's own font, so it follows the translation and never clips it.
+enum WindowColumnMetrics {
+    /// What a pop-up button draws around its text: the arrows and the padding
+    /// (measured 48 to 49 pt at 13 pt on macOS 14 and later).
+    static let menuChrome: CGFloat = 50
+    /// The stepper beside a custom value, and the gap before it.
+    static let stepperWidth: CGFloat = 20
+    static let stepperGap: CGFloat = 4
+    /// Never narrower than this, so English rows keep their shape.
+    static let minimum: CGFloat = 164
+
+    static func width(bundle: Bundle) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        func measured(_ key: String) -> CGFloat {
+            let template = bundle.localizedString(forKey: key, value: key, table: nil)
+            // 100 is the widest number a limit can show.
+            let text = template.contains("%") ? String(format: template, Int64(100)) : template
+            return (text as NSString).size(withAttributes: [.font: font]).width
+        }
+        let withStepper = measured("Switch at %lld%%") + stepperGap + stepperWidth
+        let bare = max(measured("Default (%lld%%)"), measured("Manual only"))
+        return max(minimum, ceil(max(withStepper, bare) + menuChrome))
+    }
+}
+
 /// One account's row in Settings → Accounts: drag handle, Priority control,
 /// the account, and the Session and Weekly menus.
 ///
 /// Plain inputs and closures only (no `AppState`, no `@AppStorage`), so the
 /// same view that Settings shows is rendered offscreen with sample data
-/// (`Tools/screenshots/make_settings_renders.swift`) and nothing can drift.
+/// (`Tools/screenshots/run_settings_renders.sh`, in English, German, French,
+/// Japanese and Chinese) and nothing can drift. The only things it reads
+/// besides its inputs are the language choice (`L10n`) and its own pending
+/// priority step.
 struct SettingsAccountRow: View {
     /// A custom label, else the address.
     let title: String
@@ -64,8 +98,26 @@ struct SettingsAccountRow: View {
     let onSession: @MainActor (ThresholdMenuChoice) -> Void
     let onWeekly: @MainActor (ThresholdMenuChoice) -> Void
 
+    /// The priority a person is stepping to with the arrows, not yet saved. The
+    /// list sorts by priority, so saving every click would move the row out
+    /// from under the pointer and the next click would land on another
+    /// account. It is saved after a short pause with no click, and when the
+    /// row goes away, so no step is lost.
+    ///
+    /// `State` is written out instead of with `@State`: the offscreen render
+    /// (`Tools/screenshots`) compiles this file on a Mac without Xcode, where the
+    /// `@State` macro's plugin is missing. It is the same storage.
+    private let pendingStorage = State<Int?>(initialValue: nil)
+    private var pendingPriority: Int? {
+        get { pendingStorage.wrappedValue }
+        nonmutating set { pendingStorage.wrappedValue = newValue }
+    }
+    private static let priorityPause: Duration = .milliseconds(800)
+
     var body: some View {
-        HStack(spacing: 10) {
+        // Measured once per row from the language in use (see WindowColumnMetrics).
+        let columnWidth = WindowColumnMetrics.width(bundle: L10n.bundle)
+        return HStack(spacing: 10) {
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
@@ -103,54 +155,107 @@ struct SettingsAccountRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            windowControl(.session, own: sessionOwn, caption: Text("Session"), choose: onSession)
-            windowControl(.weekly, own: weeklyOwn, caption: Text("Weekly"), choose: onWeekly)
+            windowControl(.session, own: sessionOwn, caption: Text("Session"), spoken: Text("Session limit for \(title)"),
+                          width: columnWidth, choose: onSession)
+            windowControl(.weekly, own: weeklyOwn, caption: Text("Weekly"), spoken: Text("Weekly limit for \(title)"),
+                          width: columnWidth, choose: onWeekly)
         }
         .padding(.vertical, 4)
     }
 
     // MARK: - Priority
 
+    /// What the row shows: the number being stepped to, else the saved one.
+    private var shownPriority: Int? { pendingPriority ?? priority }
+
+    /// One click of an arrow: moves the shown number only; `.task(id:)` below
+    /// saves it once the clicks stop (each new number restarts the pause).
+    private func stepPriority(by delta: Int) {
+        let next = (shownPriority ?? 0) + delta
+        guard (1...99).contains(next) else { return }
+        pendingPriority = next
+    }
+
+    /// Saves the number being stepped to. The saved value is handed over before
+    /// the pending one is cleared, so the row never flashes the old number.
+    private func commitPriority() {
+        guard let value = pendingPriority else { return }
+        onPriority(value)
+        pendingPriority = nil
+    }
+
+    /// A pick from the menu is one deliberate action: it replaces any pending
+    /// step and is saved at once.
+    private func choosePriority(_ value: Int?) {
+        pendingPriority = nil
+        onPriority(value)
+    }
+
     private var priorityControl: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Priority")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             HStack(spacing: 4) {
                 Menu {
-                    Button("None") { onPriority(nil) }
+                    Button("None") { choosePriority(nil) }
                     Divider()
                     ForEach(1...9, id: \.self) { number in
-                        Button { onPriority(number) } label: { Text(verbatim: "P\(number)") }
+                        Button { choosePriority(number) } label: { Text(verbatim: "P\(number)") }
                     }
                 } label: {
-                    if let priority {
-                        Text(verbatim: "P\(priority)").monospacedDigit()
+                    if let shown = shownPriority {
+                        Text(verbatim: "P\(shown)").monospacedDigit()
                     } else {
                         Text("None")
                     }
                 }
                 .fixedSize()
                 .help(Text("Auto-switch tries accounts with lower numbers first when it chooses by Priority. Accounts with no number come last."))
+                .accessibilityLabel(Text("Priority for \(title)"))
+                .accessibilityValue(shownPriority.map { Text(verbatim: "P\($0)") } ?? Text("None"))
 
-                if let priority {
-                    Stepper("", onIncrement: { if priority < 99 { onPriority(priority + 1) } },
-                            onDecrement: { if priority > 1 { onPriority(priority - 1) } })
-                        .labelsHidden()
+                if let shown = shownPriority {
+                    Stepper(onIncrement: { stepPriority(by: 1) }, onDecrement: { stepPriority(by: -1) }) {
+                        Text("Priority for \(title)")
+                    }
+                    .labelsHidden()
+                    .accessibilityLabel(Text("Priority for \(title)"))
+                    .accessibilityValue(Text(verbatim: "P\(shown)"))
                 }
             }
         }
+        // Restarts whenever the number being stepped to changes, so the save
+        // waits for a pause after the LAST click; cancelled with the row.
+        .task(id: pendingPriority) {
+            guard pendingPriority != nil else { return }
+            try? await Task.sleep(for: Self.priorityPause)
+            guard !Task.isCancelled else { return }
+            commitPriority()
+        }
+        .onDisappear { commitPriority() }
     }
 
     // MARK: - Session and Weekly
 
-    private func windowControl(_ window: AutoSwitchEngine.Window, own: Double?, caption: Text,
+    private func windowControl(_ window: AutoSwitchEngine.Window, own: Double?, caption: Text, spoken: Text, width: CGFloat,
                                choose: @escaping @MainActor (ThresholdMenuChoice) -> Void) -> some View {
         let shownDefault = Int(defaults.value(for: window))
+        // What the pop-up shows; also what VoiceOver reads as its value.
+        let shown: Text
+        if manualOnly {
+            shown = Text("Manual only")
+        } else if let own {
+            shown = Text("Switch at \(Int(own))%")
+        } else {
+            shown = Text("Default (\(shownDefault)%)")
+        }
         return VStack(alignment: .leading, spacing: 2) {
             caption
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             HStack(spacing: 4) {
                 Menu {
                     Button("Default (\(shownDefault)%)") { choose(.followDefault) }
@@ -161,29 +266,27 @@ struct SettingsAccountRow: View {
                         Button { choose(.percent(value)) } label: { Text(verbatim: "\(Int(value))%") }
                     }
                 } label: {
-                    if manualOnly {
-                        Text("Manual only")
-                    } else if let own {
-                        Text("Switch at \(Int(own))%")
-                    } else {
-                        Text("Default (\(shownDefault)%)")
-                    }
+                    shown
                 }
                 .fixedSize()
                 .help(help)
+                .accessibilityLabel(spoken)
+                .accessibilityValue(shown)
 
                 if let own, !manualOnly {
-                    Stepper("", onIncrement: { if own < AutoSwitchSettings.accountStepperRange.upperBound { choose(.percent(own + 1)) } },
-                            onDecrement: { if own > AutoSwitchSettings.accountStepperRange.lowerBound { choose(.percent(own - 1)) } })
-                        .labelsHidden()
+                    Stepper(onIncrement: { if own < AutoSwitchSettings.accountStepperRange.upperBound { choose(.percent(own + 1)) } },
+                            onDecrement: { if own > AutoSwitchSettings.accountStepperRange.lowerBound { choose(.percent(own - 1)) } }) {
+                        spoken
+                    }
+                    .labelsHidden()
+                    .accessibilityLabel(spoken)
+                    .accessibilityValue(shown)
                 }
             }
         }
         // One width for both columns on every row, so Session and Weekly line up
-        // down the list whether or not a row shows a stepper.
-        .frame(width: Self.windowColumnWidth, alignment: .leading)
+        // down the list whether or not a row shows a stepper. It is measured for
+        // the language in use (`WindowColumnMetrics`), so no label is clipped.
+        .frame(width: width, alignment: .leading)
     }
-
-    /// Wide enough for "Switch at 100%" or "Default (100%)" and its stepper.
-    private static let windowColumnWidth: CGFloat = 164
 }

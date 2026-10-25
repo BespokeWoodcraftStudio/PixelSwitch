@@ -327,3 +327,9 @@
 "You're using it now. Auto-switch moves you off it at %@ of its session or %@ of its week and won't move you back to it." = "現在使用中です。自動切り替えは、セッションが %@、または週間が %@ に達するとこのアカウントから切り替え、このアカウントに戻ることはありません。";
 "Manual only accounts are never switched to automatically; you can still switch to them yourself." = "「手動のみ」のアカウントに自動で切り替わることはありません。自分で切り替えることはできます。";
 "Auto-switch tries accounts with lower numbers first when it chooses by Priority. Accounts with no number come last." = "優先度で選ぶ設定のとき、自動切り替えは番号が小さいアカウントから順に試します。番号のないアカウントは最後です。";
+
+/* 2.0 fixes: help without the overflow clause; spoken names for the row controls */
+"Auto-switch moves you off this account at %@ of its session or %@ of its week, and moves you to it only while it is at %@ or less of its session and %@ or less of its week." = "自動切り替えは、セッションが %@、または週間が %@ に達するとこのアカウントから切り替えます。このアカウントに切り替えるのは、セッションが %@ 以下で、かつ週間が %@ 以下の間だけです。";
+"Priority for %@" = "%@ の優先度";
+"Session limit for %@" = "%@ のセッション上限";
+"Weekly limit for %@" = "%@ の週間上限";

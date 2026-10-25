@@ -11,9 +11,17 @@
 #     Mac for a moment). Skip that part with SKIP_SIGN_IN=1;
 #   - talks to `pixelswitch mcp` over stdio.
 #
-# Needs PixelSwitch 1.2 or later running, and the command-line tool installed
-# (Settings → Claude CLI → Install), or PIXELSWITCH_CLI pointing at it.
+# Needs PixelSwitch 2.0 or later running (the MCP check counts its 20 tools), and
+# the command-line tool installed (Settings → Claude CLI → Install), or
+# PIXELSWITCH_CLI pointing at it.
+#
+# On Linux it runs ONLY against a scratch daemon (spec 5.7): the daemon must
+# say `testMode: true` in its first status reply, or the script stops before
+# it changes anything. It also never lets the CLI start the real service
+# (PIXELSWITCH_NO_LAUNCH=1).
 set -uo pipefail
+
+[ "$(uname -s)" = "Linux" ] && export PIXELSWITCH_NO_LAUNCH=1
 
 CLI="${PIXELSWITCH_CLI:-$HOME/.local/bin/pixelswitch}"
 WORK=$(mktemp -d)
@@ -44,9 +52,19 @@ trap restore EXIT
 
 # 1. Status and protocol
 if status=$("$CLI" --json status); then
+    # The Mac app sends no `platform`, so a Mac run goes straight on. `field` prints Python's True.
+    if [ "$(echo "$status" | field platform)" = "linux" ] && [ "$(echo "$status" | field testMode)" != "True" ]; then
+        echo "Refusing: this Linux PixelSwitch is not in test mode (spec 5.7). Run this only against a scratch daemon."
+        exit 2
+    fi
     [ "$(echo "$status" | field protocolVersion)" = "2" ] && ok "status answers, protocol 2" || bad "status protocol" "$status"
 else
-    bad "status" "exit $?"
+    code=$?
+    if [ "$(uname -s)" = "Linux" ]; then
+        echo "Refusing: no scratch PixelSwitch answered status (exit $code), and this script will not guess on Linux (spec 5.7)."
+        exit 2
+    fi
+    bad "status" "exit $code"
 fi
 
 # 2. Accounts and usage (read only)

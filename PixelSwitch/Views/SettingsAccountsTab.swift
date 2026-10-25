@@ -176,6 +176,12 @@ struct SettingsAccountsTab: View {
         if rule.session == rule.weekly {
             return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt.session)), and moves you to it only while it is at \(Self.percent(numbers.arriveAt.session)) or less.")
         }
-        return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt.session)) of its session or \(Self.percent(numbers.leaveAt.weekly)) of its week, and moves you to it only while it is at \(Self.percent(numbers.arriveAt.session)) or less of its session and \(Self.percent(numbers.arriveAt.weekly)) or less of its week (up to \(Self.percent(numbers.relaxedArriveWeekly)) of its week when no account under its weekly limit can take you).")
+        // The overflow clause only when it names a different number: the weekly
+        // limit is raised to the session limit, so it differs only when the
+        // weekly limit is the lower of the two.
+        if numbers.relaxedArriveWeekly > numbers.arriveAt.weekly {
+            return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt.session)) of its session or \(Self.percent(numbers.leaveAt.weekly)) of its week, and moves you to it only while it is at \(Self.percent(numbers.arriveAt.session)) or less of its session and \(Self.percent(numbers.arriveAt.weekly)) or less of its week (up to \(Self.percent(numbers.relaxedArriveWeekly)) of its week when no account under its weekly limit can take you).")
+        }
+        return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt.session)) of its session or \(Self.percent(numbers.leaveAt.weekly)) of its week, and moves you to it only while it is at \(Self.percent(numbers.arriveAt.session)) or less of its session and \(Self.percent(numbers.arriveAt.weekly)) or less of its week.")
     }
 }

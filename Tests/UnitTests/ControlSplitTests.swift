@@ -15,6 +15,7 @@ import Foundation
     runSplitCLIOutputTests()
     runSplitMCPTests()
     runOldAppTests()
+    runNewAppEndToEndTests()
     runSplitStringTests()
 }
 
@@ -69,9 +70,14 @@ private func kind(_ response: RPCResponse?) -> String? { response?.error.map { C
               "setThresholds: \(label) is refused with the exact text", refused?.error?.message ?? "nil")
     }
     check(set("alice@work.com", ["session": .number(100.4)])?.result?["account"]?["sessionThreshold"] == .number(100)
-          && set("alice@work.com", ["session": .number(49.5)])?.result?["account"]?["sessionThreshold"] == .number(50)
           && set("alice@work.com", ["session": .number(0.6)])?.result?["account"]?["sessionThreshold"] == .number(1),
-          "setThresholds: 100.4 is 100, 49.5 is 50 (half away from zero), 0.6 is 1")
+          "setThresholds: 100.4 is 100, 0.6 is 1")
+    // 48.5 and 2.5 are the halves that round-half-to-even gets wrong (it gives 48 and 2); the Python port's round() is that rule.
+    check(set("alice@work.com", ["session": .number(48.5)])?.result?["account"]?["sessionThreshold"] == .number(49)
+          && set("alice@work.com", ["session": .number(2.5)])?.result?["account"]?["sessionThreshold"] == .number(3)
+          && set("alice@work.com", ["session": .number(49.5)])?.result?["account"]?["sessionThreshold"] == .number(50),
+          "setThresholds: 48.5 is 49, 2.5 is 3 and 49.5 is 50 (half away from zero, not half to even)")
+    _ = set("alice@work.com", ["session": .number(1)])
     let refusedSecond = set("alice@work.com", ["session": .number(70), "weekly": .number(0)])
     check(kind(refusedSecond) == "invalidValue" && account(app, "alice@work.com", api: api)?["sessionThreshold"] == .number(1),
           "setThresholds: one bad value refuses the whole request; nothing is half applied")
@@ -162,13 +168,31 @@ private func kind(_ response: RPCResponse?) -> String? { response?.error.map { C
               "setPriority: \(label) is refused with the exact text", refused?.error?.message ?? "nil")
     }
     check(app.calls.count == before, "setPriority: a refused value never reaches the app")
-    check(setPriority("1", .number(99)) != nil && priorities(setPriority("1", .number(3.0))).contains(3) && kind(setPriority("1", .number(1))) == nil,
-          "setPriority: 1 and 99 are the ends of the range, and 3.0 is the whole number 3")
+    let top = setPriority("alice@work.com", .number(99))
+    check(kind(top) == nil && priorities(top).contains(99), "setPriority: 99, the top of the range, is accepted and stored", "\(priorities(top))")
+    let bottom = setPriority("alice@work.com", .number(1))
+    check(kind(bottom) == nil && priorities(bottom).contains(1), "setPriority: 1, the bottom of the range, is accepted and stored", "\(priorities(bottom))")
+    check(kind(setPriority("alice@work.com", .number(98))) == nil && priorities(setPriority("alice@work.com", .number(3.0))).contains(3),
+          "setPriority: 3.0 is the whole number 3")
 
     // A priority number is never an account reference: "3" still means the third in the list.
+    // Here alice has priority 3 and is NOT in third place; if "3" meant "the account with priority 3" it would pick her.
+    let aliceRow = account(app, "alice@work.com", api: api)
+    check(aliceRow?["priority"] == .number(3) && aliceRow?["position"] != .number(3),
+          "references: set up: alice has priority 3 and is not the third row", aliceRow?.compactText ?? "nil")
     let third = Kit.call(api, "accounts.switch", .object(["account": .string("3")]))
     let thirdEmail = third?.result?["account"]?["email"]?.stringValue
-    check(thirdEmail == app.accounts[2].email, "references: \"3\" is the position, not the account with priority 3", thirdEmail ?? "nil")
+    check(thirdEmail == app.accounts[2].email && thirdEmail != "alice@work.com",
+          "references: \"3\" is the position, not the account with priority 3", thirdEmail ?? "nil")
+
+    // The account vanished between resolving its name and writing: both new methods say so.
+    app.refuseAccountWrites = true
+    let gonePriority = setPriority("bob@home.com", .number(5))
+    let goneThresholds = Kit.call(api, "accounts.setThresholds", .object(["account": .string("bob@home.com"), "session": .number(80)]))
+    check(kind(gonePriority) == "notFound" && gonePriority?.error?.message == "That account no longer exists."
+          && kind(goneThresholds) == "notFound" && goneThresholds?.error?.message == "That account no longer exists.",
+          "setPriority and setThresholds: an account that vanished after its name was resolved is notFound, 'That account no longer exists.'")
+    app.refuseAccountWrites = false
 
     // setOrder numbers every account 1..N, replacing typed numbers (spec D3).
     _ = setPriority("alice@work.com", .number(40))
@@ -188,6 +212,8 @@ private func kind(_ response: RPCResponse?) -> String? { response?.error.map { C
     for key in [SettingKey.autoSwitchSessionThreshold, .autoSwitchWeeklyThreshold] {
         check(norm(key, .number(72.4)) == .number(72) && norm(key, .string("85")) == .number(85) && norm(key, .number(100)) == .number(100)
               && norm(key, .number(50)) == .number(50), "settings: \(key.rawValue) takes whole numbers from 50 to 100")
+        check(norm(key, .number(72.5)) == .number(73) && norm(key, .number(50.5)) == .number(51) && norm(key, .string("98.5")) == .number(99),
+              "settings: \(key.rawValue) rounds half away from zero (72.5 is 73, not the half-to-even 72)")
         check(norm(key, .number(49)) == nil && norm(key, .number(101)) == nil && norm(key, .string("high")) == nil && norm(key, .bool(true)) == nil,
               "settings: \(key.rawValue) refuses 49, 101, words and booleans")
         check(norm(key, .null) == .null && norm(key, .string("default")) == .null && norm(key, .string(" DEFAULT ")) == .null,
@@ -238,6 +264,31 @@ private func kind(_ response: RPCResponse?) -> String? { response?.error.map { C
     AutoSwitchSettings.setDefaultThreshold(.weekly, to: nil, in: defaults)
     check(AutoSwitchSettings.storedThreshold(forKey: AutoSwitchSettings.weeklyThresholdKey, in: defaults) == nil,
           "settings: null removes a window default so it follows the base")
+    // The write of a global default rounds half away from zero too (72.5 is 73; half to even would store 72).
+    AutoSwitchSettings.setDefaultThreshold(.session, to: 72.5, in: defaults)
+    AutoSwitchSettings.setDefaultThreshold(.weekly, to: 50.5, in: defaults)
+    check(AutoSwitchSettings.storedThreshold(forKey: AutoSwitchSettings.sessionThresholdKey, in: defaults) == 73
+          && AutoSwitchSettings.storedThreshold(forKey: AutoSwitchSettings.weeklyThresholdKey, in: defaults) == 51,
+          "settings: a window default of 72.5 is stored as 73 and 50.5 as 51 (half away from zero)")
+
+    // What settings.get answers (SettingsStore.value calls this): the Beeco Mac stores only the base, 98, and
+    // both new keys must then read 98, not null or 0.
+    let readName = "pixelswitch.unit-tests.control.read.\(UUID().uuidString)"
+    let stored = UserDefaults(suiteName: readName)!
+    defer { stored.removePersistentDomain(forName: readName) }
+    func thresholdValues() -> [JSONValue?] {
+        [SettingKey.autoSwitchThreshold, .autoSwitchSessionThreshold, .autoSwitchWeeklyThreshold].map { SettingKey.autoSwitchThresholdValue($0, in: stored) }
+    }
+    check(thresholdValues() == [.number(90), .number(90), .number(90)], "settings.get: nothing stored reads 90 for the base and both windows", "\(thresholdValues())")
+    stored.set(98.0, forKey: AutoSwitchSettings.thresholdKey)
+    check(thresholdValues() == [.number(98), .number(98), .number(98)],
+          "settings.get: with only autoSwitchThreshold = 98 stored, autoSwitch.sessionThreshold and autoSwitch.weeklyThreshold both read 98", "\(thresholdValues())")
+    stored.set(95.0, forKey: AutoSwitchSettings.sessionThresholdKey)
+    check(thresholdValues() == [.number(98), .number(95), .number(98)],
+          "settings.get: a window default of its own reads its own number; the base and the other window are unchanged", "\(thresholdValues())")
+    stored.set(0.0, forKey: AutoSwitchSettings.sessionThresholdKey)
+    check(thresholdValues() == [.number(98), .number(98), .number(98)], "settings.get: a window default stored as 0 counts as not set")
+    check(SettingKey.autoSwitchThresholdValue(.refreshInterval, in: stored) == nil, "settings.get: the threshold reader answers nothing for another key")
 }
 
 // MARK: - Events and status
@@ -260,6 +311,26 @@ private func kind(_ response: RPCResponse?) -> String? { response?.error.map { C
     check(data["accounts"] == list && data["accounts"]?.arrayValue?.count == 3, "events: accountsChanged carries the list exactly as accounts.list would")
     _ = Kit.call(api, "accounts.setPriority", .object(["account": .string("2"), "priority": .number(1)]))
     check(api.accountsChangedData()["accounts"]?.arrayValue?.first?["priority"] == .number(1), "events: accountsChanged reads the list as it is now")
+
+    // accountsChanged fires when this key changes (the hub compares AccountFields and DefaultFields): every field a
+    // priority, threshold, label or active edit touches is in it, and the order is.
+    let base = Kit.a
+    func fields(_ edit: (inout Account) -> Void) -> ControlSnapshots.AccountFields {
+        var changed = base
+        edit(&changed)
+        return ControlSnapshots.AccountFields(changed)
+    }
+    let reference = ControlSnapshots.AccountFields(base)
+    check(fields { $0.customLabel = "Renamed" } != reference && fields { $0.switchThreshold = 80 } != reference
+          && fields { $0.sessionThreshold = 80 } != reference && fields { $0.weeklyThreshold = 60 } != reference
+          && fields { $0.priority = 2 } != reference && fields { $0.isActive = false } != reference
+          && fields { $0.subscriptionType = "pro" } != reference && fields { _ in } == reference,
+          "events: a label, threshold, window threshold, priority, active or plan change alters the accountsChanged key; no change does not")
+    let listAB = [Kit.a, Kit.b].map(ControlSnapshots.AccountFields.init), listBA = [Kit.b, Kit.a].map(ControlSnapshots.AccountFields.init)
+    check(listAB != listBA, "events: a new order alters the accountsChanged key")
+    check(ControlSnapshots.DefaultFields(base: 90, session: 90, weekly: 90) != ControlSnapshots.DefaultFields(base: 90, session: 80, weekly: 90)
+          && ControlSnapshots.DefaultFields(base: 90, session: 90, weekly: 90) == ControlSnapshots.DefaultFields(base: 90, session: 90, weekly: 90),
+          "events: a window default change alters the accountsChanged key")
 
     let status = Kit.call(api, "status.get")?.result.flatMap { try? $0.decode(StatusInfo.self) }
     check(status?.protocolVersion == 2 && status?.protocolRevision == 3 && status?.features == ["priority", "splitThresholds"]
@@ -374,6 +445,18 @@ private func info(_ id: String, email: String, position: Int, active: Bool = fal
     check(CLIOutput.status(status(equalInfo)).contains("Auto-switch:   on, default 98%, next by most room left")
           && CLIOutput.status(status(oldInfo)).contains("Auto-switch:   on, default 98%, next by most room left"),
           "cli output: equal defaults (and an old app that sends none) read 98% as before")
+    // The Settings window never writes the base: equal window defaults that differ from it are a normal state,
+    // and the line must say what auto-switch actually uses (the windows' own default), not the base.
+    let movedInfo = AutoSwitchInfo(enabled: true, defaultThreshold: 98, onFable: true, strategy: "mostRoom", drainEarly: true, drainWithinHours: 24,
+                                   defaultSessionThreshold: 95, defaultWeeklyThreshold: 95)
+    let lowerInfo = AutoSwitchInfo(enabled: true, defaultThreshold: 90, onFable: true, strategy: "mostRoom", drainEarly: true, drainWithinHours: 24,
+                                   defaultSessionThreshold: 80, defaultWeeklyThreshold: 80)
+    check(CLIOutput.status(status(movedInfo)).contains("Auto-switch:   on, default 95%, next by most room left")
+          && CLIOutput.status(status(lowerInfo)).contains("Auto-switch:   on, default 80%, next by most room left"),
+          "cli output: equal window defaults that differ from the base read the windows' value (95%, 80%), not the base",
+          CLIOutput.status(status(movedInfo)))
+    check(CLIOutput.defaultWords(movedInfo) == "95%" && CLIOutput.defaultWords(oldInfo) == "98%"
+          && CLIOutput.defaultWords(splitInfo) == "5h 90% / 7d 50%", "cli output: defaultWords: windows first, the base only when the app sends neither")
     check(CLIOutput.strategyWords("myOrder") == "priority" && CLIOutput.strategyWords("resetsSoonest") == "resets soonest",
           "cli output: myOrder is called priority")
 
@@ -383,8 +466,11 @@ private func info(_ id: String, email: String, position: Int, active: Bool = fal
           && set.contains("pixelswitch settings set autoSwitch.strategy priority"),
           "cli output: setting a priority under another strategy says the numbers do nothing yet, and how to use them")
     check(CLIOutput.prioritySet(equal, strategy: "myOrder") == CLIOutput.accounts(equal), "cli output: under Priority there is no extra sentence")
-    check(CLIOutput.orderSet(equal).hasPrefix(CLIOutput.accounts(equal)) && CLIOutput.orderSet(equal).contains("numbered from 1")
-          && CLIOutput.orderSet(equal).contains("replacing any priority numbers"), "cli output: accounts order says it renumbers every account from 1")
+    check(CLIOutput.orderSet(equal, numbered: true).hasPrefix(CLIOutput.accounts(equal)) && CLIOutput.orderSet(equal, numbered: true).contains("numbered from 1")
+          && CLIOutput.orderSet(equal, numbered: true).contains("replacing any priority numbers"),
+          "cli output: accounts order says it renumbers every account from 1 when the app numbers accounts")
+    check(CLIOutput.orderSet(equal, numbered: false) == CLIOutput.accounts(equal),
+          "cli output: accounts order says nothing about numbering when the app does not number accounts (1.9)")
 }
 
 // MARK: - MCP
@@ -416,10 +502,13 @@ private func info(_ id: String, email: String, position: Int, active: Bool = fal
           && pp?["priority"]?["minimum"] == .number(1) && pp?["priority"]?["maximum"] == .number(99)
           && priority?["description"]?.stringValue?.contains("null clears") == true,
           "mcp: set_account_priority: only account is required; priority is an integer 1-99 or null, and the description says null clears it")
-    let accountWords = ["set_account_thresholds", "set_account_priority", "switch_account", "set_account_threshold"].map {
-        tool($0)?["inputSchema"]?["properties"]?["account"]?["description"]?.stringValue?.contains("never a priority number") == true
-    }
-    check(!accountWords.contains(false), "mcp: every account argument says it is never a priority number")
+    // Every tool that takes an account, found from the schemas (not a list typed here), says a priority number is not one.
+    let withAccount = tools.filter { $0["inputSchema"]?["properties"]?["account"] != nil }
+    let silent = withAccount.filter { $0["inputSchema"]?["properties"]?["account"]?["description"]?.stringValue?.contains("never a priority number") != true }
+        .compactMap { $0["name"]?.stringValue }
+    check(withAccount.count >= 8 && silent.isEmpty, "mcp: every account argument of every tool says it is never a priority number (\(withAccount.count) tools)", silent.joined(separator: ", "))
+    check(tool("get_usage") != nil && tool("start_sign_in") != nil && withAccount.contains { $0["name"] == .string("get_usage") }
+          && withAccount.contains { $0["name"] == .string("start_sign_in") }, "mcp: get_usage and start_sign_in are among the tools checked")
 
     _ = reply(#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"set_account_thresholds","arguments":{"account":"2","session":90,"weekly":null}}}"#)
     check(calls.value.last == #"accounts.setThresholds {"account":"2","session":90,"weekly":null}"#, "mcp: set_account_thresholds forwards its arguments, null included", calls.value.last ?? "")
@@ -434,6 +523,12 @@ private func info(_ id: String, email: String, position: Int, active: Bool = fal
           && tool("get_settings")?["description"]?.stringValue?.contains("autoSwitch.sessionThreshold") == true
           && tool("get_settings")?["description"]?.stringValue?.contains("\"priority\" is accepted") == true,
           "mcp: the descriptions of the threshold, order, list and settings tools tell the 2.0 story")
+    // A model is never told to send null where the tool refuses it: set_setting's value is required, so the description says "default".
+    let settingsWords = tool("get_settings")?["description"]?.stringValue ?? ""
+    check(settingsWords.contains("or \"default\" to follow autoSwitch.threshold") && !settingsWords.contains("null/"),
+          "mcp: get_settings tells a model to send \"default\", not null, to follow the base threshold")
+    _ = reply(#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"set_setting","arguments":{"key":"autoSwitch.sessionThreshold","value":"default"}}}"#)
+    check(calls.value.last == #"settings.set {"key":"autoSwitch.sessionThreshold","value":"default"}"#, "mcp: set_setting forwards \"default\"", calls.value.last ?? "")
     let discover = reply(#"{"jsonrpc":"2.0","id":5,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#)
     check(discover?["result"]?["instructions"]?.stringValue?.contains("never by priority number") == true, "mcp: the instructions say accounts are never named by priority number")
 }
@@ -486,7 +581,7 @@ private enum Payload19 {
         let result: JSONValue
         switch request?.method {
         case "status.get": result = (try? ControlCoding.decoder.decode(JSONValue.self, from: Data(Payload19.status.utf8))) ?? .null
-        case "accounts.list": result = (try? ControlCoding.decoder.decode(JSONValue.self, from: Data(Payload19.accounts.utf8))) ?? .null
+        case "accounts.list", "accounts.setOrder": result = (try? ControlCoding.decoder.decode(JSONValue.self, from: Data(Payload19.accounts.utf8))) ?? .null
         default: return RPCResponse.failure(request?.id, ControlError(.methodNotFound, "There is no method called \"\(request?.method ?? "")\".")).line
         }
         return RPCResponse.success(request?.id, result).line
@@ -494,17 +589,7 @@ private enum Payload19 {
     guard (try? oldApp.start()) != nil else { check(false, "old app: a stand-in 1.9 app starts"); return }
     defer { oldApp.stop() }
 
-    func run(_ arguments: [String]) -> (Int32, String, String)? {
-        let work = Kit.offMain { () throws -> (Int32, String, String) in
-            let out = Lines(), err = Lines()
-            var runner = CLIRunner(client: ControlClient(path: path))
-            runner.out = { out.add($0) }
-            runner.err = { err.add($0) }
-            let code = runner.run(try CLIParser.parse(arguments))
-            return (code, out.text, err.text)
-        }
-        return (try? work?.get())
-    }
+    func run(_ arguments: [String]) -> (Int32, String, String)? { runCLI(path, arguments) }
     let listed = run(["accounts"])
     check(listed?.0 == 0 && listed?.1.contains("alice@work.com (Work)") == true && listed?.1.contains("98% (default)") == true,
           "old app: the new CLI lists a 1.9 app's accounts", listed?.1 ?? "nil")
@@ -517,30 +602,103 @@ private enum Payload19 {
     let priority = run(["accounts", "priority", "1", "1"])
     check(priority?.0 == 1 && priority?.2 == "error: This PixelSwitch (1.9) cannot set priorities; update it." && !asked.all.contains("accounts.setPriority"),
           "old app: accounts priority stops with 'This PixelSwitch (1.9) cannot set priorities; update it.', exit 1, and never sends the method", priority?.2 ?? "nil")
+    // A 1.9 app's setOrder numbers nothing, so the CLI must not claim it did.
+    let reordered = run(["accounts", "order", "2", "1"])
+    check(reordered?.0 == 0 && reordered?.1.hasPrefix("#  Account") == true && reordered?.1.contains("numbered from 1") == false
+          && reordered?.1.contains("replacing any priority numbers") == false && asked.all.contains("accounts.setOrder"),
+          "old app: accounts order against a 1.9 app prints the table and does not say it numbered the accounts", reordered?.1 ?? "nil")
     let legacy = run(["accounts", "threshold", "1", "80"])
     check(asked.all.contains("accounts.setThreshold") && legacy?.0 == 1,
           "old app: the old threshold syntax is still sent as before (this stand-in has no such method, so it answers methodNotFound)")
+}
+
+/// Runs one CLI command against the socket at `path` off the main thread (the stand-in app is served by the main actor).
+@MainActor private func runCLI(_ path: String, _ arguments: [String]) -> (Int32, String, String)? {
+    let work = Kit.offMain { () throws -> (Int32, String, String) in
+        let out = Lines(), err = Lines()
+        var runner = CLIRunner(client: ControlClient(path: path))
+        runner.out = { out.add($0) }
+        runner.err = { err.add($0) }
+        let code = runner.run(try CLIParser.parse(arguments))
+        return (code, out.text, err.text)
+    }
+    return (try? work?.get())
+}
+
+// MARK: - The new commands, end to end against a stand-in 2.0 app
+
+/// The CLI against a 2.0 app (the real `ControlAPI` over a fake app, behind a real socket), recording what the CLI sends.
+@MainActor private func runNewAppEndToEndTests() {
+    let dir = Kit.makeTempDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let path = dir.appendingPathComponent("new20.sock").path
+    let app = Kit.FakeApp()
+    app.appVersion = "2.0"
+    let api = ControlAPI(controller: app)
+    let asked = AskedLog()
+    let server = ControlServer(path: path, handler: { line, _ in
+        if let request = try? ControlCoding.decoder.decode(RPCRequest.self, from: Data(line.utf8)) {
+            asked.add("\(request.method) \(request.params?.compactText ?? "nil")")
+        }
+        return await api.handle(line)
+    })
+    guard (try? server.start()) != nil else { check(false, "2.0 app: a stand-in 2.0 app starts"); return }
+    defer { server.stop() }
+    func lastSent(_ method: String) -> String? { asked.all.last { $0.hasPrefix(method + " ") }.map { String($0.dropFirst(method.count + 1)) } }
+
+    // What each flag puts on the wire: a flag left out is absent (the other window is left alone), default is null.
+    let weekly = runCLI(path, ["accounts", "threshold", "1", "--weekly", "50"])
+    check(weekly?.0 == 0 && lastSent("accounts.setThresholds") == #"{"account":"1","weekly":50}"#,
+          "2.0 app: --weekly 50 sends exactly the account and weekly, with no session key", lastSent("accounts.setThresholds") ?? "nil")
+    let session = runCLI(path, ["accounts", "threshold", "1", "--session", "80"])
+    check(session?.0 == 0 && lastSent("accounts.setThresholds") == #"{"account":"1","session":80}"#,
+          "2.0 app: --session 80 sends no weekly key, so a weekly limit of its own is not wiped", lastSent("accounts.setThresholds") ?? "nil")
+    let followed = runCLI(path, ["accounts", "threshold", "1", "--session", "default"])
+    check(followed?.0 == 0 && lastSent("accounts.setThresholds") == #"{"account":"1","session":null}"#,
+          "2.0 app: --session default sends session null", lastSent("accounts.setThresholds") ?? "nil")
+    let both = runCLI(path, ["accounts", "threshold", "1", "--session", "90", "--weekly", "50"])
+    check(both?.0 == 0 && both?.1 == "alice@work.com now switches at 90% of its session or 50% of its week."
+          && account(app, "alice@work.com", api: api)?["sessionThreshold"] == .number(90),
+          "2.0 app: --session 90 --weekly 50 is applied and read back in words", both?.1 ?? "nil")
+
+    let cleared = runCLI(path, ["accounts", "priority", "1", "none"])
+    check(cleared?.0 == 0 && lastSent("accounts.setPriority") == #"{"account":"1","priority":null}"#,
+          "2.0 app: accounts priority 1 none sends priority null", lastSent("accounts.setPriority") ?? "nil")
+
+    // The sentence about the strategy depends on the live strategy the app reports.
+    let note = "Auto-switch follows these numbers only when it chooses by Priority."
+    let underMostRoom = runCLI(path, ["accounts", "priority", "1", "5"])
+    check(underMostRoom?.0 == 0 && underMostRoom?.1.contains(note) == true && lastSent("accounts.setPriority") == #"{"account":"1","priority":5}"#,
+          "2.0 app: setting a priority while auto-switch chooses by most room prints that the numbers are not followed yet", underMostRoom?.1 ?? "nil")
+    app.autoSwitch = AutoSwitchInfo(enabled: true, defaultThreshold: 90, onFable: true, strategy: "myOrder", drainEarly: true, drainWithinHours: 24)
+    let underPriority = runCLI(path, ["accounts", "priority", "1", "6"])
+    check(underPriority?.0 == 0 && underPriority?.1.contains(note) == false && underPriority?.1.hasPrefix("#  Account") == true,
+          "2.0 app: the same command while auto-switch chooses by Priority prints no such sentence", underPriority?.1 ?? "nil")
+
+    let reordered = runCLI(path, ["accounts", "order", "3", "2", "1"])
+    check(reordered?.0 == 0 && reordered?.1.contains("numbered from 1") == true,
+          "2.0 app: accounts order against a 2.0 app says it numbered every account from 1", reordered?.1 ?? "nil")
 }
 
 // MARK: - Strings
 
 @MainActor private func runSplitStringTests() {
     let languages = ["en", "de", "fr", "ja", "zh-Hans"]
-    let tables = languages.map { NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String] ?? [:] }
+    let paths = languages.map { "PixelSwitch/\($0).lproj/Localizable.strings" }
+    let tables = paths.map { NSDictionary(contentsOfFile: $0) as? [String: String] ?? [:] }
     let keySets = tables.map { Set($0.keys) }
     check(!keySets[0].isEmpty && keySets.allSatisfy { $0 == keySets[0] }, "l10n: the five string tables still share one key set",
           zip(languages, keySets).map { "\($0.0) \($0.1.count)" }.joined(separator: ", "))
-    let keys = [
-        "Session (5-hour) default", "Weekly default",
-        "When no account under its weekly limit can take you, the session limit decides.",
-        "Fable uses the weekly limit.", "Priority (lowest number first)",
-        "Priority", "None", "Session", "Weekly",
-        "Lower numbers are tried first. Dragging renumbers every account from 1.",
-        "Auto-switch follows these numbers only when it chooses by Priority.", "Use priority",
-        "Auto-switch moves you off this account at %@ of its session or %@ of its week, and moves you to it only while it is at %@ or less of its session and %@ or less of its week (up to %@ of its week when no account under its weekly limit can take you).",
-        "Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default thresholds (%@ of its session or %@ of its week).",
-        "You're using it now. Auto-switch moves you off it at %@ of its session or %@ of its week and won't move you back to it.",
-    ]
+
+    // Every string 2.0 added: the English table's lines from its "/* 2.0" comment on. Derived, never typed by hand,
+    // so a string added later is covered the day it is added.
+    let lines = ((try? String(contentsOfFile: paths[0], encoding: .utf8)) ?? "").components(separatedBy: "\n")
+    let start = lines.firstIndex { $0.hasPrefix("/* 2.0") } ?? lines.count
+    let keys = lines[min(start, lines.count)...].compactMap { line -> String? in
+        guard line.hasPrefix("\""), let entry = ("{ " + line + " }").propertyList() as? [String: String] else { return nil }
+        return entry.keys.first
+    }
+    check(keys.count >= 20, "l10n: the English table's 2.0 block is found and has its strings (at least 20)", "\(keys.count)")
     let missing = keys.filter { key in !tables.allSatisfy { $0[key] != nil } }
     check(missing.isEmpty, "l10n: every new 2.0 string exists in all five languages", missing.joined(separator: " | "))
     // English is the key; the other four must be real translations, not the English copied over.
@@ -549,10 +707,29 @@ private enum Payload19 {
         return tables[1...].contains { $0[key] == key }
     }
     check(untranslated.isEmpty, "l10n: the long 2.0 strings are translated in de, fr, ja and zh-Hans", untranslated.joined(separator: " | "))
+    // The translation keeps the same placeholders as the English: %@, %lld and %% (a dropped or extra one shows a sentence with a number missing).
+    func placeholders(_ text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #"%(?:\d+\$)?(?:%|lld|@|d)"#) else { return [] }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.matches(in: text, range: range).compactMap { Range($0.range, in: text).map { String(text[$0]).replacingOccurrences(of: #"\d+\$"#, with: "", options: .regularExpression) } }.sorted()
+    }
+    let changed = keys.flatMap { key in languages.indices.dropFirst().compactMap { index -> String? in
+        guard let translated = tables[index][key], placeholders(translated) != placeholders(key) else { return nil }
+        return "\(languages[index]): \(key.prefix(40))"
+    } }
+    check(changed.isEmpty, "l10n: every 2.0 translation keeps the English string's placeholders", changed.joined(separator: " | "))
     check(tables.allSatisfy { $0["Priority (lowest number first)"] != nil && $0["My order"] == nil },
           "l10n: the strategy is called Priority (lowest number first) and the old \"My order\" label is gone")
     check(tables[0]["Lower numbers are tried first. Dragging renumbers every account from 1."] == "Lower numbers are tried first. Dragging renumbers every account from 1."
           && tables[0]["Auto-switch follows these numbers only when it chooses by Priority."] == "Auto-switch follows these numbers only when it chooses by Priority."
           && tables[0]["Fable uses the weekly limit."] == "Fable uses the weekly limit.",
           "l10n: the English sentences are the ones the spec fixes")
+    // The strings the account row speaks to VoiceOver, with the account's name in them.
+    let spoken = ["Priority for %@", "Session limit for %@", "Weekly limit for %@"]
+    check(spoken.allSatisfy { key in tables.allSatisfy { $0[key] != nil && placeholders($0[key] ?? "") == ["%@"] } },
+          "l10n: the Priority, Session limit and Weekly limit labels exist in all five languages and each names the account")
+    // Every key in all five tables whose English has a placeholder keeps it (older strings too).
+    let drifted = tables[0].keys.filter { key in languages.indices.dropFirst().contains { index in
+        tables[index][key].map { placeholders($0) != placeholders(key) } ?? false } }
+    check(drifted.isEmpty, "l10n: no string in any table has lost or gained a placeholder", drifted.sorted().prefix(3).joined(separator: " | "))
 }

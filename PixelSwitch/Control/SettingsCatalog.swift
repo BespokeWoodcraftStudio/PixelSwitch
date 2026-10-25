@@ -158,6 +158,26 @@ enum SettingKey: String, CaseIterable, Sendable {
         }
     }
 
+    /// What `settings.get` answers for the three threshold keys, read from
+    /// `defaults`: the base as stored (50-100, 90 when unset), and each window's
+    /// EFFECTIVE default (its own key when set, else the base). Pure, so it is
+    /// tested with only the base stored: both window keys then read the base
+    /// (spec 2.1). Nil for any other key.
+    static func autoSwitchThresholdValue(_ key: SettingKey, in defaults: UserDefaults) -> JSONValue? {
+        let pair = AutoSwitchSettings.windowDefaults(
+            base: AutoSwitchSettings.storedThreshold(forKey: AutoSwitchSettings.thresholdKey, in: defaults),
+            session: AutoSwitchSettings.storedThreshold(forKey: AutoSwitchSettings.sessionThresholdKey, in: defaults),
+            weekly: AutoSwitchSettings.storedThreshold(forKey: AutoSwitchSettings.weeklyThresholdKey, in: defaults))
+        switch key {
+        case .autoSwitchThreshold:
+            return .number(AutoSwitchSettings.baseThreshold(
+                stored: AutoSwitchSettings.storedThreshold(forKey: AutoSwitchSettings.thresholdKey, in: defaults)))
+        case .autoSwitchSessionThreshold: return .number(pair.session)
+        case .autoSwitchWeeklyThreshold: return .number(pair.weekly)
+        default: return nil
+        }
+    }
+
     /// Finds a key by its name, case-insensitive, or lists the valid names.
     static func named(_ name: String) throws -> SettingKey {
         let trimmed = name.trimmingCharacters(in: .whitespaces)

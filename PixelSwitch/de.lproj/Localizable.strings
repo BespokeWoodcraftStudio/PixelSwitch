@@ -327,3 +327,9 @@
 "You're using it now. Auto-switch moves you off it at %@ of its session or %@ of its week and won't move you back to it." = "Du nutzt es gerade. Der automatische Wechsel wechselt bei %@ der Sitzung oder %@ der Woche von ihm weg und kehrt nicht zu ihm zurück.";
 "Manual only accounts are never switched to automatically; you can still switch to them yourself." = "Zu Konten mit „Nur manuell“ wird nie automatisch gewechselt; du kannst selbst zu ihnen wechseln.";
 "Auto-switch tries accounts with lower numbers first when it chooses by Priority. Accounts with no number come last." = "Der automatische Wechsel probiert Konten mit niedrigeren Nummern zuerst, wenn er nach Priorität wählt. Konten ohne Nummer kommen zuletzt.";
+
+/* 2.0 fixes: help without the overflow clause; spoken names for the row controls */
+"Auto-switch moves you off this account at %@ of its session or %@ of its week, and moves you to it only while it is at %@ or less of its session and %@ or less of its week." = "Der automatische Wechsel wechselt bei %@ der Sitzung oder %@ der Woche von diesem Konto weg und wechselt nur zu ihm, solange es bei höchstens %@ der Sitzung und höchstens %@ der Woche liegt.";
+"Priority for %@" = "Priorität für %@";
+"Session limit for %@" = "Sitzungslimit für %@";
+"Weekly limit for %@" = "Wochenlimit für %@";
