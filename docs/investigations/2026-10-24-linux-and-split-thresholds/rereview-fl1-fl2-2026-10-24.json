@@ -1,0 +1,355 @@
+[
+ {
+  "lens": "switch-path",
+  "review": {
+   "priorFindings": [
+    {
+     "finding": "LB#0 P0 coordinator.py:1273 - first pass writes when the proven owner's renewed login could not be saved, or when the in-lock read returned nothing",
+     "closed": true,
+     "note": "live_login_backup.py ports LiveLoginBackup.swift exactly: result(), after_first_pass (abort unreadable when owner known and seen is None; abort notSaved on unproven or storeRefused), after_retry (unreadable when live_now is None but the first pass saw a login), after_judged_login. coordinator.py:1544-1556 applies them inside .storage-write. FirstPassTests cover a store refusing the save of an unchanged and of a renewed login, a login unreadable at step 1, and one that vanishes before the write: nothing is written in any of them."
+    },
+    {
+     "finding": "LB#1/#12/#24/#31 P1 coordinator.py:1036 - D20 revision 4 not implemented (no-active-account switch refused, no removed-login fingerprints)",
+     "closed": true,
+     "note": "perform_switch refuses only when the account list is empty (1193). _unowned_live_login_decision (1226) feeds removal.decide_disposal, a line-by-line port of LiveLoginDisposal.decide. treatAsActive adopts through the already-live shortcut, and a refusal uses the Mac's sentence. RemovedLoginsFile is 0600, holds at most 16 entries and is cleared on switch, add, sign-in and adopt. fingerprints_to_record matches RemovedLogins.fingerprintsToRecord. NoActiveAccountTests and RemovedLoginsRecordTests replace the old refusal test."
+    },
+    {
+     "finding": "LB#2/#13/#25/#30 P1/P0 claude_service.py:113 - a 429 with no account is not recorded (429 loop)",
+     "closed": true,
+     "note": "The line is now `elif status == 429:`. The guard keeps _rate_limited_without_account (64 entries, ended ones pruned, earliest cool-down evicted) and checks it in decision after the account's own park and cool-down, and in may_use, exactly as UsageRequestGuard.swift:135-138, 153 and 203-216. test_a_429_without_an_account_parks_that_token and NoAccountReconcileTests (3 cycles, 1 profile request) pin it."
+    },
+    {
+     "finding": "LB#3/#14/#26/#34 P1 coordinator.py:945-950 - removal fallback never re-checks, gives busy only 5 s, never shows the last failure",
+     "closed": true,
+     "note": "removal.run_fallback ports RemovalFallback.run: still_needed is checked before every candidate and after every wait, there are 150 busy waits in all, busyGaveUp tries nothing else, and noneWorked carries the last failure. _switch_after_removal clears the active account only if it is still the removed one and calls set_error. RemovalFallbackTests cover a user switch during the wait, a sign-in during the wait, 151 busy tries, and the last failure shown."
+    },
+    {
+     "finding": "LB#4 P1 coordinator.py:1267 - re-read and merge happen before Claude Code's .storage-write lock",
+     "closed": true,
+     "note": "storage_write_lock(held.remaining()) is held from the re-read through the merge, the atomic write and the read-back (1539-1559), and is released before ~/.claude.json.lock. The rollback compares and writes under it too. StorageWriteLockTests cover an MCP login rotated while the switch waits being kept, and a login saved under the lock being seen by the re-read."
+    },
+    {
+     "finding": "LB#11 P1 usagecycle.py:616 - staying-put sentence follows the old rule 10",
+     "closed": true,
+     "note": "staying_put.py ports stayingPutKind: strict fire, Fable-only gives noRoom, relaxed pair gives noRoom else waitingForSessionLimit. usagecycle uses `kind == WAITING_FOR_SESSION_LIMIT` with watch_fable = config.on_fable, as the Mac's watchFable = autoSwitchOnFable."
+    },
+    {
+     "finding": "LB#15 P1 coordinator.py:205 / LA#1 P1 protocol.py:831 - autoSwitched omits relaxed",
+     "closed": true,
+     "note": "auto_switched_data now takes the keyword-only relaxed argument and always sends it. emit_auto_switched passes bool(record.relaxed). test_cycle.py:471 asserts relaxed is False."
+    },
+    {
+     "finding": "LB#16 P1 coordinator.py:978 - account-list changes built outside the lock and installed stale",
+     "closed": true,
+     "note": "Every site the finding lists now goes through _modify_accounts, which reads, changes and installs under one RLock: _replace_account, _mark_active, set_priority, set_account_order, add_current_account and both sign-in finishes. StateRaceTests and ReadModifyWriteTests pin it. remove_account still installs a snapshot; that is reported as a new P2."
+    },
+    {
+     "finding": "LB#22 P1 api.py:82 - updater never follows GitHub's release redirects (FL2)",
+     "closed": true,
+     "note": "daemon.py:241 builds Transport(follow_redirects=True) for the updater only. It follows at most 5 hops, https only, to github.com, objects.githubusercontent.com and release-assets.githubusercontent.com, and drops credential headers. The token transport keeps _NoRedirect. test_api_redirects.py covers it."
+    },
+    {
+     "finding": "LB#23 P1 updater.py:270 - a rolled-back build is reinstalled (restart loop) (FL2)",
+     "closed": true,
+     "note": "rollback.py records the build in bad-builds. Updater._check returns 'rolled back' for a bad feed.build before any download or _finish and removes the bad folder."
+    },
+    {
+     "finding": "LB#27 P1 coordinator.py:1472 - renewals and usage requests start after SIGTERM",
+     "closed": true,
+     "note": "refresh_backup_in_place returns UNREACHABLE when shutting_down, and _renew_backup_in_place re-checks before the POST. read_usage, _request_usage and _renew_then_request return on _stop. finish_shutdown waits for renewals, the gate and the cycle thread. The dead retry_usage was removed. ShutdownTests pin it."
+    },
+    {
+     "finding": "LB#32 P1 test_switch.py:353 - re-read-before-write test aimed at the wrong read",
+     "closed": true,
+     "note": "The test now rotates right after the snapshot save, asserts exactly one proof request and two lock takes, and adds the unprovable-change and changes-every-time cases. Mutation check in a scratch copy: replacing the in-lock `live_now = self.login.read_credential()` with `live_now = seen` fails 7 switch tests."
+    },
+    {
+     "finding": "LB#33 P1 test_daemon.py:195 - suite contacts production hosts (FL2)",
+     "closed": true,
+     "note": "tests/network_guard.py is installed by tests/__init__.py and ends the run on any socket to anthropic.com, claude.com or github*. The outside-test-mode test no longer seeds anything to send. The full suite ran here: 1570 tests OK (26 skipped)."
+    },
+    {
+     "finding": "LA#0/#19 P1 accounts.py:238 - setting the same priority re-stamps recency",
+     "closed": true,
+     "note": "setting_priority returns sorted_by_priority(accounts) unchanged when current.priority == priority. set_priority installs only when the list changed."
+    },
+    {
+     "finding": "LA#2 P1 settings_catalog.py:216 - strategy alias not trimmed",
+     "closed": true,
+     "note": "STRATEGY_ALIASES.get(trim_whitespace(value).casefold()). Checked here: normalize(autoSwitch.strategy, ' Priority ') gives myOrder."
+    },
+    {
+     "finding": "LA#12 P1 update_check.py:90 - RecursionError escapes parse_feed (FL2)",
+     "closed": true,
+     "note": "parse_feed catches ValueError, UnicodeDecodeError, RecursionError and MemoryError and raises UpdateError('feed'). Updater._check also refuses any non-UpdateError from the feed path."
+    },
+    {
+     "finding": "LA#13 P1 logins.py:72 - OverflowError from a 309+ digit expiresAt",
+     "closed": true,
+     "note": "finite.finite_number is used in logins, accounts, protocol, settings_catalog and credtools. Checked here: a 400-digit expiresAt gives 'expiresAt is not a positive number' and usable False, and login_from_credential does not raise."
+    },
+    {
+     "finding": "LA#18 P1 logins.py:175 - same_oauth_tokens differs from liveLoginChanged",
+     "closed": true,
+     "note": "live_login_changed ports CredentialOwnership.liveLoginChanged: identical text is unchanged, then the token pairs are compared as String?. Checked here: same_oauth_tokens(None,None), ('x','x') and (blank,blank) are all True."
+    },
+    {
+     "finding": "LA#20 P1 accounts.py:217 - stored priority outside 1-99 sorts as a real number",
+     "closed": true,
+     "note": "sorted_by_priority keys on valid_priority. build_account_info sends priority only when valid. numbered_in_order caps at 99."
+    }
+   ],
+   "findings": [
+    {
+     "severity": "P1",
+     "file": "linux/pixelswitch/coordinator.py",
+     "line": 1610,
+     "problem": "FL1 added `held.check()` at the start of `_write_identity`, which runs AFTER `.credentials.json` has been written. If the refresh lock's 10 s budget runs out during the credential write (slow fsync, or a long wait for .storage-write), check() raises LockLost. That skips both the identity write and `_roll_back_credential`. The outer handler (1567-1570) logs 'nothing more was written' and tells the user the switch failed. Before FL1, the identity was always written (or rolled back) once the credential was. The Mac never leaves the token switched without trying the identity write.",
+     "failure_scenario": "Reproduced in a scratch HOME with the test rig: write_credential advances the clock 11 s. The switch to B raises 'PixelSwitch could not finish within the time it may hold Claude Code's lock. Try again in a moment.' Afterwards the live token is B's, ~/.claude.json still names A, and PixelSwitch still says A is active, so Claude Code runs B's login under A's identity. Only a later reconcile repairs it (one reconcile did in the probe), and only if the API answers for B's token. Until then the user has been told nothing changed. If they retry 'switch to B' while the API cannot prove the owner, the believed-active account is A, so the already-live shortcut does not apply and B's saved backup is written over B's live login again.",
+     "fix": "Once write_credential has succeeded, do not abort on the hold budget. In _write_identity, call write_oauth_account with budget=held.remaining() without the hold-limit check, or catch LockLost there and run _roll_back_credential (compare-and-write under .storage-write) before raising. Raise a message that does not say nothing was written. Add a test where the credential write crosses the 10 s limit: either B's identity is written and the switch succeeds, or the live credential is back to A's."
+    },
+    {
+     "severity": "P2",
+     "file": "linux/pixelswitch/dirlock.py",
+     "line": 268,
+     "problem": "When there is no birth time, `_is_ours` compares st_mtime with the float PixelSwitch passed to os.utime, within 2 ms. On a filesystem with no birth time and whole-second timestamps (ext3, or ext4 made with 128-byte inodes), the stored mtime is truncated, so PixelSwitch's own lock is never 'ours'. check() raises LockLost on every switch, and release() leaves PixelSwitch's own .oauth_refresh.lock, .storage-write and ~/.claude.json.lock directories behind; the ledger entry is dropped, so reap never cleans them. Orchestrator O1's proposed fix (an exact st_mtime_ns == against a value with a random sub-millisecond part) fails the same way on such a filesystem. On ext4 with birth time the check is right for every real takeover: Claude Code takes over only a lock stale for 10-60 s, so the births differ by seconds. The 2 ms window only fails the artificial immediate-remake tests (O1). Two narrow cases remain where release could remove a lock it does not own: with no birth time, a takeover between the touch loop's lstat and its utime; and a pause between release's lstat and rmdir.",
+     "failure_scenario": "Simulated (birth_time_ms returns None, utime truncated to whole seconds): DirLock.acquire, then check() raises 'changed under us', and after release() the lock directory still exists. On such a home every switch fails, and Claude Code's renewals and saves wait on PixelSwitch's leftovers until they go stale.",
+     "fix": "After each utime (in try_acquire and in the touch loop), record the mtime read back with os.lstat(path).st_mtime_ns and compare that exactly, so the check holds at the filesystem's granularity. Fold this into FL4's O1 fix."
+    },
+    {
+     "severity": "P2",
+     "file": "linux/pixelswitch/coordinator.py",
+     "line": 1268,
+     "problem": "In the treatAsActive branch (1268-1276) no judged login is set. Only the 'proceed' branch binds the switch to the login it judged (1280). Mac lane FE (03478e0, merged after 2f6fad5, from FD re-review P2 AppState.swift:1105) now sets judgedLiveLogin for treatAsActive as well. Linux matched the Mac at 2f6fad5 but no longer does.",
+     "failure_scenario": "After a removal where every fallback failed, B and K remain and nothing is active. Claude Code holds K's grant. The user switches to B, the decision is treatAsActive(K), and while B's saved login is validated or renewed, Claude Code renews K (R1 spent, R2 live). Step 1 saves nothing (no proven owner), the two reads agree, and B is written over K(R2). K's backup holds the spent R1, so K must sign in again.",
+     "fix": "In the treatAsActive branch, also set `judged = llb.JudgedLogin(live_credential)`, as AppState.swift now does. Add the FE test: a renewal between the judgment and step 1 on a treatAsActive switch writes nothing."
+    },
+    {
+     "severity": "P2",
+     "file": "linux/pixelswitch/coordinator.py",
+     "line": 1009,
+     "problem": "remove_account is the one account-list change that still builds the new list from a snapshot (`remaining = [a for a in self.accounts ...]`) and installs it later with _install_accounts (1024/1030), outside _modify_accounts. Label, threshold, priority and order setters take no gate, so one that lands in between is overwritten. This is the LB#16 class, left in the removal path.",
+     "failure_scenario": "Reproduced: during remove_account(A), after the snapshot (hooked at persist_needs_reauth), another connection's set_label('Work', B) returns True. After the removal, B's label is None in memory and in accounts.json.",
+     "fix": "Do the removal's list change inside _modify_accounts: drop the account and clear the flags in a change function that reads `current`, and choose `active` there."
+    },
+    {
+     "severity": "P2",
+     "file": "linux/pixelswitch/coordinator.py",
+     "line": 993,
+     "problem": "remove_account reads `account = self.account_by_id(account_id)` before `gate.begin`, which FL1 made wait up to 2 s for a reconcile. was_active then uses the stale `account.is_active` (1002). perform_switch re-reads its state under the gate for exactly this reason; remove_account does not.",
+     "failure_scenario": "A is believed active, and the user signed B in by hand. The user removes A while the cycle's reconcile holds the gate and adopts B. The stale A.is_active makes was_active True, so the B list entry is reinstalled with is_active False while _active stays B. The fallback stands down. status.get, the CLI and the tray report no active account, and accounts.json is saved with none active. The daemon itself treats B as active.",
+     "fix": "Re-read the account (and fail notFound if it is gone) after the gate is taken, before computing was_active."
+    },
+    {
+     "severity": "P2",
+     "file": "linux/pixelswitch/coordinator.py",
+     "line": 939,
+     "problem": "_finish_reauthentication marks the account active without calling forget_removed_logins(). Mac lane FE added forgetRemovedLogins() to finishReauthentication's matching branch (FD re-review P2 AppState.swift:639). Linux clears the record on add, new sign-in, existing-account sign-in, adopt and switch, but not on re-authenticate.",
+     "failure_scenario": "The user removes A, so its fingerprints are recorded. Then they re-authenticate K, which becomes active, but the record is kept. A later removal appends to it, so A's fingerprints carry into a later no-active state. Impact is small (only provable grants are recorded).",
+     "fix": "Call self.forget_removed_logins() after self._modify_accounts(reauthenticated) when the capture succeeded, as the Mac now does."
+    }
+   ],
+   "verdict": "No P0. One new P1 and five P2. All 19 P0/P1 findings outside FL3's files are closed.\n\nRead-only review of the Linux code at 2f6fad5. HEAD moved to a43eaaa during the review, but only Mac files and orchestrator-findings.md changed, nothing under linux/. The full suite ran here: 1570 tests, OK, 26 skipped.\n\nNew P1: _write_identity calls held.check() after .credentials.json was written. When the 10 s hold limit is passed during the credential write, the switch leaves B's login live under A's identity in ~/.claude.json, with no rollback, and tells the user nothing changed. Reproduced in a scratch HOME; one reconcile repaired it in the probe, provided the API answers.\n\nLens results:\n- live_login_backup.py matches LiveLoginBackup.swift in every abort and every proceed. Linux differs in one way: it does the API proof outside the lock and then runs a second pass with after_retry rules, which is stricter and safe.\n- removal.py matches LiveLoginDisposal, RemovedLogins.fingerprintsToRecord and RemovalFallback.run. The judged-login binding is correct for proceed but missing for treatAsActive, which Mac lane FE has since fixed on the Mac (P2).\n- The re-read, merge and write happen inside .storage-write, and every wait is capped by the refresh lock's remaining time. The one gap is the post-write check (the P1).\n- The account-less 429 table is an exact port.\n- staying_put.py matches stayingPutKind.\n- The accounts-list critical section is fixed for every listed site. remove_account still installs a snapshot (P2), and it reads the account before its new 2 s gate wait (P2).\n- Shutdown is closed. The only remaining gap is a microsecond window between perform_switch's shutting_down check and taking the gate.\n- dirlock on ext4 with birth time is correct for any real takeover, because a takeover needs 10-60 s of staleness. The 2 ms tolerance only fails the immediate-remake tests (O1, already assigned to FL4). Where there is no birth time and timestamps are whole seconds, PixelSwitch treats its own lock as lost and leaves it behind; O1's exact-ns fix would keep that failure (P2). Release removes a lock PixelSwitch does not own only in two pathological cases: with no birth time, a takeover between the touch loop's lstat and its utime; and a pause between release's lstat and rmdir.\n\nProbes ran from the scratchpad. Running python -I ignored PYTHONDONTWRITEBYTECODE and wrote 5 gitignored .pyc files into linux/tests/__pycache__. They are deleted, and the checkout is clean."
+  }
+ },
+ {
+  "lens": "updater",
+  "review": {
+   "priorFindings": [
+    {
+     "finding": "LB-0 P0 coordinator.py:1273: the first pass writes when the proven owner's renewed login could not be saved, or when the in-lock read returned nothing",
+     "closed": true,
+     "note": "live_login_backup.py:103-120 after_first_pass aborts with UNREADABLE_ABORT when owner_known and seen is None, and with notSaved when the login is unchanged and the save was unproven or storeRefused. after_retry (:160-172) aborts when live_now is None but the first pass saw a login. coordinator.py:1539-1561 applies both inside .storage-write before any write. Suite green."
+    },
+    {
+     "finding": "LB-1 P1 coordinator.py:1036: D20 revision 4 missing; a switch with no active account is always refused",
+     "closed": true,
+     "note": "coordinator.py:1193-1195 refuses only an empty list. _unowned_live_login_decision (:1221-1248) uses removal.decide_disposal. :1262-1290 handles treatAsActive, proceed (JudgedLogin, nothing saved) and refuse with removal.REFUSAL_SENTENCE (removal.py:125, the Mac sentence). Removed-login fingerprints are recorded in remove_account (:1006-1007, _remember_removed_logins), kept in stores.RemovedLoginsFile (0600, at most 16), and forgotten after a switch (:1309) or an adopt."
+    },
+    {
+     "finding": "LB-2 P1 claude_service.py:113: a 429 from the profile lookup with no account is not recorded (429 loop)",
+     "closed": true,
+     "note": "claude_service.py:116-120 records every 429 via guard.record_rate_limited(account, ...) with account possibly None. usage_guard.py:134 keeps _rate_limited_without_account (cap 64 at :121, pruned and evicted in record_rate_limited :239-260), consulted in decision (:171-175) and may_use (:193-195). test_claude_service.py:204 now asserts the token is parked."
+    },
+    {
+     "finding": "LB-3 P1 coordinator.py:950: _switch_after_removal never re-checks the removed account is still active, gives up after 5 busy seconds, never shows the last failure",
+     "closed": true,
+     "note": "removal.run_fallback (removal.py:59-97) checks still_needed before every candidate and after every wait, counts busy waits across the whole loop (DEFAULT_MAX_BUSY_WAITS=150, :56), returns busyGaveUp without trying others, and returns noneWorked with last_failure. coordinator.py:1047-1096 clears the active account only if it is still the removed one and calls set_error(outcome.message)."
+    },
+    {
+     "finding": "LB-4 P1 coordinator.py:1267: the re-read and merge happen before Claude Code's .storage-write lock, so a save Claude Code makes during the wait is overwritten",
+     "closed": true,
+     "note": "coordinator.py:1539: `with self.login.storage_write_lock(held.remaining()) as storage:` wraps the live_now re-read, the LiveLoginBackup verdicts and _write_credential_locked (:1576-1600, merge built from live_now read under the lock). oauthAccount is written after release (_write_identity). _roll_back_credential does compare-and-write under .storage-write (:1625). claude_login.py:268 adds storage_write_lock."
+    },
+    {
+     "finding": "LB-11 P1 usagecycle.py:616: the staying-put log uses the old rule 10 (overflow sentence even past the relaxed limits)",
+     "closed": true,
+     "note": "New staying_put.py ports stayingPutKind: notAtLimit / noRoom (Fable-only, or relaxed limits also reached) / waitingForSessionLimit. usagecycle.py:608 picks the sentence from staying_put_kind instead of overflow_holds."
+    },
+    {
+     "finding": "LB-12 P1 coordinator.py:1036: perform_switch refuses with no active account (parity, duplicate of LB-1)",
+     "closed": true,
+     "note": "Same evidence as LB-1: refusal only when self.accounts is empty (coordinator.py:1193), disposal decision ported, removed-login fingerprints persisted and cleared."
+    },
+    {
+     "finding": "LB-13 P1 claude_service.py:113: an account-less 429 is dropped (parity, duplicate of LB-2)",
+     "closed": true,
+     "note": "Same evidence as LB-2 (claude_service.py:116-120; usage_guard.py:134, 171-175, 193-195, 239-260)."
+    },
+    {
+     "finding": "LB-14 P1 coordinator.py:941: the removal fallback differs from RemovalFallback.run (no stand-down, moves on after 5 busy retries, no error event)",
+     "closed": true,
+     "note": "Same evidence as LB-3. busyGaveUp stops the whole loop. set_error emits the error event with the last failure's sentence."
+    },
+    {
+     "finding": "LB-15 P1 coordinator.py:205: autoSwitched sends relaxed only when true",
+     "closed": true,
+     "note": "coordinator.py:245-249 always passes relaxed=bool(record.relaxed). protocol.auto_switched_data (protocol.py:894-904) has a mandatory keyword-only relaxed and always sets data['relaxed']."
+    },
+    {
+     "finding": "LB-16 P1 coordinator.py:978: list changes are built outside _state_lock and installed later, so concurrent writers lose updates",
+     "closed": true,
+     "note": "coordinator.py:302-333 _modify_accounts holds _state_lock from the read of _accounts through the install and save, and emits events after release. _install_accounts, _mark_active, _replace_account, set_priority and set_account_order all go through it."
+    },
+    {
+     "finding": "LB-22 P1 api.py:82: the updater's transport never follows GitHub's redirects, so no Linux install can ever update",
+     "closed": true,
+     "note": "api.py:135-156 _FollowReleaseRedirects: at most 5 hops, GET/HEAD only, each hop checked by check_release_url (https, no userinfo, port 443, exact host github.com / objects.githubusercontent.com / release-assets.githubusercontent.com), and credential headers dropped. daemon.py:241 builds update_transport with follow_redirects=True and passes it to Updater. The token transport keeps _NoRedirect. test_updater.py:444-455 installs through two-hop chains for both the feed and the tarball. Not checked live (network forbidden here): see the verdict note on the Accept header."
+    },
+    {
+     "finding": "LB-23 P1 updater.py:270: a rolled-back build is reinstalled two minutes later (restart loop, start-limit-hit)",
+     "closed": true,
+     "note": "rollback.py:122 records the build in bad-builds before flipping. updater.py:341-343 returns none 'rolled back' for a recorded build, before any download or _finish, and _forget_bad_build removes its folder unless it is current or previous. A higher build still installs. Tested at test_updater.py:553-570 (one restart, feed only, then 33 installs) and :774-796 (sequence against StartLimitBurst read from the packaged unit)."
+    },
+    {
+     "finding": "LB-24 P1 coordinator.py:1036: pre-revision-4 no-active-account refusal (process-updater lens, duplicate of LB-1)",
+     "closed": true,
+     "note": "Same evidence as LB-1."
+    },
+    {
+     "finding": "LB-25 P1 claude_service.py:113: account-less 429 not recorded (process-updater lens, duplicate of LB-2)",
+     "closed": true,
+     "note": "Same evidence as LB-2."
+    },
+    {
+     "finding": "LB-26 P1 coordinator.py:946: the fallback never re-checks before each candidate or after a busy wait (wrong switch)",
+     "closed": true,
+     "note": "Same evidence as LB-3. coordinator.py still_needed() also returns False while shutting_down."
+    },
+    {
+     "finding": "LB-27 P1 coordinator.py:1472: renewals and usage requests can start after SIGTERM; finish_shutdown stops waiting too early",
+     "closed": true,
+     "note": "refresh_backup_in_place returns UNREACHABLE when shutting_down (coordinator.py:1793) and re-checks before the POST (:1869). usagecycle.py:205, 225, 264 refuse new usage requests and renewals once _stop is set. finish_shutdown (:1931-1950) waits for renewals, the gate and the cycle thread, then joins the sign-in and workers within the deadline."
+    },
+    {
+     "finding": "LB-30 P0 claude_service.py:113: 429 loop on the live token with no account (tests lens, duplicate of LB-2)",
+     "closed": true,
+     "note": "Same evidence as LB-2. test_claude_service.py:204 test_a_429_without_an_account_parks_that_token replaces the pin of the old rule."
+    },
+    {
+     "finding": "LB-31 P1 coordinator.py:1036: no-active-account refusal, no disposal tests (tests lens, duplicate of LB-1)",
+     "closed": true,
+     "note": "Same evidence as LB-1. Disposal and removal cases are in test_fl1_pure_switch.py and test_fl1_switch.py. Suite green: 1570 tests, OK, 35 skipped."
+    },
+    {
+     "finding": "LB-32 P1 test_switch.py:353: the re-read-before-write test mutated the wrong read",
+     "closed": true,
+     "note": "test_switch.py:368-386 now rotates the live login right after the snapshot save (rotate_after_the_snapshot). It asserts B ends live, A's backup holds the rotated token, one profile proof, and two refresh-lock entries. The negative case (unprovable rotation writes nothing, LIVE_NOT_SAVED_MESSAGE) is at :388-397."
+    },
+    {
+     "finding": "LB-33 P1 test_daemon.py:195: the outside-test-mode daemon test sent fabricated tokens to production",
+     "closed": true,
+     "note": "test_daemon.py:210-233 builds the daemon in-process without starting it and checks that every URL is production. :235-259 starts a real daemon with no seeded account or login, loads the network guard via guarded_environment, and asserts no getUsageLimits or accountIdentity line. My in-process run of the whole suite recorded no production lookup. The in-process guard has a separate false-pass hole (new finding 1)."
+    },
+    {
+     "finding": "LB-34 P1 coordinator.py:945: the fallback differs from RemovalFallback.run in three ways (tests lens, duplicate of LB-3)",
+     "closed": true,
+     "note": "Same evidence as LB-3."
+    },
+    {
+     "finding": "LA-0 P1 accounts.py:238: setting_priority re-stamps when the number is unchanged",
+     "closed": true,
+     "note": "accounts.py:234-238 returns sorted_by_priority(accounts) unchanged when current.priority == priority. coordinator.set_priority installs nothing when updated == current, so there is no save and no event."
+    },
+    {
+     "finding": "LA-1 P1 protocol.py:831: auto_switched_data cannot send relaxed",
+     "closed": true,
+     "note": "protocol.py:894-904: relaxed is a required keyword and always set."
+    },
+    {
+     "finding": "LA-2 P1 settings_catalog.py:216: the strategy alias is not trimmed",
+     "closed": true,
+     "note": "settings_catalog.py:218 STRATEGY_ALIASES.get(trim_whitespace(value).casefold())."
+    },
+    {
+     "finding": "LA-12 P1 update_check.py:90: parse_feed lets RecursionError escape",
+     "closed": true,
+     "note": "update_check.py:94 catches ValueError, UnicodeDecodeError, RecursionError and MemoryError and raises UpdateError('feed'). :86-89 also catches a lone surrogate. updater.py:336-338 refuses any other exception from the feed path. Tests at test_update_check.py:60-63 and test_updater.py:636. This Mac has Python 3.14.7, so the 3.12 pin was not re-run here."
+    },
+    {
+     "finding": "LA-13 P1 logins.py:72: a 309+ digit expiresAt raises OverflowError in the D12 predicate (and the same pattern elsewhere)",
+     "closed": true,
+     "note": "New finite.py finite_number() catches OverflowError. Used at logins.py:77 and :135, accounts.py:71 and :366, protocol.py:524 and :539, and settings_catalog.py:192, 225, 323, 413. The remaining float() calls (coordinator.py:385, settings_catalog.py:150) take values that were already validated."
+    },
+    {
+     "finding": "LA-18 P1 logins.py:175: same_oauth_tokens differs from liveLoginChanged (None/None, blank/blank, x/x are 'changed')",
+     "closed": true,
+     "note": "logins.py:192-208 live_login_changed ports the Mac rule exactly: identical text, None/None included, is unchanged; then tokens compare as str-or-None, and one side unparseable means changed. same_oauth_tokens (:211-218) is its negation."
+    },
+    {
+     "finding": "LA-19 P1 accounts.py:238: setting the same priority re-stamps (tests lens, duplicate of LA-0)",
+     "closed": true,
+     "note": "Same evidence as LA-0."
+    },
+    {
+     "finding": "LA-20 P1 accounts.py:217: out-of-range stored priorities sort as real numbers; AccountInfo sends them raw; numbering passes 99",
+     "closed": true,
+     "note": "accounts.py:211-213 treats an invalid priority as none in the sort key. protocol.py:778 sends priority only when valid_priority. accounts.py:249 caps numbering with min(index, 99)."
+    }
+   ],
+   "findings": [
+    {
+     "severity": "P1",
+     "file": "linux/tests/network_guard.py",
+     "line": 134,
+     "problem": "The test network guard can give a false pass. clear() runs `del violations[:]`, which erases every violation recorded so far in the run, not just the guard test's own five deliberate ones. test_network_guard.py calls it twice: line 44 explicitly, and line 34 as addCleanup. unittest discovers modules in sorted order, so 32 of the 45 test modules run before test_network_guard. That includes test_daemon (its in-process build test), test_claude_service, test_api_redirects, test_cli and test_mcp. A real production lookup or connect recorded in any of them is wiped, and the atexit check then exits 0. Daemon-subprocess violations go to the child log and are not affected. Today it is latent: I ran the whole suite in-process with clear() wrapped to record what it erases (1570 tests, 0 failures), and it erased only the five deliberate entries.",
+     "failure_scenario": "Proven with a scratch probe that makes no network traffic. Import tests.network_guard, then call socket.getaddrinfo('api.anthropic.com', 443) inside try/except, as code under test that swallows the refusal would. violations now holds ['getaddrinfo(...)']. Then run GuardTests.test_a_connection_attempt_is_refused_and_recorded_without_any_network_traffic. Afterwards violations is [] and the process exits 0. Concretely: a future change makes test_claude_service or the in-process daemon build in test_daemon resolve api.anthropic.com, and the code catches the OSError. The suite reports OK on the laptop and in CI. The guarantee behind the merge title 'no test touches real servers' is enforced only for the 12 modules after test_network_guard.",
+     "fix": "Make the guard test remove only its own entries. Take `before = len(network_guard.violations)` at the start, then use `del network_guard.violations[before:]`, both at line 44 and in the cleanup (e.g. `self.addCleanup(lambda: network_guard.clear(since=before))` with `def clear(since=0): del violations[since:]`). Add a test that a violation already present before the guard test still makes a child `python -c` run exit 1 after the guard test's own steps. Running the deliberate refusals in a subprocess instead would keep the parent's list untouched altogether."
+    },
+    {
+     "severity": "P2",
+     "file": "linux/pixelswitch/updater.py",
+     "line": 468,
+     "problem": "A self-check result of 'bad' is now permanent (record_bad_build), but 'bad' still covers failures that are not the build's fault. A child killed by a signal (negative returncode, e.g. the OOM killer on a loaded machine) counts as bad. So does a self-check that fails because the user's own store is unreadable for a while. For example, settings.json or accounts.json hand-edited into invalid JSON: the running daemon keeps its in-memory copy, but --self-check exits 1. Before FL2 such a build was simply retried at the next 6-hour check. Now it is never installed, and the user waits for the next release.",
+     "failure_scenario": "An update to build 32 arrives while settings.json briefly holds invalid JSON from a hand edit, or while the OOM killer takes the ~1 s self-check child. _self_check returns 'bad', the folder is removed and bad-builds gains 32. The user fixes the file. Every later check logs 'Build 32 was rolled back or failed its self-check; waiting for a newer build' and 32 is never installed. Only build 33 or later reaches that machine.",
+     "fix": "Treat `child.returncode < 0` as 'unrunnable'. Give the self-check a distinct exit code for 'a store could not be read' (for example 3, from daemon.self_check when the failure is in the store reads rather than the imports or the version) and treat that as 'unrunnable' too. Record a build as bad only for import failures, a missing launcher, or a version/build mismatch. Add a test for a self-check killed by SIGKILL and one for a damaged settings.json: neither may write bad-builds."
+    },
+    {
+     "severity": "P2",
+     "file": "linux/pixelswitch/updater.py",
+     "line": 422,
+     "problem": "There is a gap between the stop check and the restart. _finish checks `self._stop.is_set()` at line 422, then flips previous and current (two symlink replaces with directory fsyncs) and calls self._restart() at line 434, which runs `systemctl --user restart pixelswitch.service`. Daemon.stop sets the flag (updater.stop(0.0)) but does not wait for the updater to get past that point. A SIGTERM that lands inside this window lets the updater issue the restart anyway. With the default job mode, systemd's restart job replaces the user's pending stop job, so the service comes back.",
+     "failure_scenario": "An installed update has just passed its self-check and the daemon is idle. The user runs `systemctl --user stop pixelswitch.service`, or the uninstaller runs `systemctl --user disable --now`, in the milliseconds between line 422 and line 434. The updater still sends `restart`. The service starts again on the new build after the user stopped it, and an uninstall then removes files under a daemon that is running from them. The window is narrow (two fsyncs), so this is rare.",
+     "fix": "Use a small lock shared by the flip and stop. _finish holds it from the stop re-check through self._restart(). Updater.stop() sets the flag and then acquires and releases that lock (bounded by its timeout) before Daemon.stop goes on. A stop then lands either before the flip (nothing is restarted, and current is left for the next start) or after the restart was already queued, in which case the user's later stop job replaces it as intended."
+    },
+    {
+     "severity": "P2",
+     "file": "linux/pixelswitch/api.py",
+     "line": 150,
+     "problem": "The size cut-off and the stop poll cover only the final response. After _FollowReleaseRedirects.redirect_request approves a hop, urllib's HTTPRedirectHandler.http_error_302 drains the 3xx body with an unbounded `fp.read()` (confirmed in this Python 3.14.7) before it follows. That read has no byte limit and no should_stop poll, so the commit's 'size cut-off across hops' does not hold for redirect bodies. It is small because every hop host has already passed the GitHub allow-list over verified TLS, so only GitHub could serve such a body. Separately, when the handler raises RedirectRefused the 3xx response is never closed, and its socket lingers until garbage collection.",
+     "failure_scenario": "An allowed GitHub host answers a hop with a 302 whose body is very large, or drips one byte every 29 s. The updater thread holds that much memory, or sits in fp.read() without seeing the stop flag. Daemon.stop's 5 s updater join then gives up and the thread is frozen at exit. Nothing is installed, because integrity still rests on the signature.",
+     "fix": "Override http_error_301/302/303/307/308 in _FollowReleaseRedirects to read at most a small cap (e.g. 64 KiB) of the 3xx body, or none at all, before closing it and calling self.parent.open. Close fp before raising RedirectRefused. Add a test where a hop's body is larger than the cap."
+    },
+    {
+     "severity": "P2",
+     "file": "linux/tests/network_guard.py",
+     "line": 101,
+     "problem": "The guard is blind to two paths. (a) A proxy: the production Transport installs urllib.request.ProxyHandler() (api.py:168), so with https_proxy or HTTPS_PROXY set in the environment (common in CI or behind a corporate proxy), a request to api.anthropic.com resolves and connects only to the proxy host and sends `CONNECT api.anthropic.com:443`. Neither getaddrinfo nor connect ever sees a blocked name. (b) Non-Python grandchildren: outside test mode ClaudeCli finds the real claude in /usr/local/bin, PATH or `bash -lc 'command -v claude'`, and openssl and systemctl are also spawned without the guard. Today no test sends through either path (my in-process full run recorded no violation).",
+     "failure_scenario": "On a CI runner with HTTPS_PROXY set, a future test that builds a non-test-mode Transport and calls USAGE_URL with a fabricated token reaches Anthropic through the proxy. The guard records nothing and the run passes.",
+     "fix": "In tests/__init__.py, before installing the guard, remove http_proxy, https_proxy, all_proxy and their uppercase forms from os.environ. Do the same in child_environment, or blank them there, so children and urllib see no proxy. Optionally also refuse a CONNECT line naming a blocked host by wrapping http.client.HTTPConnection.set_tunnel. For (b), set claude.binaryPath to the stub, or give an empty PATH, in any non-test-mode daemon test."
+    }
+   ],
+   "verdict": "No P0. All 30 P0/P1 findings in scope from review-lb and review-la are closed: every finding whose file is not one of FL3's, duplicates counted separately. Of these, 22 are from LB (2 P0, 20 P1) and 8 from LA (all P1). Each closure is backed by file:line evidence in the code at 2f6fad5. Five new defects came from the FL2 lens. One is P1, the network-guard false pass: clear() erases every earlier violation, so 32 of the 45 test modules are effectively unguarded. A probe proved it, and an in-process full run shows it is latent today. Four are P2: a self-check killed by a signal or failing on a damaged user store permanently blacklists that build; a stop arriving just before the restart can turn the user's stop into a restart; redirect bodies are drained with no size cap or stop poll (only GitHub hosts can serve them); and the guard cannot see traffic through an https proxy or from non-Python grandchildren. The redirect allow-list held against every bypass I tried: userinfo, @, backslash, port, IDN case, tab and newline quoting. No credential header is sent on any hop, and a final 404 is 'no update'. The verify-then-extract path works on the very same bytes. A file served from an allowed host installs only if it is signed by the pinned key and its signed VERSION is newer than the running build. bad-builds is 0600, written atomically by both writers in the same shape, read defensively, and does not stop a higher build. is_idle checks the right store locks (BackupStore.is_idle and the AccountsFile and SettingsFile RLocks), and the 85 s stop budget fits under TimeoutStopSec=90 (server.stop adds well under a second in practice). Suite: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s linux/tests -t linux` on this Mac (Python 3.14.7) ran 1570 tests, OK (35 skipped), exit 0. Not verified, because the network is forbidden here: whether GitHub answers the updater's exact request (`Accept: application/json`, User-Agent `PixelSwitch/<v> (Linux)`) on /releases/latest/download/latest-linux.json with the same 302 chain that FL2 observed with plain `curl -sI`. One live header check at release time would rule out a never-updating feed. Nothing in the repo was edited, created or committed. Two read-only probes live in the scratchpad (/private/tmp/claude-501/-Users-ahamade-Documents-GitHub-pixelventures/71ac74c8-b531-4cc7-b4e9-8d6524a2e9e6/scratchpad/probe/), and no processes or scratch HOMEs were left behind."
+  }
+ }
+]
