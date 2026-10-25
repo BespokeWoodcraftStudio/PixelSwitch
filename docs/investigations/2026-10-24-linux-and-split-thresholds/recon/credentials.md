@@ -99,7 +99,7 @@ Account matching never uses lineage (same refresh token) as proof: lineage can o
 
 | Step | What | Where | Reads | Writes |
 |---|---|---|---|---|
-| 0 | Preconditions: an `activeAccount` must exist (else `ActionError.noActiveAccount`); `!isSwitching && !isLoggingIn` (else `.busy`); set `isSwitching`, `switchingTo` | `AppState.swift:780-797` | - | in-memory |
+| 0 | Preconditions (1.9): an `activeAccount` must exist (else `ActionError.noActiveAccount`). **Superseded in 2.0 by spec D20 revision 4:** only an empty account list refuses; with no active account a switch may overwrite an unproven live login only when it is provably disposable (see the spec and `LiveLoginDisposal` in `PixelSwitch/Services/AccountRemoval.swift`); `!isSwitching && !isLoggingIn` (else `.busy`); set `isSwitching`, `switchingTo` | `AppState.swift:780-797` | - | in-memory |
 | 1 | Read live credential, prove owner (layer 2). If owner is the target, or owner unknown and the target is already `activeAccount`: log "No switch needed", adopt if needed, return | `:802-812` | S1, profile API | - |
 | 2 | `validatedTargetBackup(for:)`: look up the target's backup (`missing` vs `storeUnavailable` are different errors); check the guard; renew if expired/refused; ask the API whose login it is; compare to the target; compare saved `oauthAccount` details; else lineage check against other accounts' saved logins | `:821-827,936-1020` | S4, token endpoint (maybe), profile API (maybe) | S4 only if a renewal happens |
 | 3 | Set `lastAutoSwitchAt = now` (restarts the 300 s auto-switch cooldown, `:129-130,832`); `isLoading = true` | `:832-834` | - | in-memory |
