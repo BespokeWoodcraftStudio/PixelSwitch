@@ -13,15 +13,23 @@ every client. Builders are Sonnet, QA is Opus. **Do not touch the PixelDirector 
   `docs/superpowers/specs/2026-10-24-2.0-spec.md` (revision 3, decisions D1-D20). Lanes, file ownership, checks:
   `docs/superpowers/plans/2026-10-24-2.0-lanes.md`. Recon, reviews and findings:
   `docs/investigations/2026-10-24-linux-and-split-thresholds/`.
-- **Merged into `release-2.0`:** lane V (150 shared cases, `Tests/conformance/`), lane MA (Mac engine, AppState rules,
-  D12 usable-login rule, re-read before write, renewal expiry, D20 remove fix; 1039/1039 unit tests; CI branch build
-  40151307161 passed `scripts/verify-ci-artifact.sh`), lane LA (Linux pure core in `linux/`; 672 tests on 3.14, 3.12 and
-  the laptop).
-- **Running when this was written:** lane MB (Mac views, control, CLI, MCP, strings, docs) in `.claude/worktrees/mb-mac-ui`,
-  lane LB (Linux daemon) in `.claude/worktrees/lb-linux-daemon`, Opus reviews of MA and LA. Still to come: lane LC (Linux
-  CLI, MCP, tray, settings window, packaging, CI jobs), Opus reviews and fix rounds, the founder page
-  `docs/decisions/pixelswitch-2.0-2026-10-24.html`, release notes, `scripts/release.sh 2.0`, `scripts/verify-release.sh v2.0`,
-  the laptop install from the real release (auto-switch off).
+- **Merged into `release-2.0`** (as of 2026-10-24 ~20:30 PDT): lanes V (150 shared cases), MA (Mac engine), MB (Mac
+  control, CLI, MCP, views, strings), FA, FB, FC (Mac fixes from three rounds of Opus review), LA (Linux pure core), LB
+  (Linux daemon; the refresh lock and two more Claude Code locks confirmed and honoured, see `linux/README.md`). Mac:
+  1326/1326 unit tests; CI branch builds pass `scripts/verify-ci-artifact.sh` (signed, notarized). Linux: 1136 tests on
+  3.14, 3.12 and the laptop; scratch-HOME integration 82/82 on the Mac and the laptop. Founder page committed:
+  `docs/decisions/pixelswitch-2.0-2026-10-24.html` (rendered 1920x1080 both themes; Copy tested). Draft
+  `RELEASE_NOTES.md` has a `LINUX_INSTALL_PLACEHOLDER` to fill from lane LC's report.
+- **Review records:** `docs/investigations/2026-10-24-linux-and-split-thresholds/review-*.json` and `rereview-*.json`.
+- **Running at that time:** lane LC (Linux CLI, MCP, tray, settings window, packaging, install.sh, CI jobs,
+  verify-release Linux checks) in `.claude/worktrees/lc-linux-faces`; Opus review of LB (four lenses); Opus re-review of
+  FC; CI run 40157939731.
+- **Queue after that:** one Linux fix lane (review-la P1s, review-lb findings, spec rev 4 D20 and 429 rules for Linux);
+  one final Mac polish lane (rereview-fb P2s: priority stepper hover-hold and stale pending step; remote-control.sh guard
+  pinned to PIXELSWITCH_CONTROL_SOCKET and the host OS; any rereview-fc findings); Opus re-reviews; CI with the Linux
+  jobs; fill the release notes; merge `release-2.0` into `main`; `echo y | ./scripts/release.sh 2.0`;
+  `scripts/verify-release.sh v2.0`; install on the laptop from the real release (auto-switch off) and read its own usage;
+  confirm the Macs pick up 2.0; worklog, handover, memory.
 - **If a lane died:** its worktree and branch hold its commits; re-brief a new lane from the lanes file, never edit the
   conformance vectors, and run the lane's checks yourself before merging.
 - **Laptop:** `ssh ahmed@ahmed-aorus-15p-xd.tail19d9f2.ts.net` (key auth). It runs the CabDesign farm, whose `claude`
