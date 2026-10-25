@@ -58,6 +58,7 @@ The founder asked for it on 2026-10-24 (his words verbatim in spec section 0). *
 
 ## Waiting on the founder
 
+0. **2.0 decisions and hand checks** (four choices that ship with defaults; checks on his Mac, the laptop and the CLI): [docs/decisions/pixelswitch-2.0-2026-10-24.html](decisions/pixelswitch-2.0-2026-10-24.html). He pastes the Copy block back; record it verbatim in `docs/decisions/`, mark the page answered, ship behaviour changes as 2.1.
 1. **Hand checks** (15 cards, one round, on 1.5 to 1.8; card 4 is the no-subscription fix, card 5 is 1.8's switch at your number, card 6 is 1.7's Retry): [docs/decisions/pixelswitch-hand-checks-2026-09-25.html](decisions/pixelswitch-hand-checks-2026-09-25.html). He pastes the Copy block back. Then:
    - record his answers verbatim in `docs/decisions/`;
    - mark the page answered;
