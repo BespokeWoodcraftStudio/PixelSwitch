@@ -1,0 +1,326 @@
+[
+ {
+  "lens": "release-security",
+  "severity": "P1",
+  "file": "linux/install.sh",
+  "line": 88,
+  "problem": "Every delete in install.sh calls a bare `rm` (lines 76, 88, 91, 94, 96-99, 101, 280, 286, 296). On the founder's laptop, a login shell (SSH, bash -l) puts ~/.cabdesign-safety/bin first on PATH, and that folder holds an `rm` wrapper (recon laptop.md:314 and risk 4 at :346: 'Avoid rm in install scripts; use Python or /bin/rm explicitly, and expect the guard to refuse deletes outside what it allows'). The wrapper's behaviour has never been tested, and the test suite hides the problem: InstallTests.run_install replaces PATH with clean_path() (test_packaging.py:43-45), 'no per-user guard scripts that shadow rm'.",
+  "failure_scenario": "The founder runs `bash ~/.local/share/pixelswitch/install-linux.sh --uninstall --purge` from an SSH or login shell on the laptop. Line 87 stops and disables the service. Line 88's `rm -f ~/.config/systemd/user/pixelswitch.service` runs ~/.cabdesign-safety/bin/rm. If the guard refuses, set -e ends the script there: the unit file, the launchers, the app, the desktop entries and (with --purge) backups.json with every saved login all stay on disk, and he sees the guard's message instead of PixelSwitch's. A reinstall over an existing install has the same problem: `rm -rf \"$TARGET\"` (line 280) or `rm -f \"$link\"` (line 296) aborts after `current` and `previous` were already flipped (lines 288-289), leaving a half-done install.",
+  "fix": "Right after `set -euo pipefail`, add `rm() { /bin/rm \"$@\"; }`. A shell function wins over PATH lookup, so every existing call then uses /bin/rm, which exists on Ubuntu 24.04 and 26.04. Alternatively, replace each `rm` with `/bin/rm`. Add an InstallTests case that puts a shim `rm` printing 'refused' and exiting 1 first on PATH, and asserts that a fresh install, a reinstall of the same build and `--uninstall --purge` all succeed and leave nothing behind."
+ },
+ {
+  "lens": "release-security",
+  "severity": "P2",
+  "file": ".github/workflows/build.yml",
+  "line": 495,
+  "problem": "Spec 5.6 requires the release notes to carry the SHA-256 of install-linux.sh, but nothing enforces it. linux-publish only emits a ::warning::, and only after the macOS job has already published the release body. scripts/verify-release.sh:68 prints the hash but never checks the release body. RELEASE_NOTES.md at HEAD (07ac7c3) still says `sha256sum install-linux.sh   # must print INSTALLER_SHA256_PLACEHOLDER`.",
+  "failure_scenario": "v2.0 is tagged without replacing the placeholder. CI is green apart from a warning, `scripts/verify-release.sh v2.0` passes, and every user who follows README:29-35 or the release notes ('Or check the installer first') gets a hash that can never match the expected one. The checked install path the spec requires is dead on arrival.",
+  "fix": "In verify-release.sh linux_checks, after the Python block, add `sha=$(shasum -a 256 \"$L/install-linux.sh\" | awk '{print $1}'); body=$(gh release view \"$TAG\" -R $R --json body --jq .body); case \"$body\" in *INSTALLER_SHA256_PLACEHOLDER*) bad \"release notes still hold the placeholder\" ;; *\"$sha\"*) ok \"release notes carry install-linux.sh sha256\" ;; *) bad \"release notes lack install-linux.sh sha256 $sha\" ;; esac`. Catch it before tagging as well: install-linux.sh is byte-identical to linux/install.sh (verified here; same hash), so scripts/release.sh can refuse to tag unless `shasum -a 256 linux/install.sh` appears in RELEASE_NOTES.md."
+ },
+ {
+  "lens": "release-security",
+  "severity": "P2",
+  "file": ".github/workflows/build.yml",
+  "line": 470,
+  "problem": "linux-publish has `needs: [build, linux-package]`, and linux-package runs no tests. A tag whose Linux suite fails on 24.04 or 26.04 is still signed and published, and every Linux install updates itself to it, since updates.automatic is on by default. The Mac release, by contrast, is gated on Tests/run-unit-tests.sh inside the build job.",
+  "failure_scenario": "A regression that linux-test catches (for example in the switch path or the CLI) still reaches latest-linux.json for v2.x. The self-check and the rollback only catch a daemon that fails to start, not wrong behaviour.",
+  "fix": "Use `needs: [build, linux-test, linux-package]`. This is stricter than the spec's literal `needs: [build, linux-package]`; record it as a spec 5.6 amendment."
+ },
+ {
+  "lens": "release-security",
+  "severity": "P2",
+  "file": ".github/workflows/build.yml",
+  "line": 13,
+  "problem": "The workflow-level `permissions: contents: write` is inherited by linux-test (line 388) and linux-package (line 447). On pushes to main or a tag, and on same-repo pull requests, those jobs hold a token that can create or flag releases and replace appcast.xml or latest.json. actions/checkout persists that token in .git/config while apt packages, the whole test suite and install.sh run.",
+  "failure_scenario": "A compromised build dependency in linux-test (an apt package, or a test helper changed in a collaborator's PR) uses the persisted token to mark an older release as Latest or to delete appcast.xml. Every Mac client's SUFeedURL (releases/latest/download/appcast.xml) then stops offering updates, and the Linux feed goes back to the old release.",
+  "fix": "Add `permissions: contents: read` to linux-test and linux-package. Give linux-publish its own `permissions: contents: write`, so it is the only Linux job with a write token."
+ },
+ {
+  "lens": "release-security",
+  "severity": "P2",
+  "file": "linux/install.sh",
+  "line": 305,
+  "problem": "With the documented one-line install (`curl ... | bash`, README:23-27, line 4 of install.sh), BASH_SOURCE[0] is empty, so no copy is kept at ~/.local/share/pixelswitch/install-linux.sh. Yet linux/README.md:47-48 says 'The installer keeps a copy of itself at ~/.local/share/pixelswitch/install-linux.sh', and the 2.0 release notes tell users to uninstall with `bash ~/.local/share/pixelswitch/install-linux.sh --uninstall`. Tested here: `echo '[ -f \"${BASH_SOURCE[0]:-}\" ] && echo kept || echo not-kept' | bash` prints not-kept.",
+  "failure_scenario": "A user installs with the one-liner and later runs the documented uninstall command, which fails with 'No such file or directory'. The InstallTests only run the script by path, so the piped case is untested.",
+  "fix": "Ship the installer inside the signed tarball. In build-release.sh, call write_installer before build_tarball and copy \"$OUT/install-linux.sh\" to \"$top/install-linux.sh\" (mode 755). In install.sh, copy \"$TARGET/install-linux.sh\" to \"$DATA/install-linux.sh\" when present, falling back to BASH_SOURCE only for older tarballs. The kept copy is then covered by the Ed25519 signature. Add a test that pipes the installer into bash and asserts the copy exists."
+ },
+ {
+  "lens": "release-security",
+  "severity": "P2",
+  "file": "linux/install.sh",
+  "line": 220,
+  "problem": "On the feed path the installer accepts any build (0 <= build < 10^9) and flips `current` to it even when the installed version is newer (lines 288-289). The updater refuses build <= running (spec 5.4). The installer is the one Linux path that accepts a downgrade to an older, genuinely signed release, and the feed is unsigned.",
+  "failure_scenario": "An older release is marked Latest, by mistake or with one of the write tokens in the previous finding. The user re-runs ~/.local/share/pixelswitch/install-linux.sh to repair something. It downloads the old feed, the old signed tarball verifies, and `current` goes back to the old build. The updater will not move forward again, because latest now names the older build.",
+  "fix": "In the feed branch, after reading FEED_BUILD, read the build from \"$APP/current/VERSION\" when that link exists, and stop with \"the latest release (build $FEED_BUILD) is older than the installed build $INSTALLED; nothing was installed\" when FEED_BUILD < INSTALLED. Allow an equal build, which is a repair. Keep --from as the explicit escape hatch."
+ },
+ {
+  "lens": "release-security",
+  "severity": "P2",
+  "file": "linux/install.sh",
+  "line": 245,
+  "problem": "The `..` and absolute-path pre-check is `if tar -tzf ... | grep -Eq ...` under `set -o pipefail`. When grep -q exits on its first match, tar keeps writing, dies of SIGPIPE (status 141), and the pipeline's non-zero status sends the `if` down the else branch, so the refusal is skipped. The same mechanism shown here: `set -o pipefail; yes | grep -q y` returns 141. Not run against GNU tar on this Mac, whose bsdtar exits 0. The test at test_packaging.py:461 passes only because its archive has a single member. Extraction then relies only on GNU tar's defaults, and `chmod 755 \"$ROOT\"/bin/*` (line 266) follows symlinks.",
+  "failure_scenario": "A hostile archive given with --from, with `../x` first and more than 64 KB of further names, passes the pre-check on Ubuntu. Its bin/ symlinks pointing at user files (for example ~/.ssh/id_ed25519) are then made 0755 by line 266.",
+  "fix": "Extract with Python's tarfile data filter, as the updater does (Python 3.12 or newer is already required). Replace lines 245-246 with `python3 -I - \"$TARBALL\" \"$EXTRACT\" <<'PY'` running `import sys, tarfile; t = tarfile.open(sys.argv[1], 'r:gz'); t.extractall(sys.argv[2], filter='data')`, ending with `PY`, followed by `|| die ...`. Replace line 266 with `find \"$ROOT/bin\" -type f -exec chmod 755 {} +`. At minimum, write the listing to \"$WORK/list\" first and grep that file."
+ },
+ {
+  "lens": "release-security",
+  "severity": "P2",
+  "file": "linux/install.sh",
+  "line": 203,
+  "problem": "With `--from FILE --signature SIG`, the signature is checked on the caller's path (line 203), and the archive is then opened again twice from that same path: by tar -t (line 245) and by tar -x (line 246). The file can therefore change between verification and extraction. The download path avoids this by keeping everything in the 0700 $WORK folder.",
+  "failure_scenario": "The user runs `install-linux.sh --from /tmp/shared/pixelswitch.tar.gz --signature x.sig` on a file another account owns or can rewrite. That account swaps the bytes after openssl prints 'Signature Verified Successfully'. Unsigned code is then unpacked and run by the self-check, and the result is labelled 'verified signature'.",
+  "fix": "At line 199, run `cp -- \"$FROM\" \"$WORK/pixelswitch-linux.tar.gz\"` and set TARBALL to the copy, then verify, list and extract only that copy."
+ },
+ {
+  "lens": "release-security",
+  "severity": "P2",
+  "file": "linux/build-release.sh",
+  "line": 165,
+  "problem": "sign_file runs inside a command substitution (`signature=\"$(sign_file \"$TARBALL\")\"`). The KEY_FILE it sets at line 130 never reaches the parent shell, so the EXIT trap at lines 36-40 cannot remove it, and the subshell has no trap of its own. If the run is terminated while openssl signs, the 48-byte PKCS8 private key (0600) stays in $TMPDIR. Reproduced here with a throwaway key and a slow openssl stand-in: after SIGTERM, $TMPDIR/pixelswitch-key.* (48 bytes) remained. The die at line 136 also leaves an empty key file behind.",
+  "failure_scenario": "A maintainer signs locally with `--signing-key env:SPARKLE_EDDSA_KEY` and presses Ctrl-C, or a CI job is cancelled during signing. The release signing key (the same key that signs the Mac DMG, D16) is left in a file in $TMPDIR. A hosted runner is discarded afterwards; a Mac or a self-hosted machine keeps the file.",
+  "fix": "Create the key file in the parent so the existing trap can remove it. In write_feed: `KEY_FILE=\"$(mktemp \"${TMPDIR:-/tmp}/pixelswitch-key.XXXXXX\")\"; chmod 600 \"$KEY_FILE\"; signature=\"$(sign_file \"$TARBALL\" \"$KEY_FILE\")\"; rm -f \"$KEY_FILE\"; KEY_FILE=\"\"`. Have sign_file write to \"$2\", and move the mktemp after the length check. bash runs the EXIT trap on SIGTERM and SIGINT (checked here)."
+ },
+ {
+  "lens": "release-security",
+  "severity": "P2",
+  "file": "linux/install.sh",
+  "line": 27,
+  "problem": "The documented `curl -fsSL ... | bash` executes the script line by line as it arrives, and the whole body is top-level code. If the connection drops mid-download, bash runs only the first part of the script.",
+  "failure_scenario": "The download is cut off after line 289. The new version has been moved in and `current` flipped, but the launchers, rollback.py, the desktop entries, the unit and the service restart never happen. The service keeps running the old version until it restarts, and PixelSwitch prints no error.",
+  "fix": "Put everything after the function definitions inside `main() { ... }` and make the last line of the file `main \"$@\"`, so bash runs nothing until the whole script has arrived."
+ },
+ {
+  "lens": "release-security",
+  "severity": "P2",
+  "file": "linux/install.sh",
+  "line": 320,
+  "problem": "Each run without --no-autostart rewrites ~/.config/autostart/pixelswitch-tray.desktop and starts the tray (lines 345-354). On Linux, launchAtLogin=false is stored as that file being absent: autostart.set_enabled unlinks it and is_enabled reads it back. Re-running the installer over an existing install therefore silently turns the user's launchAtLogin back on.",
+  "failure_scenario": "The user turns off 'Launch at login' in Settings, later re-runs the installer to repair the install, and the tray starts at every login again. `settings get launchAtLogin` now reports true.",
+  "fix": "Write the autostart file and start the tray only on a first install, or when the file already exists: `if [ \"$NO_AUTOSTART\" = 0 ] && { [ -z \"$CURRENT_NAME\" ] || [ -e \"$AUTOSTART_DIR/pixelswitch-tray.desktop\" ]; }; then ...`. Apply the same condition to the tray start at lines 345-354."
+ },
+ {
+  "lens": "cli-mcp-parity",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/mcp.py",
+  "line": 93,
+  "problem": "The Linux MCP server copies the Mac's text word for word, so on a Linux machine it tells the model things that are false. This goes beyond the word \"Mac\" that README:99-100 already admits to. get_usage (line 93) promises \"plus this Mac's cost and activity today\", but the Linux daemon never sends `machine` (D15, protocol.build_usage_report). check_for_updates (line 138) says \"(its window opens on that Mac)\", but Linux has no update window and the check installs by itself. The start_sign_in `open` example (line 105) is \"Safari\", which does not exist on Linux, so coordinator.check_browser answers invalidValue. The instructions (lines 43, 45) and switch_account, add_current_account, start_sign_in and quit_app (lines 97, 99, 103, 140) say \"that Mac\". The CLI port already changed the matching strings (cli.py:336 \"like Firefox\", cli.py:720 \"On the computer running PixelSwitch\", cli.py:953 \"installs by itself\"), so on the same machine the MCP and the CLI disagree.",
+  "failure_scenario": "The founder's Claude connects with `ssh laptop /home/ahmed/.local/bin/pixelswitch mcp` and asks \"what did the laptop cost today, and open the sign-in in my browser\". Following the descriptions, the model calls get_usage, expects a cost block, finds none, and reports that cost tracking is broken or zero. It then calls start_sign_in with open \"Safari\" (the documented example) and gets `invalidValue: No browser called \"Safari\" is installed on this computer.` After check_for_updates it tells the user to look for an update window that never appears.",
+  "fix": "Keep the Swift text as the source, but apply one fixed substitution table on Linux. In mcp.py add `_LINUX_TEXT = ((\"; plus this Mac's cost and activity today\", \"\"), (\"(its window opens on that Mac)\", \"; a newer version installs by itself\"), (\"such as \\\"Safari\\\"\", \"such as \\\"Firefox\\\"\"), (\"on the Mac this server runs on\", \"on the computer this server runs on\"), (\"that Mac\", \"that computer\"))` and run every description and INSTRUCTIONS through it once at import. With these replacements check_for_updates reads \"Ask PixelSwitch to check for an update; a newer version installs by itself.\" In test_mcp.py, make test_every_description_is_the_swift_one and test_the_instructions_are_the_swift_ones apply the same table to the Swift literals before comparing, so the descriptions still cannot drift from the Mac's in any other way. Update README:99-101 to say the descriptions are the Mac's with these Linux wordings."
+ },
+ {
+  "lens": "cli-mcp-parity",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/README.md",
+  "line": 60,
+  "problem": "README:60-63 says the CLI's \"output, --json shapes and exit codes \u2026 are the Mac's\" and lists the deliberate differences as exactly three: the cost line, the warnings lines, and --version. The CLI changes three more user-visible strings. update-check prints \"PixelSwitch is checking for updates; a newer version, if there is one, installs by itself.\" (cli.py:953), where the Mac prints \"\u2026; its window opens on that Mac.\" The sign-in text says \"On the computer running PixelSwitch, open this\u2026\" (cli.py:720), where the Mac says \"On the Mac running PixelSwitch\u2026\". The --open-in hint ends \"like Firefox.\" (cli.py:336), where the Mac's ends \"like Safari.\". The module docstring (cli.py:6-11) lists the first two but not the third. recon control.md 5.4 says these strings are pinned by users' scripts, so the list of differences has to be complete.",
+  "failure_scenario": "A user who drives both machines with one script (for example, grepping `accounts sign-in` output for \"On the Mac running PixelSwitch\" to pull out the automatic link, as the integration script's step 5 does in spirit) trusts the README's \"output \u2026 are the Mac's\". The grep silently finds nothing on the laptop, and the script reports that no link arrived.",
+  "fix": "In README.md lines 61-63, replace the list with: \"Differences, all on purpose: there is no \\\"This Mac today\\\" cost line in `usage`; `status` prints the daemon's warnings (one line each); `pixelswitch --version` prints the app version; `update-check` says a newer version installs by itself instead of naming the Mac's window; the sign-in link line says \\\"On the computer running PixelSwitch\\\" instead of \\\"On the Mac running PixelSwitch\\\"; and the `--open-in` hint names Firefox, not Safari.\" Add the `--open-in` hint as a fifth bullet to the cli.py docstring at lines 6-11."
+ },
+ {
+  "lens": "gui",
+  "severity": "P1",
+  "file": "linux/pixelswitch/gui/settings_accounts.py",
+  "line": 207,
+  "problem": "The Remove confirmation always says \"Claude Code's own login is not touched.\" When the account being removed is the active one and others remain, coordinator.remove_account (D20) starts _switch_after_removal, which runs perform_switch and rewrites ~/.claude/.credentials.json. The dialog says the opposite of what happens, in exactly the case that matters (spec 5.7.8 says the founder must be told in words that a switch also changes the CabDesign farm's account). The Mac has no such sentence because it has no confirmation at all.",
+  "failure_scenario": "On the laptop the founder opens Settings and presses Remove\u2026 on the card marked Active. The dialog says Claude Code's login is not touched, so he confirms. The daemon switches Claude Code to the next account by priority, and every Claude Code worker in the CabDesign farm moves to that account mid-job.",
+  "fix": "In AccountCard._remove_clicked, choose the body from the state. If self.info.get(\"isActive\") and len(self.window.snapshot.accounts) > 1, use: \"This is the account Claude Code is using now. PixelSwitch will switch Claude Code to the next account by priority, which changes the account every Claude Code on this computer uses. Its saved login is deleted from PixelSwitch; signing it back in needs a person at a browser.\" Otherwise keep the current text. Add a widget test asserting both bodies (extend test_remove_asks_first to capture the body)."
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/settings_accounts.py",
+  "line": 143,
+  "problem": "Re-sign appears only when the card has a message that model.needs_resign recognises. The Mac's re-authenticate button (\u21bb, AccountSwitcherView.swift:210-218) is on every account. Also, the daemon's exact sentences \"Session expired. Re-authenticate (\u21bb) to fix.\" and \"...was removed. Re-authenticate (\u21bb) to fix.\" tell the user to press \u21bb, which does not exist anywhere in the Linux window.",
+  "failure_scenario": "An account shows \"No active subscription on this account (OAuth not allowed).\" needs_resign and can_retry are both false, so the card offers no action and the user cannot re-sign it from the window. On an expired account the message points at a \u21bb the user cannot find; the button is labelled \"Re-sign\".",
+  "fix": "Show the Re-sign button on every card (set_visible(True)), keeping suggested-action styling only when model.needs_resign(info). Give it the glyph the message names, e.g. Gtk.Button(label=\"\u21bb Re-sign\") or an Adw.ButtonContent with icon view-refresh-symbolic and label Re-sign. Update test_buttons."
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/model.py",
+  "line": 57,
+  "problem": "Retry eligibility is guessed from message prefixes. The daemon also marks \"Could not fetch usage: <ExceptionName>\" as retryable (usagecycle.py:192-195, can_retry=True when no UsageRequestError is available), but that prefix is not in RETRYABLE_PREFIXES.",
+  "failure_scenario": "An unexpected exception in a usage read puts \"Could not fetch usage: JSONDecodeError\" on the card. The Mac card would offer Retry; the Linux card offers nothing, and the user has to wait for the next poll.",
+  "fix": "Add \"Could not fetch usage\" to RETRYABLE_PREFIXES, with a test in test_gui_model.test_messages. (Longer term, put the daemon's canRetry on the wire as an optional usage.canRetry and prefer it.)"
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/settings.py",
+  "line": 79,
+  "problem": "Spec 5.1 lists General as \"... strategy with the D6 line ...\", but the General page has no D6 line or Use priority button under the strategy (only Accounts has it). Also, every caption added with auto.add(caption(...)) is a non-row child, which Adw.PreferencesGroup places after the whole list box. TEXT_OVERFLOW (\"When no account under its weekly limit can take you, the session limit decides.\"), which belongs under the two defaults, therefore renders under the strategy picker (visible in linux-settings-general-light.png).",
+  "failure_scenario": "The founder picks \"Most room left\" on General and gets no hint there that priority numbers then do nothing. The sentence explaining the two defaults sits under an unrelated row.",
+  "fix": "Split the Auto-switch group. Put the switch row and the two default SpinRows in one Adw.PreferencesGroup whose set_description is TEXT_OVERFLOW. Put Fable, strategy and early switching in a second group, and add under the strategy row a plain_row(TEXT_PRIORITY_NOTE) with a \"Use priority\" button (settings.set autoSwitch.strategy \"priority\"), visible when the strategy is not myOrder and updated in GeneralPage.update."
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/link.py",
+  "line": 155,
+  "problem": "After a failed connect the event thread sleeps in self._stop.wait(backoff), and the backoff grows to 30 s. request_snapshot() only sets _reread, which is read only inside _read_events while connected. So pressing \"Start PixelSwitch\" (SettingsWindow.start_service, which posts request_snapshot after 1.5 s, or the tray's start-service action) does not shorten the wait.",
+  "failure_scenario": "The daemon has been down for a minute, so the backoff is 30 s. The user clicks Start PixelSwitch in the banner; systemd starts the service in about 1 s, but the banner and the tray's \"PixelSwitch is not running\" stay for up to 30 s. The user clicks again or concludes the start failed.",
+  "fix": "Add self._wake = threading.Event(). stop() and request_snapshot() set it. _event_loop waits with self._wake.wait(backoff), and when woken without _stop it clears _wake and resets backoff to 1.0. Call self.link.request_snapshot() from Tray.start_service as well."
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/settings.py",
+  "line": 490,
+  "problem": "_closing flushes only the Accounts page's debouncers. The General page's three Debouncers (session default, weekly default, drain hours; 500 ms) are never flushed, so a change made just before closing is dropped when the app quits and its GLib timeout never fires. Separately, DaemonLink._call_loop returns as soon as _stop is set and drops any call still queued, so even a flushed call can be lost if do_shutdown's link.stop() runs before the worker dequeues it.",
+  "failure_scenario": "The user sets Weekly default to 60 with the spin button and closes the window within half a second. Nothing is sent and the weekly default stays at 50 with no message.",
+  "fix": "Add GeneralPage.flush() that calls flush() on session_default.debounce, weekly_default.debounce and _drain_debounce, and call it from SettingsWindow._closing next to accounts_page.flush(). In link.py, let stop() wait briefly (up to 2 s) for the queue to drain before setting _stop, or have _call_loop process items until it dequeues the None sentinel instead of checking _stop first."
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/link.py",
+  "line": 176,
+  "problem": "_read() makes status.get, accounts.list and settings.get calls on the subscribed event connection, and ControlClient.call (client.py:295-296) throws away every pushed event that arrives while it waits for a reply. The server writes events from its own dispatcher thread (server.py control-events), so an event for a change can arrive after the daemon computed an older reply and before that reply is written. The event is lost and the face keeps the stale reply.",
+  "failure_scenario": "The tray is re-reading after a usage event. Meanwhile `pixelswitch settings set autoSwitch.enabled false` runs, and its settingsChanged event lands during the tray's status.get call. The tray's Auto-switch check stays ticked until some unrelated event arrives, which with a 5-minute refresh can be minutes later.",
+  "fix": "Count skipped events in ControlClient.call (e.g. self.skipped_events += 1 when decode_response returns None for a line that decode_event accepts). In _read_events, if the count rose during self._read(client), set dirty = True and last_event = now so another read follows. Alternatively, queue the skipped events for next_event to return first."
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/sni.py",
+  "line": 177,
+  "problem": "Dbusmenu treats underscores in the label property as mnemonics: a single underscore is hidden and marks the access key, and only a double underscore shows as one. Account labels and addresses are exported unescaped. The GNOME AppIndicator extension strips the first single underscore.",
+  "failure_scenario": "An account ahmed_h@example.com, or a label \"side_project\", shows in the top-bar menu as \"ahmedh@example.com\" or \"sideproject\". In the menu that switches accounts, the user can no longer tell which line is which account.",
+  "fix": "Escape before exporting: item.property_set(\"label\", entry.label.replace(\"_\", \"__\")). Add an account with an underscore to gui_sni_probe.py and assert the raw label in GetLayout carries \"__\"."
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/sni.py",
+  "line": 309,
+  "problem": "In AppIndicatorBackend, accounts and Auto-switch are Gtk.CheckMenuItem. A click toggles the item's check locally before our handler runs. Tray.on_snapshot redraws only when the entries change, so a click that changes nothing leaves the wrong check mark. Examples: the active account, which has no action, or a failed switch.",
+  "failure_scenario": "On a machine where AyatanaAppIndicator3 is installed, the user clicks the active (checked) account. It shows unchecked and no account is ticked until the next usage change. Or a switch to B fails: both A and B show ticked.",
+  "fix": "In the activate handler, restore the state for check items: connect a handler that, with the handler blocked, calls w.set_active(entry.checked) and then calls on_action only when entry.action is set. Or call self.set_menu(self._entries) after any check-item activation."
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/tray.py",
+  "line": 101,
+  "problem": "The re-exec rule compares only the marketing version (status.appVersion \"2.0\") with the tray's own VERSION version. Spec 5.4 accepts any feed whose build is greater than the running build, with the same version, so a build-only update (2.0 build 31 to 2.0 build 32) restarts the daemon but never re-executes the tray. That breaks \"The tray re-executes itself when the daemon reports a new version\".",
+  "failure_scenario": "v2.0 is republished as build 32 with a tray fix. The updater installs it and restarts the daemon. The tray sees appVersion 2.0 == own 2.0 and keeps running build 31's code until the next login.",
+  "fix": "On each (re)connect, compare (version, build) from version_module.read_version() with parse_version_file of ~/.local/share/pixelswitch/app/current/VERSION (or an optional appBuild in status.get). Re-exec when they differ, and key REEXEC_ENV on \"<version>-<build>\". Extend TrayRuleTests with a same-version, higher-build case."
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/settings_accounts.py",
+  "line": 123,
+  "problem": "\"Updated N ago\" is computed only when a snapshot arrives. The Mac's text counts up by itself (UsageDashboardView: \"the relative text then counts up by itself\"), and D15 requires the Linux window to show it. Between events the Linux text freezes.",
+  "failure_scenario": "An account polled round-robin reads \"Updated 2 minutes ago\" and still reads that 8 minutes later, because no event arrived. The user trusts a stale percentage as recent.",
+  "fix": "In SettingsWindow, add GLib.timeout_add_seconds(30, ...) that re-runs self.accounts_page.update(self.snapshot) when the snapshot is connected. It needs no socket call."
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/widgets.py",
+  "line": 155,
+  "problem": "A priority typed with the spin button is saved 800 ms after the last click. The accounts list is sorted by priority, so AccountsPage.update rebuilds the page and the card moves while the pointer is still on it. The Mac avoids this by not saving while the pointer is over the row (lane FD \"priority stepper hover hold\"); the Linux control has no equivalent.",
+  "failure_scenario": "The user clicks + on account B's priority (P3 to P4), pauses a second, and B jumps below C. Their next + click lands on C's spin button and changes C's priority instead of B's.",
+  "fix": "Add a Gtk.EventControllerMotion (and a focus-leave controller) to PriorityControl. While the pointer is inside, keep re-arming the debounce instead of committing, and commit on leave or focus-out, as the Mac does. Do the same in LimitControl for consistency."
+ },
+ {
+  "lens": "gui",
+  "severity": "P2",
+  "file": "linux/pixelswitch/gui/settings.py",
+  "line": 429,
+  "problem": "apply_snapshot passes a disconnected snapshot to every page. AccountsPage then rebuilds with zero accounts and shows the \"No Accounts / Add your current Claude Code account to get started.\" empty state with an active Add current account button. General shows fabricated defaults (90/90, Most room left), and every existing card is destroyed. This happens on every daemon restart, including each auto-update.",
+  "failure_scenario": "The updater restarts the daemon while the window is open. For a second or more the window says there are no accounts and offers to add one. Clicking Add current account then fails with a toast, and all cards are rebuilt on reconnect.",
+  "fix": "In apply_snapshot, when not snapshot.connected, reveal the banner, set self.stack insensitive and return without updating the pages, so the last connected state stays visible. Make the stack sensitive again on the next connected snapshot."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "linux/tests/test_packaging.py",
+  "line": 524,
+  "problem": "test_the_script_never_calls_sudo cannot catch the most likely sudo regression. It deletes the text '\"sudo apt install' and then checks with the regex \\bsudo\\s+(?!apt install), whose negative lookahead whitelists every 'sudo apt install' anywhere, executed or quoted. I checked this in memory: insert an executed line `sudo apt install -y python3-gi gir1.2-gtk-4.0` into check_python_and_gtk() and the test still passes. Only the 'sudo  apt-get' spelling is caught.",
+  "failure_scenario": "A later edit 'helpfully' installs the missing typelibs instead of dying (install.sh lines 118/125 already print that exact command). Running install-linux.sh on the laptop then prompts for or runs sudo, breaking D14 and the P0 rule 'an install that runs with sudo', and the suite stays green.",
+  "fix": "Replace the regex with a per-occurrence check. Strip comment lines, then for every re.finditer(r'\\bsudo\\b', line), assert that line[:m.start()] matches r'\\b(die|warn|say)\\s+\"[^\"]*$', meaning sudo only appears inside a message string. Also prove it at run time: put `sudo` and `pkexec` shims first on PATH in run_install() (each does `touch $SCRATCH/sudo-called; exit 1`). Assert the marker is absent after test_install_from_a_local_tarball_in_a_scratch_home, after the uninstall tests, and after test_the_dependency_check_names_what_is_missing (for that test, add the shim dir to its explicit env PATH)."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "linux/tests/test_packaging.py",
+  "line": 366,
+  "problem": "No test runs install.sh's download path (install.sh lines 209-239 and 259), the path every real first install takes. That path fetches latest-linux.json, validates version, build, url prefix, size and SHA format, downloads with --max-filesize, compares size and SHA-256, verifies the signature against the embedded key, and requires VERSION to equal the feed. Every InstallTests case uses --from, and VerifyReleaseTests exercises verify-release.sh, not install.sh. A grep of linux/tests for the path's messages ('not the size the release promised', 'does not match its SHA-256', 'does not match the release feed', 'release feed') finds nothing.",
+  "failure_scenario": "A refactor drops or short-circuits line 236 (the SHA-256 compare) or line 237 (verify_signature \"$TARBALL\" \"$FEED_SIGNATURE\"), or loosens the url-prefix assert in the embedded Python. The laptop's real 2.0 install from GitHub then accepts a tarball that matches no signature (P0: a forged download accepted), and all 1335 tests stay green.",
+  "fix": "Add InstallTests cases on the VerifyReleaseTests pattern. Use a stand-in `curl` on PATH that copies a served file to the path after `-o`, choosing it by URL (latest-linux.json or the tarball). Use a copy of install.sh whose SU_PUBLIC_ED_KEY line is re.sub'd to a test seed's public key, run with HOME scratch, --no-systemd --no-autostart, PIXELSWITCH_INSTALL_SKIP_CHECKS=1 and openssl3() first on PATH; skip the class without OpenSSL 3. Assert:\n(a) a good signed feed installs, with stdout containing 'verified: size, SHA-256 and Ed25519 signature';\n(b) a wrong sha256 dies with 'does not match its SHA-256';\n(c) size+1 dies with 'not the size the release promised';\n(d) a signature by another seed dies with \"does not match PixelSwitch's public key\";\n(e) a url outside https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/download/v<version>/, a size over 50 MB, or version '2.0.1' all die with 'is not what this installer expects';\n(f) a correctly signed tarball whose VERSION build differs from the feed dies with 'does not match the release feed'.\nEach failing case must also assert ~/.local/bin/pixelswitch does not exist."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/test_packaging.py",
+  "line": 251,
+  "problem": "The determinism check for --sort=name is a tautology: `names = sorted(members)` followed by `self.assertEqual(names, sorted(names))` compares a sorted list with itself. test_two_builds_are_byte_identical builds twice on the same machine and file system, where readdir order is repeatable, so it cannot catch a missing --sort=name either. Also, test_a_different_source_date_epoch_changes_only_times (line 237) asserts only that the bytes differ, not that only the times do.",
+  "failure_scenario": "--sort=name is dropped from build-release.sh line 107. The tarball built on the laptop and the one built by linux-package on the runner then differ in member order. The 'same commit gives the same bytes' claim in build-release.sh and spec 5.6 silently stops holding, and every packaging test stays green.",
+  "fix": "Read the members in archive order: `order = [m.name for m in archive.getmembers()]`, then `self.assertEqual(order, sorted(order, key=lambda n: n.split('/')))`. That is GNU tar's depth-first per-directory C-locale order, and it matches the current tree. In the SOURCE_DATE_EPOCH test, compare both archives member by member: equal names, sizes, modes and contents (extractfile().read()), with mtimes of 1700000000 and 1700000001."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": ".github/workflows/build.yml",
+  "line": 411,
+  "problem": "linux-test treats skipped tests as passing. The 35 tests that skip on a Mac are spec 7's evidence that the suite is 'green in CI on 24.04 and 26.04'. They are gated by skipUnless on import probes, and the step only checks unittest's exit code. The render step indirectly guards the GTK 4 path, but nothing guards the tray rules, the SNI registration, GNU tar or OpenSSL 3.",
+  "failure_scenario": "On ubuntu-26.04 a typelib stops importing, or a later step puts a toolcache python3 (actions/setup-python) ahead of /usr/bin/python3 without python3-gi. The 6 tray and SNI tests (and with setup-python the 20 widget tests too) report 'skipped', the job shows OK, and the release ships with the tray never exercised.",
+  "fix": "Give the step `shell: bash` (which adds -o pipefail) and tee the run: `... python3 -m unittest discover -s linux/tests -t linux -v 2>&1 | tee unittest.log`. Then fail on any skip: `if grep -E \"\\.\\.\\. skipped '\" unittest.log; then echo '::error::tests were skipped in CI'; exit 1; fi`. The pattern ignores test names that merely contain 'skipped'. Alternatively, have lc_support read PIXELSWITCH_REQUIRE_ALL_TESTS=1 (set in this step) and turn each skipUnless into a failure."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": ".github/workflows/build.yml",
+  "line": 470,
+  "problem": "Nothing in the publish chain depends on linux-test. linux-publish needs [build, linux-package], and linux-package has no needs, so a tag publishes the signed tarball and latest-linux.json even when the Linux suite or the systemd-analyze check is red on either Ubuntu.",
+  "failure_scenario": "Tag v2.0 is pushed while linux-test (ubuntu-26.04) fails, for example a GTK 4 API missing on 26.04. linux-publish still uploads latest-linux.json, and every Linux client's updater installs the untested build within 6 hours.",
+  "fix": "Add `needs: [linux-test]` to linux-package. That keeps linux-publish's `needs: [build, linux-package]` exactly as spec 5.6 writes it, and makes a red Linux test stop the package and the publish. If an ubuntu-26.04 runner may not exist, report the trade-off to the orchestrator instead of dropping the dependency."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/test_packaging.py",
+  "line": 573,
+  "problem": "No test forces the dependency-check refusals that spec 5.5 names: Python below 3.12, each missing typelib (Gtk 4.0, Adw 1, Gtk 3.0, Dbusmenu 0.4), and a missing StatusNotifierWatcher being only a warning. test_the_dependency_check_names_what_is_missing takes whichever branch the host gives: on a Mac, 'PyGObject is missing'; in CI, everything is present, so it only asserts success.",
+  "failure_scenario": "The Dbusmenu probe at install.sh line 123 is dropped or misnamed (the laptop really lacks a typelib, per laptop.md). Install proceeds, and the tray dies on first start with an ImportError instead of a one-line sentence naming gir1.2-dbusmenu-glib-0.4. Or the watcher check is turned into a die, and install refuses on a stock Ubuntu desktop without the AppIndicator extension. Either way the suite is green on Mac and CI.",
+  "fix": "Add cases that run install.sh without PIXELSWITCH_INSTALL_SKIP_CHECKS and put a `python3` shim first on PATH. The shim execs sys.executable, except that it exits 1 when its -c code contains `require_version(\"Dbusmenu\"` (and in a second case `sys.version_info >= (3, 12)`). Assert exit status 1, stderr containing 'gir1.2-dbusmenu-glib-0.4' (or 'Python 3.12 or newer') and 'never uses sudo', and no ~/.local/bin/pixelswitch. Add one case with a `gdbus` shim that prints '(false,)' and DBUS_SESSION_BUS_ADDRESS set: install succeeds and stderr contains 'shows no tray icons'."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/test_cli.py",
+  "line": 567,
+  "problem": "The Mac golden 'cli: each line reaches a pipe at once (watch over SSH is not held in a buffer)' (ControlTests.swift lines 713-715) is not ported. test_watch_prints_each_events_params_and_ends_when_the_daemon_goes injects out=captured.out.append, so the real stdout path (_write_stdout's flush, cli.py line 801) is never exercised.",
+  "failure_scenario": "Someone 'simplifies' _write_stdout to print(text) or drops the flush. Python block-buffers stdout on a pipe, so `ssh laptop pixelswitch watch` or `pixelswitch watch | jq` shows nothing until 8 KB of events pile up or the daemon closes. The behaviour differs from the Mac CLI the spec says is identical, and the suite stays green.",
+  "fix": "Add a RunnerTests case. Start a FakeDaemon whose events list holds one event and whose connection stays open, launch `[sys.executable, '-I', os.path.join(LINUX_ROOT, 'bin', 'pixelswitch'), 'watch']` with stdout=subprocess.PIPE and the test's env, read one line with a 3 s select() timeout while the daemon is still up, and assert it equals the event's JSON line. Then terminate the child."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/test_mcp.py",
+  "line": 256,
+  "problem": "The 'same as the Mac' checks cover only part of what the spec calls identical. SameAsSwiftTests compares descriptions, names, methods and required lists, but not each property's type, minimum and maximum, nor which tools pass their arguments (params: pass vs { _ in nil }). For the CLI, test_the_help_names_the_new_commands (test_cli.py line 151) checks substrings of HELP_TEXT and never compares it with CLIParser.swift's helpText. Today they differ only by the deliberate D15 omission of '; cost today'.",
+  "failure_scenario": "In a 2.1 change, set_account_thresholds' minimum changes to 0 in MCPServer.swift, or a CLI command and its help line are added on the Mac. The Linux MCP and CLI drift from the Mac, and test_mcp and test_cli stay green.",
+  "fix": "In SameAsSwiftTests, also extract per tool block the `\"minimum\": .number(X)`, `\"maximum\": .number(Y)` and `.string(\"integer\"|\"number\"|\"string\"|\"array\")` values with regexes, plus whether the block ends `params: pass`, and compare them with mcp.TOOLS (types, minimum, maximum, tool.passes). In test_cli, parse helpText from PixelSwitchCLI/CLIParser.swift the way test_the_instructions_are_the_swift_ones parses instructions, and assert it equals cli.HELP_TEXT once the one usage line is mapped to drop '; cost today' (skipUnless the Swift file exists, as test_mcp does)."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/pixelswitch/mcp.py",
+  "line": 43,
+  "problem": "Because SameAsSwiftTests requires every description to be the Swift one, the Linux MCP server tells the model things that are false on Linux. The instructions say 'the Claude Code account switcher on the Mac this server runs on'. get_usage (line 93) promises 'plus this Mac's cost and activity today', which D15 leaves out on Linux. check_for_updates (line 138) says 'its window opens on that Mac'. Section 4's 'identical' and D15 conflict here, and the test resolves it silently in favour of the Mac text.",
+  "failure_scenario": "An AI agent on the laptop reads get_usage's description, looks for cost and activity in structuredContent, finds none, and reports that PixelSwitch is broken or that it cannot read costs. Or it tells the founder an update window opened when none exists on Linux.",
+  "fix": "Report the conflict to the orchestrator, as the spec requires. If Linux wording is allowed, give mcp.py platform variants of these strings (for example 'this computer' and no cost clause), and make SameAsSwiftTests compare against Swift after a fixed, listed substitution map, so any other drift still fails."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": ".github/workflows/build.yml",
+  "line": 496,
+  "problem": "Neither CI nor scripts/verify-release.sh fails when the release notes lack, or carry a stale copy of, install-linux.sh's SHA-256. The publish step only emits ::warning, and verify-release prints the hash with '(it must be in the release notes)' but checks nothing. VerifyReleaseTests counts 11 PASS lines without it.",
+  "failure_scenario": "install.sh changes after RELEASE_NOTES.md was written (the hash is filled in by hand, per commit fb9c991). v2.0 ships with a wrong SHA in the notes. The README's two-step check (spec 5.5) then fails for every careful user, or teaches them to skip it, and no gate went red.",
+  "fix": "Since the build is deterministic, compute the hash before tagging. In the publish step, replace the warning with `echo \"::error::...\"; exit 1` placed before the upload step. In verify-release.sh's Python block, fetch the release body (`gh release view \"$TAG\" --json body --jq .body`) and add a say() check that it contains the installer's hash. Extend VerifyReleaseTests' gh stub to return a body, and add a failing case for a body without the hash."
+ }
+]
