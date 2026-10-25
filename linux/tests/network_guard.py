@@ -13,6 +13,15 @@ How it works, in this process:
   suite: an ``atexit`` handler prints every violation and ends the process with exit code 1, whatever
   unittest decided.
 
+* A proxy is another way to a production host: urllib's ``ProxyHandler`` sends ``CONNECT api.anthropic.com:443``
+  to the proxy, so neither ``getaddrinfo`` nor ``connect`` ever sees the blocked name. :func:`install`
+  therefore removes ``http_proxy``, ``https_proxy``, ``all_proxy`` and their upper-case forms from the
+  environment (this process and every child that inherits it), makes ``urllib.request.getproxies`` fail closed
+  (a proxy configured later, by a test or the system, is recorded as a violation and not used), and refuses a
+  ``CONNECT`` tunnel to a blocked host (``http.client.HTTPConnection.set_tunnel``).
+* The guard's own self-test records into a private recorder (:func:`scoped`), so it can never erase another
+  test's violations.
+
 In a child process a test starts (the daemon), :func:`child_environment` returns an environment that makes
 Python load the same guard through ``sitecustomize``; the child appends violations to a log file, and
 the test's cleanup fails if that file is not empty.
@@ -23,11 +32,15 @@ This module imports nothing from the package under test and nothing outside the 
 from __future__ import annotations
 
 import atexit
+import contextlib
 import errno
+import http.client
 import os
 import socket
 import sys
 import tempfile
+import threading
+import urllib.request
 
 BLOCKED_DOMAINS = ("anthropic.com", "claude.com", "github.com", "githubusercontent.com")
 ENV_LOG = "PIXELSWITCH_NETGUARD_LOG"
@@ -35,6 +48,12 @@ ENV_LOG = "PIXELSWITCH_NETGUARD_LOG"
 violations: list[str] = []
 _installed = False
 _log_path: str | None = None
+#: Per thread: the recorders :func:`scoped` has open. A violation is recorded in the innermost one of the
+#: thread that made it, else in :data:`violations`, which is what fails the run.
+_local = threading.local()
+PROXY_VARIABLES = ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+#: The proxy variables :func:`install` removed from this process's environment (name -> the value it had).
+stripped_proxy_variables: dict[str, str] = {}
 
 
 def blocked(host) -> bool:
@@ -46,8 +65,33 @@ def blocked(host) -> bool:
     return any(name == domain or name.endswith("." + domain) for domain in BLOCKED_DOMAINS)
 
 
+@contextlib.contextmanager
+def scoped():
+    """Records the violations THIS thread makes inside the block into a private list (yielded) instead of the
+    run-wide one. For the guard's own self-test: it makes deliberate refusals and must not touch what other
+    tests recorded before it, so there is no ``clear``."""
+    recorder: list[str] = []
+    stack = _stack()
+    stack.append(recorder)
+    try:
+        yield recorder
+    finally:
+        stack.remove(recorder)
+
+
+def _stack() -> list:
+    stack = getattr(_local, "stack", None)
+    if stack is None:
+        stack = _local.stack = []
+    return stack
+
+
 def _record(where: str, host) -> None:
     line = f"{where}({host!r})"
+    stack = _stack()
+    if stack:
+        stack[-1].append(line)
+        return
     violations.append(line)
     if _log_path:
         try:
@@ -82,6 +126,8 @@ def install(log_path: str | None = None) -> None:
     real_gethostbyname_ex = socket.gethostbyname_ex
     real_connect = socket.socket.connect
     real_connect_ex = socket.socket.connect_ex
+    real_getproxies = urllib.request.getproxies
+    real_set_tunnel = http.client.HTTPConnection.set_tunnel
 
     def getaddrinfo(host, *args, **kwargs):
         if blocked(host):
@@ -108,6 +154,25 @@ def install(log_path: str | None = None) -> None:
             _refuse("connect_ex", _host_of(address))
         return real_connect_ex(self, address)
 
+    def getproxies():
+        """Fail closed: whatever proxy is configured now (an environment variable a test set, or the
+        system's) is recorded and NOT used, so a request goes straight to the socket guard."""
+        found = real_getproxies()
+        if found:
+            _record("proxy", ",".join(sorted(found)))
+        return {}
+
+    def set_tunnel(self, host, port=None, headers=None):
+        if blocked(host):
+            _refuse("set_tunnel", host)
+        return real_set_tunnel(self, host, port, headers)
+
+    for name in PROXY_VARIABLES:
+        value = os.environ.pop(name, None)
+        if value:
+            stripped_proxy_variables[name] = value
+    urllib.request.getproxies = getproxies
+    http.client.HTTPConnection.set_tunnel = set_tunnel
     socket.getaddrinfo = getaddrinfo
     socket.gethostbyname = gethostbyname
     socket.gethostbyname_ex = gethostbyname_ex
@@ -127,11 +192,6 @@ def _fail_if_violated() -> None:
         except (OSError, ValueError):
             pass
     os._exit(1)
-
-
-def clear() -> None:
-    """For the guard's own test only."""
-    del violations[:]
 
 
 def child_environment(directory: str, log_path: str | None = None) -> dict[str, str]:

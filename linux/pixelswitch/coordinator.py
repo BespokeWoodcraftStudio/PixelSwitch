@@ -69,6 +69,11 @@ LIVE_NOT_SAVED_MESSAGE = ("Claude Code renewed its login and PixelSwitch could n
 #: How long a user's action (a switch, a sign-in, add-current, a removal) waits for the cycle's own reconcile or
 #: audit to let go of the gate before it answers ``busy``. Those two are background steps, not user actions.
 USER_ACTION_GATE_WAIT_SECONDS = 2.0
+#: Once ``.credentials.json`` has been written the switch is finished or rolled back whatever the refresh
+#: lock's 10 s hold limit says (the Mac never leaves the token switched without trying the identity write).
+#: The waits for the identity write and for a rollback get at least this long, so a hold that ran out
+#: during the credential write still ends consistent. The lock stays fresh (it is touched every 5 s).
+POST_WRITE_GRACE_SECONDS = 2.0
 BACKGROUND_KINDS = ("reconcile", "audit")
 
 
@@ -931,12 +936,19 @@ class Coordinator(UsageMixin):
             self.note_credential_changed(account)  # forget the old login's park, refusal, cool-down and flag
         # Update metadata. Done even when the capture failed -- the CLI really is on this account
         # now -- but a failed capture must be surfaced, not folded into "completed".
+        found = {"account": False}
+
         def reauthenticated(current: list[Account]):
             updated = [replace(a, org_name=status.org_name, subscription_type=status.subscription_type, is_active=True)
                        if a.id == account.id else replace(a, is_active=False) for a in current]
+            found["account"] = any(a.id == account.id for a in updated)
             return updated, next((a for a in updated if a.id == account.id), None)
 
         self._modify_accounts(reauthenticated)
+        if found["account"]:
+            # AppState.finishReauthentication: it is now the account Claude Code uses, by the user's own
+            # choice, so the record of removed accounts' logins is cleared like on every other adoption.
+            self.forget_removed_logins()
         self.last_auto_switch_at = self.clock()
         self.gate.end("signin")
         self.refresh()
@@ -990,23 +1002,24 @@ class Coordinator(UsageMixin):
         made with no active account can tell the live login is disposable (spec D20 revision 4)."""
         if self.shutting_down:
             raise ActionError("failed", SHUTTING_DOWN_MESSAGE)
-        account = self.account_by_id(account_id)
-        if account is None:
+        if self.account_by_id(account_id) is None:
             raise ControlError("notFound", "That account no longer exists.")
         if not self.gate.begin("remove", BACKGROUND_KINDS, USER_ACTION_GATE_WAIT_SECONDS):
             raise ActionError("busy", BUSY_MESSAGE)
         fallbacks: list[Account] = []
         try:
+            # The gate may have waited for a reconcile that adopted another account or removed this one:
+            # everything below is judged from the state read NOW, as perform_switch does.
+            account = self.account_by_id(account_id)
+            if account is None:
+                raise ControlError("notFound", "That account no longer exists.")
             self.log.info(f"[removeAccount] Removing account {account.id}")
-            active = self.active_account()
-            was_active = account.is_active or (active is not None and active.id == account.id)
             # Remember which grants were provably this account's before its backup goes: its saved
             # login, and the live login only when it is the same grant or the API proved it the
             # account's. Being believed active is not proof: the live login may be another account's.
             saved = self.backups.get(account.id)
             self._remember_removed_logins(account.id, saved.token if saved is not None else None)
             self.backups.remove(account.id)
-            remaining = [a for a in self.accounts if a.id != account.id]
             # Drop every per-account cache too, or a re-added account inherits the removed one's
             # readings, error banner and rate-limit park.
             self.usage.pop(account.id, None)
@@ -1015,20 +1028,35 @@ class Coordinator(UsageMixin):
             self.guard.forget(account.id)
             self.read_soon.discard(account.id)
             self.persist_needs_reauth()
-            if was_active:
+            result = {"was_active": False, "remaining": 0}
+
+            def removal_change(current: list[Account]):
+                """Read, changed and installed under one lock (a label, threshold or priority set meanwhile
+                is kept), and ``was_active`` judged from the list as it is at that moment."""
+                existing = next((a for a in current if a.id == account_id), None)
+                if existing is None:
+                    return None
+                believed = self._active
+                was_active = existing.is_active or (believed is not None and believed.id == existing.id)
+                remaining = [a for a in current if a.id != account_id]
+                result["was_active"] = was_active
+                result["remaining"] = len(remaining)
+                if not was_active:
+                    return remaining, True
                 # No remaining account is marked active until its switch succeeds. `_active` stays
                 # on the removed account for now: perform_switch needs a current account to leave,
                 # and the "already live" shortcut must not see the target as current.
                 remaining = [replace(a, is_active=False) for a in remaining]
-                fallbacks = fallback_order(remaining)
-                self._install_accounts(remaining, active=(True if fallbacks else None))
+                fallbacks.extend(fallback_order(remaining))
+                return remaining, (True if fallbacks else None)
+
+            self._modify_accounts(removal_change)
+            if result["was_active"]:
                 if not fallbacks:
                     self.log.info("[removeAccount] Removed the last account; no account is active")
                 else:
                     self.log.info(f"[removeAccount] Removed active account; switching to the first of {len(fallbacks)} remaining")
-            else:
-                self._install_accounts(remaining)
-            self.log.info(f"[removeAccount] Done. Remaining accounts: {len(remaining)}")
+            self.log.info(f"[removeAccount] Done. Remaining accounts: {result['remaining']}")
         finally:
             self.gate.end("remove")
         if fallbacks:
@@ -1272,6 +1300,11 @@ class Coordinator(UsageMixin):
                                      f"{believed.id}'s saved login; treating {believed.id} as the active account")
                     current_active = believed
                     adopts_believed = True
+                    # Nothing is saved for the believed account at step 1 (no proven owner), so bind the
+                    # switch to the login that was judged, as the Mac does (AppState.performSwitch): the
+                    # safe overwrite rested on that backup holding this very grant, and a renewal since
+                    # has spent the refresh token that backup holds.
+                    judged = llb.JudgedLogin(live_credential)
                 else:
                     decision = removal.REFUSE
             if decision.kind == "proceed":
@@ -1565,7 +1598,10 @@ class Coordinator(UsageMixin):
             except LiveLoginBusy as busy:
                 raise SwitchFailure(busy.message) from None
             except LockLost:
-                self.log.error("[switchAccount] The Claude Code lock was lost or held too long; nothing more was written")
+                if written is not None:
+                    self.log.error("[switchAccount] The Claude Code lock was lost after the login was written")
+                else:
+                    self.log.error("[switchAccount] The Claude Code lock was lost or held too long; nothing more was written")
                 raise SwitchFailure("PixelSwitch could not finish within the time it may hold Claude Code's lock. "
                                     "Try again in a moment.") from None
             if written is not None:
@@ -1607,12 +1643,20 @@ class Coordinator(UsageMixin):
         """Writes ``oauthAccount`` (after ``.storage-write`` was let go, so the lock order stays: refresh
         lock, ``.storage-write``, release, config lock) and rolls the login back if that fails."""
         live_now, written, backup = written_pack
-        held.check()
-        if not self.login.write_oauth_account(backup.oauth_account, budget=held.remaining()):
+        # No hold-limit check here: the login is already written, so this step finishes (or rolls the login
+        # back) even if the 10 s ran out during the credential write.
+        budget = self._finish_budget(held)
+        if not self.login.write_oauth_account(backup.oauth_account, budget=budget):
             self.log.error("[switchAccount] Step 3: Failed to write oauthAccount to ~/.claude.json!")
             self._roll_back_credential(live_now, written, held)
             raise SwitchFailure("Failed to write oauthAccount to ~/.claude.json")
         self.log.info("[switchAccount] Step 3: Both login and oauthAccount written")
+
+    @staticmethod
+    def _finish_budget(held: HeldRefresh) -> float:
+        """The wait allowed for the steps after the credential write: what is left of the refresh lock's
+        hold, but never less than :data:`POST_WRITE_GRACE_SECONDS`."""
+        return max(held.remaining(), POST_WRITE_GRACE_SECONDS)
 
     def _roll_back_credential(self, previous: str | None, written: str, held: HeldRefresh | None = None) -> None:
         """The identity write failed after the login was written: put the login back, if it is still
@@ -1622,7 +1666,7 @@ class Coordinator(UsageMixin):
         if previous is None:
             return
         try:
-            with self.login.storage_write_lock(held.remaining() if held is not None else None) as storage:
+            with self.login.storage_write_lock(self._finish_budget(held) if held is not None else None) as storage:
                 if self.login.read_credential() == written.strip():
                     self.login.write_credential(previous, storage)
                     self.log.warning("[switchAccount] Put the previous login back after the identity write failed")

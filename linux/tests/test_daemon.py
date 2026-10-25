@@ -250,6 +250,9 @@ class StartRulesTests(unittest.TestCase):
         login, so there is nothing it could send anywhere; the network guard is loaded into it and fails this
         test if it opens a socket to a production host."""
         rig = Rig(self)  # no seed_account: nothing to send
+        # The network guard sees Python sockets only. Point `claude` at the stub so no real claude binary (a
+        # non-Python grandchild with its own network stack) can run from the user's PATH or /usr/local/bin.
+        fsio.atomic_write(rig.paths.settings, json.dumps(rig.settings_seed))
         env = {"PATH": "/usr/bin:/bin", "HOME": rig.home, "XDG_RUNTIME_DIR": os.path.join(rig.tmp, "run"),
                "PIXELSWITCH_TEST_API_BASE": rig.api.base, "PYTHONDONTWRITEBYTECODE": "1"}
         env.update(guarded_environment(self))

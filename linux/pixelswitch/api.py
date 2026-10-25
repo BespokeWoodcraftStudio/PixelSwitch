@@ -52,6 +52,11 @@ OAUTH_BETA = "oauth-2025-04-20"
 #: is still routed there. Any other host is refused.
 RELEASE_REDIRECT_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
 MAX_REDIRECTS = 5
+#: Bytes of a 3xx response body that are ever read. urllib reads the whole body before it follows a
+#: redirect, with no limit and no stop check, so a huge or dribbling body from a hop would hold the updater's
+#: thread (and its memory). The body of a redirect says nothing the updater needs, so none is read: the
+#: connection is closed instead (every request sends ``Connection: close``).
+REDIRECT_BODY_LIMIT = 0
 #: Never forwarded to, or sent for, an update download.
 _CREDENTIAL_HEADERS = ("authorization", "proxy-authorization", "cookie")
 
@@ -132,14 +137,49 @@ def check_release_url(url: str, *, test_mode: bool) -> None:
         raise RedirectRefused("host is not a GitHub release host")
 
 
+class _CappedBody:
+    """A response body that yields at most ``limit`` bytes in all, whatever the caller asks for."""
+
+    def __init__(self, fp, limit: int) -> None:
+        self._fp = fp
+        self._left = max(0, limit)
+
+    def read(self, amt: int | None = None) -> bytes:
+        if self._left <= 0:
+            return b""
+        size = self._left if amt is None or amt < 0 else min(amt, self._left)
+        data = self._fp.read(size)
+        self._left -= len(data)
+        return data
+
+    def read1(self, amt: int = -1) -> bytes:
+        return self.read(amt)
+
+    def close(self) -> None:
+        self._fp.close()
+
+    def __getattr__(self, name):
+        return getattr(self._fp, name)
+
+
 class _FollowReleaseRedirects(urllib.request.HTTPRedirectHandler):
     """At most :data:`MAX_REDIRECTS` hops, each checked by :func:`check_release_url`, GET only, and
-    the new request carries none of the credential headers of the old one."""
+    the new request carries none of the credential headers of the old one. The body of a 3xx response is
+    never read beyond :data:`REDIRECT_BODY_LIMIT` bytes, and the response is closed when a hop is refused."""
 
     max_redirections = MAX_REDIRECTS
 
     def __init__(self, test_mode: bool) -> None:
         self._test_mode = test_mode
+
+    def http_error_302(self, req, fp, code, msg, headers):  # noqa: D401
+        try:
+            return super().http_error_302(req, _CappedBody(fp, REDIRECT_BODY_LIMIT), code, msg, headers)
+        except RedirectRefused:
+            fp.close()
+            raise
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
         if req.get_method() not in ("GET", "HEAD") or req.data is not None:
