@@ -456,6 +456,7 @@ class SessionTests(SessionHarness):
         self.assertEqual(session.notice, signin.NO_LINK_NOTICE)
         self.assertEqual(session.state, "starting")
         self.assertIsNone(session.manual_link)
+        self.assertTrue(wait_for(lambda: os.path.exists(os.path.join(self.home, "stub-calls.log")), 30), "the stub started")
         time.sleep(0.5)
         calls = read_file(os.path.join(self.home, "stub-calls.log")).splitlines()
         self.assertEqual(len(calls), 1, "the CLI was NOT started a second time without BROWSER (no fallback)")

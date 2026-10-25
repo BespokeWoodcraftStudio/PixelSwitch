@@ -175,6 +175,9 @@ class ClaudeLogin:
                     new.acquire(max(0.0, deadline - self._clock()), poll=(0.5, 1.0))
                 except LockBusy as busy:
                     raise LiveLoginBusy(self._busy_message(busy.age)) from None
+                except OSError as error:
+                    raise LiveLoginBusy(f"PixelSwitch could not take Claude Code's refresh lock in ~/.claude "
+                                        f"({error.strerror or type(error).__name__}). Nothing was changed.") from None
                 candidate = self._lock(self.legacy_lock_path, 60.0, 5.0, max_hold)
                 try:
                     got = candidate.try_acquire()

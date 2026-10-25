@@ -46,8 +46,9 @@ class Base(unittest.TestCase):
 class ReadTests(Base):
     def test_reads_trimmed_text_or_none(self):
         self.assertIsNone(self.login.read_credential())
-        self.write_creds("  " + credential_text("a", "r") + "\n")
-        self.assertEqual(self.login.read_credential(), credential_text("a", "r"))
+        text = credential_text("a", "r")
+        self.write_creds("  " + text + "\n")
+        self.assertEqual(self.login.read_credential(), text)
         self.write_creds("   \n")
         self.assertIsNone(self.login.read_credential())
 
@@ -287,3 +288,18 @@ class RefreshLockTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefreshLockCannotBeMadeTests(Base):
+    def test_a_folder_that_cannot_be_written_fails_cleanly_with_nothing_taken(self):
+        import unittest as _unittest
+
+        if os.geteuid() == 0:
+            raise _unittest.SkipTest("root can write anywhere")
+        os.chmod(self.paths.claude_dir, 0o500)
+        self.addCleanup(os.chmod, self.paths.claude_dir, 0o700)
+        with self.assertRaises(LiveLoginBusy) as raised:
+            with self.login.refresh_lock(timeout=1.0):
+                self.fail("must not be entered")
+        self.assertIn("could not take Claude Code's refresh lock", raised.exception.message)
+        self.assertIn("Nothing was changed", raised.exception.message)
