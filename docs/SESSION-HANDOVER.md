@@ -3,6 +3,31 @@
 Read this first. Then read `docs/worklog/INDEX.md` for the full history; the newest entries are at the bottom of `docs/worklog/2026-10-16.md`.
 Last updated 2026-10-16 (PDT), after 1.9: PixelSwitch stops causing the usage 429s ("API Rate Limited") and says what is really happening.
 
+## 2.0 IN PROGRESS (2026-10-24): read this first
+
+The founder asked for separate session and weekly auto-switch limits (example 90% / 50%), priority numbers per account
+("ahmed@gmail.com = 3, ahmed@pixelventures.ai = 1"), and a Linux version tested on his Ubuntu laptop, then a release to
+every client. Builders are Sonnet, QA is Opus. **Do not touch the PixelDirector repo** (his other session works there).
+
+- **Branch `release-2.0`** (pushed to origin; `main` is untouched until release). Contract:
+  `docs/superpowers/specs/2026-10-24-2.0-spec.md` (revision 3, decisions D1-D20). Lanes, file ownership, checks:
+  `docs/superpowers/plans/2026-10-24-2.0-lanes.md`. Recon, reviews and findings:
+  `docs/investigations/2026-10-24-linux-and-split-thresholds/`.
+- **Merged into `release-2.0`:** lane V (150 shared cases, `Tests/conformance/`), lane MA (Mac engine, AppState rules,
+  D12 usable-login rule, re-read before write, renewal expiry, D20 remove fix; 1039/1039 unit tests; CI branch build
+  40151307161 passed `scripts/verify-ci-artifact.sh`), lane LA (Linux pure core in `linux/`; 672 tests on 3.14, 3.12 and
+  the laptop).
+- **Running when this was written:** lane MB (Mac views, control, CLI, MCP, strings, docs) in `.claude/worktrees/mb-mac-ui`,
+  lane LB (Linux daemon) in `.claude/worktrees/lb-linux-daemon`, Opus reviews of MA and LA. Still to come: lane LC (Linux
+  CLI, MCP, tray, settings window, packaging, CI jobs), Opus reviews and fix rounds, the founder page
+  `docs/decisions/pixelswitch-2.0-2026-10-24.html`, release notes, `scripts/release.sh 2.0`, `scripts/verify-release.sh v2.0`,
+  the laptop install from the real release (auto-switch off).
+- **If a lane died:** its worktree and branch hold its commits; re-brief a new lane from the lanes file, never edit the
+  conformance vectors, and run the lane's checks yourself before merging.
+- **Laptop:** `ssh ahmed@ahmed-aorus-15p-xd.tail19d9f2.ts.net` (key auth). It runs the CabDesign farm, whose `claude`
+  jobs use the same login (`laptop-farm.md`). Every test there follows spec 5.7 (scratch HOME under
+  `~/.cache/pixelswitch-dev/`, test mode, fabricated logins, no systemctl, no sudo).
+
 ## Current state
 
 - **Released: 1.9** (build 30, tag `v1.9`, release CI run 38924948392, published 2026-10-16T15:37:20Z), verified with `scripts/verify-release.sh v1.9`: Latest, feed 1.9/30, appcast length equals the DMG, EdDSA signature verified, notarized and stapled. The two new messages are in all five shipped string tables (`plutil -p`), and "API Rate Limited" is gone. The branch build before it (run 38924140452) passed `scripts/verify-ci-artifact.sh`. The main-push build of the bump commit (run 38924944037) was cancelled as redundant, as on every release.
