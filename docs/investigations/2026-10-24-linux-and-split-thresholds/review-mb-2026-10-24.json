@@ -1,0 +1,200 @@
+[
+ {
+  "lens": "protocol",
+  "severity": "P1",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitchCLI/CLIRunner.swift",
+  "line": 294,
+  "problem": "`defaultWords` prints the base `defaultThreshold` whenever the two effective window defaults are equal, even when both differ from the base. Since 2.0 the Settings window never writes the base: `SettingsThresholdDefaults` calls `appState.setDefaultWindowThreshold` for each slider (`SettingsView.swift:94-99`). So equal window defaults that differ from the base are a normal state. In that state `pixelswitch status` shows a default that auto-switch does not use, and contradicts the `accounts` table printed by the same CLI.",
+  "failure_scenario": "On the Beeco Mac (base 98), drag both Settings sliders to 95, or run `settings set autoSwitch.sessionThreshold 95` and `settings set autoSwitch.weeklyThreshold 95`. `pixelswitch status` prints `Auto-switch:   on, default 98%, next by most room left`, but auto-switch leaves at 95%, and `pixelswitch accounts` prints `95% (default)`. I reproduced this by compiling CLIRunner.swift with AutoSwitchInfo(defaultThreshold: 98, defaultSessionThreshold: 95, defaultWeeklyThreshold: 95).",
+  "fix": "Show the effective value when the two are equal, and fall back to the base only when the app sends neither field (a 1.9 app):\n```swift\nstatic func defaultWords(_ a: AutoSwitchInfo) -> String {\n    guard let session = a.defaultSessionThreshold, let weekly = a.defaultWeeklyThreshold else { return percent(a.defaultThreshold) }\n    return session == weekly ? percent(session) : windowsWords(session: session, weekly: weekly)\n}\n```\nAdd a case to `runSplitCLIOutputTests` with defaultThreshold 98, session 95, weekly 95, expecting `default 95%`. The existing 98/98/98 and old-app cases still pass unchanged."
+ },
+ {
+  "lens": "protocol",
+  "severity": "P1",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/Tests/integration/remote-control.sh",
+  "line": 46,
+  "problem": "Spec 5.7 rule 2 says: \"Every scratch test, `remote-control.sh` included, checks `testMode: true` first.\" Lane MB is the only lane that may edit this file (lanes.md:46). LC runs the script but cannot edit it (lanes.md:49 and 69). The 2.0 edit changed only 18 to 20 tools, so the guard ships missing and no later lane can add it. The script refreshes usage, starts a real sign-in and changes two settings on whatever daemon answers.",
+  "failure_scenario": "On the founder's laptop after the real 2.0 install, LC (or a 2.1 lane) runs `PIXELSWITCH_CLI=<linux cli> bash Tests/integration/remote-control.sh` with a scratch HOME and XDG_RUNTIME_DIR, while the scratch daemon is down. The Linux client walks spec 5.2's fallback list to `/run/user/<uid>/pixelswitch/control.sock`, which is the real daemon. The script then sends `usage.refresh` with the CabDesign farm's live login, starts the real `claude auth login`, and writes and restores settings on the live daemon. Because PIXELSWITCH_NO_LAUNCH is not set, it may also run `systemctl --user start`, which spec 5.7 rule 5 forbids before release.",
+  "fix": "Right after the first `status` call, refuse a Linux daemon that is not in test mode. The Mac app sends no `platform` or `macos`, so Mac runs are unaffected:\n```bash\nif status=$(\"$CLI\" --json status); then\n    if [ \"$(echo \"$status\" | field platform)\" = \"linux\" ] && [ \"$(echo \"$status\" | field testMode)\" != \"True\" ]; then\n        echo \"Refusing: this Linux PixelSwitch is not in test mode (spec 5.7). Run it only against a scratch daemon.\"; exit 2\n    fi\n    [ \"$(echo \"$status\" | field protocolVersion)\" = \"2\" ] && ok \"status answers, protocol 2\" || bad \"status protocol\" \"$status\"\n```\n`field` prints Python's `True` for JSON true. Also export `PIXELSWITCH_NO_LAUNCH=1` when the platform is linux."
+ },
+ {
+  "lens": "protocol",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Control/RemoteControlService.swift",
+  "line": 145,
+  "problem": "The new `UserDefaults.didChangeNotification` pipeline is created inside the `@MainActor` `ControlEventHub` with no `.receive(on:)`. Under SWIFT_VERSION 6.0 (project.yml:23), its `map` and `sink` closures are main-actor isolated and carry a runtime isolation check. The notification is posted on the thread that wrote the default, so any write to any defaults from a background thread, by any code or framework in the process, traps the app. The hub exists from launch to quit. No such writer was found in the app's own code today (Sparkle was not checked), so the risk is latent. `follow(_:)` at line 177 already guards its own pipeline with `.receive(on: DispatchQueue.main)`.",
+  "failure_scenario": "A scratch program with this exact pipeline (a @MainActor class, the same map/prepend/removeDuplicates/dropFirst/sink chain, compiled with -swift-version 6) died with SIGTRAP (exit 133) when `UserDefaults.standard.set` ran on `DispatchQueue.global()`. The same write on the main queue was fine. In the app, such a write would quit PixelSwitch, and with it the control socket and auto-switch.",
+  "fix": "Hop to main before any isolated closure runs, as `follow(_:)` does:\n```swift\nNotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)\n    .receive(on: DispatchQueue.main)\n    .map { _ in DefaultFields.current }\n```\nThe same scratch program with `.receive(on: DispatchQueue.main)` ran clean (exit 0) and the event arrived on main."
+ },
+ {
+  "lens": "protocol",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitchCLI/MCPServer.swift",
+  "line": 104,
+  "problem": "The `get_settings` description, written in this change, tells the model that `autoSwitch.sessionThreshold` and `autoSwitch.weeklyThreshold` take \"null/\\\"default\\\" to follow autoSwitch.threshold\". But `run` treats a null in any required argument as missing (line 202: `arguments[key] == nil || arguments[key] == .null`), and `set_setting` requires `value`. So null never reaches the app, and the description promises something the MCP refuses. The spec's rule that null clears these keys is reachable through the CLI and the socket, but not through MCP.",
+  "failure_scenario": "An AI follows the description and calls `tools/call set_setting {\"key\":\"autoSwitch.sessionThreshold\",\"value\":null}`. It gets `invalidParams: set_setting needs value.`, a misleading message, and the app is never called (reproduced in a scratch build of MCPServer.swift; `\"default\"` worked).",
+  "fix": "Let a JSON null through for `set_setting`'s `value` only, keeping the absent check: `for key in tool.required where arguments[key] == nil || (arguments[key] == .null && !(tool.name == \"set_setting\" && key == \"value\"))`. Add a test that `set_setting` with `value: null` forwards `{\"key\":...,\"value\":null}`. If you would rather keep the guard, drop `null/` from the `get_settings` description and say `\"default\"` only."
+ },
+ {
+  "lens": "protocol",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitchCLI/CLIRunner.swift",
+  "line": 374,
+  "problem": "`orderSet` always adds \"Every account is now numbered from 1 in this order, replacing any priority numbers you set.\" A 1.9 app's `accounts.setOrder` numbers nothing. During the update gap (new CLI in the updated bundle, old app process still running), the sentence is false, and the table printed above it shows `\u2014` in every Priority cell.",
+  "failure_scenario": "Sparkle has replaced the bundle, but the 1.9 process still serves the socket. `pixelswitch accounts order 2 1 3` prints the new order with every Priority `\u2014`, then claims every account is now numbered from 1.",
+  "fix": "Pass the status to it, as `.priority` already does: in `execute` call `CLIOutput.orderSet(Self.accounts(result[\"accounts\"]), numbered: app.features?.contains(ControlProtocol.featurePriority) == true)`, and append the sentence only when `numbered` is true. Add a check in `runOldAppTests` with the stand-in 1.9 app answering `accounts.setOrder`."
+ },
+ {
+  "lens": "protocol",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitchCLI/MCPServer.swift",
+  "line": 62,
+  "problem": "Spec section 4 says \"The `account` descriptions say 'an email, label or position, never a priority number'\". The shared `account` property does, but `get_usage`'s `account` (line 62, \"Optional: only this account.\") and `start_sign_in`'s `account` (line 72, \"Optional: re-sign this account instead of adding a new one.\") do not. The test at ControlSplitTests.swift:419-422 checks only four tools, so the gap is not caught.",
+  "failure_scenario": "With priorities P1, P3 and P9 (positions 1, 2, 3), an AI asked to re-sign \"my P3 account\" calls `start_sign_in {\"account\":\"3\"}`. That resolves to position 3, the P9 account, and starts a re-sign of the wrong account.",
+  "fix": "Use the same words in both, e.g. `\"Optional: only this account (an email, label, id or position, never a priority number).\"` and `\"Optional: re-sign this account (an email, label, id or position, never a priority number) instead of adding a new one.\"`. Extend the test's tool list to every tool that has an `account` property: `tools.filter { $0[\"inputSchema\"]?[\"properties\"]?[\"account\"] != nil }`."
+ },
+ {
+  "lens": "ui-strings",
+  "severity": "P2",
+  "file": "PixelSwitch/Views/SettingsAccountRow.swift",
+  "line": 137,
+  "problem": "The new controls have no accessible name. The Priority stepper and both window steppers are Stepper(\"\") with .labelsHidden(), so VoiceOver reads them as an unnamed stepper. The Priority menu is announced only as \"P1\" or \"None\". The Session and Weekly menus (lines 155-171) are announced only by their label, so two side-by-side pop-ups both say \"Default (90%)\". The \"Session\", \"Weekly\" and \"Priority\" captions are separate static text, not the controls' labels.",
+  "failure_scenario": "A VoiceOver user tabs through a row and hears \"Default (90%), pop-up button\" twice, then \"stepper\" with no name. They cannot tell which pop-up sets the 5-hour limit and which sets the weekly limit, or what the stepper changes.",
+  "fix": "Give each stepper a real label and keep it visually hidden, which leaves it available to VoiceOver: `Stepper { Text(\"Priority\") } onIncrement: {...} onDecrement: {...}.labelsHidden()` at line 137, and `Stepper { caption } onIncrement: ... onDecrement: ...` at line 176. On the Priority Menu add `.accessibilityLabel(Text(\"Priority\"))`. On each window Menu add `.accessibilityLabel(caption)` plus `.accessibilityValue(...)` set to the same Text the label shows (\"Manual only\", \"Switch at N%\" or \"Default (N%)\"). The keys \"Priority\", \"Session\" and \"Weekly\" already exist in all five tables."
+ },
+ {
+  "lens": "ui-strings",
+  "severity": "P2",
+  "file": "PixelSwitch/Views/SettingsAccountRow.swift",
+  "line": 188,
+  "problem": "Each Session and Weekly column is a fixed frame 164pt wide (line 184) holding a .fixedSize() menu plus a stepper. That width fits English (measured from the render: the \"Switch at 90%\" pop-up is 135pt, plus 4pt spacing and a 20pt stepper, 159pt in all). The German label \"Wechseln bei %lld%%\" is about 30pt wider in 13pt SF, so the content is about 188pt. A frame(width:) does not grow to fit, so the content draws past it. French \"Par d\u00e9faut (100 %)\" is also slightly over. The renders cover English only. These widths are estimates from glyph metrics, because this Mac cannot render SwiftUI.",
+  "failure_scenario": "With the app in German, an account with its own session limit (for example after picking 90% in Session) shows \"Wechseln bei 90%\" and its stepper running about 24pt past its column. With only 10pt of spacing, that is about 14pt drawn over the left edge of the Weekly pop-up. In the Weekly column the stepper runs past the row's trailing edge.",
+  "fix": "Size the column for the widest of the five tables, not for English. Raising windowColumnWidth to about 196 covers \"Wechseln bei 100%\" plus the stepper. Alternatively, measure the widest label once with a PreferenceKey and share that width across rows. Then render one German row to confirm. The window is 820pt wide, so an address still keeps 28 or more characters."
+ },
+ {
+  "lens": "ui-strings",
+  "severity": "P2",
+  "file": "PixelSwitch/Views/SettingsAccountRow.swift",
+  "line": 137,
+  "problem": "Every click on the priority stepper calls setPriority, and setPriority re-sorts the list at once. Equal numbers go to the account set most recently, so a row can move out from under the pointer between two clicks. The next click then lands on another account's stepper.",
+  "failure_scenario": "After a drag, A is P1, B is P2 and C is P3. The user clicks A's up arrow three times. Click 1: A becomes P2 and stays first (set most recently). Click 2: A becomes P3 and the list becomes B, A, C, so row 1 is now B. Click 3 lands on B's stepper: B becomes P3 and sorts first. The user meant to give A P4 but changed B's number without noticing.",
+  "fix": "Do not move the row while someone is stepping through numbers. One option is to drop the priority stepper and make every number a deliberate menu pick: keep None and P1-P9, and add submenus 10-19 through 90-99. Another is for SettingsAccountsTab to hold the pending number in @State, show it in the row, and call appState.setPriority only after a short pause, for example 0.8 s with no further click."
+ },
+ {
+  "lens": "ui-strings",
+  "severity": "P2",
+  "file": "PixelSwitch/Views/SettingsAccountsTab.swift",
+  "line": 179,
+  "problem": "The split-window help sentence always adds \"(up to X of its week when no account under its weekly limit can take you)\". When the session limit is lower than the weekly limit, the relaxed weekly limit is max(weekly, session), which equals the weekly limit, so X equals the weekly number already stated.",
+  "failure_scenario": "An account set to Session 50 and Weekly 90 shows the tooltip \"...and moves you to it only while it is at 49% or less of its session and 89% or less of its week (up to 89% of its week when no account under its weekly limit can take you).\" The extra clause suggests a different limit where there is none.",
+  "fix": "Add the parenthetical only when numbers.relaxedArriveWeekly > numbers.arriveAt.weekly. Otherwise return a new sentence without it: \"Auto-switch moves you off this account at %@ of its session or %@ of its week, and moves you to it only while it is at %@ or less of its session and %@ or less of its week.\" Add that key to all five tables and to the key list in runSplitStringTests."
+ },
+ {
+  "lens": "ui-strings",
+  "severity": "P2",
+  "file": "PixelSwitch/Views/SettingsView.swift",
+  "line": 327,
+  "problem": "effectiveDefault was inserted between strategyExplanation and its doc comment. The line \"/// One line under the strategy picker saying what the chosen strategy does.\" now opens effectiveDefault's doc comment, and strategyExplanation (line 334) has none.",
+  "failure_scenario": "Quick Help on effectiveDefault describes the strategy line, and the next reader of strategyExplanation has no description of it.",
+  "fix": "Move line 327 down so it sits directly above `private var strategyExplanation: LocalizedStringKey` at line 334."
+ },
+ {
+  "lens": "ui-strings",
+  "severity": "P2",
+  "file": "PixelSwitch/Control/RemoteControlService.swift",
+  "line": 145,
+  "problem": "This is a latent threading risk outside the views, found while checking for run-time isolation problems. ControlEventHub is @MainActor and the app builds in Swift 6 mode. The .map and .sink closures on NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification) are formed in the @MainActor init, so the Swift 6 compiler treats them as main-actor-isolated and inserts a run-time check that traps if they run on another thread. UserDefaults.didChangeNotification is posted on whichever thread changed a default. Every in-repo write today is on the main actor (AppState, SettingsStore, MenuBarConfig), so this does not fire now.",
+  "failure_scenario": "Any in-process defaults write from a background thread would trap the app on that thread (a dispatch queue assertion) the moment remote control is running. That could be a framework such as Sparkle, or future code that persists a flag from a Task or a URLSession callback.",
+  "fix": "Hop to the main queue before any closure runs: `NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: DispatchQueue.main).map { _ in DefaultFields.current } ...`."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "PixelSwitchCLI/CLIRunner.swift",
+  "line": 298,
+  "problem": "When the two window defaults are equal, defaultWords prints the base `autoSwitch.threshold` instead of the effective window defaults. The test at Tests/UnitTests/ControlSplitTests.swift:371-376 only uses base = session = weekly = 98, so it cannot catch this.",
+  "failure_scenario": "The Settings window has no base slider since 2.0. The user moves both new sliders to 80 (or runs `settings set autoSwitch.sessionThreshold 80` and `autoSwitch.weeklyThreshold 80`), and the base stays at 90 (unset) or at 98 on the Beeco Mac. `pixelswitch status` then prints `Auto-switch:   on, default 90%, ...`, while `pixelswitch accounts` prints `80% (default)` and auto-switch leaves at 80%. Confirmed with a scratch probe compiled from the shipped CLI files.",
+  "fix": "In defaultWords, replace `return percent(a.defaultThreshold)` with `return percent(a.defaultSessionThreshold ?? a.defaultThreshold)`. This is byte-identical when the windows follow the base and for an old app that sends neither value. Add a test: AutoSwitchInfo(defaultThreshold: 90, defaultSessionThreshold: 80, defaultWeeklyThreshold: 80) must make the status line contain `default 80%`."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "Tests/UnitTests/ControlSplitTests.swift",
+  "line": 168,
+  "problem": "The test 'references: \"3\" is the position, not the account with priority 3' runs when no account has priority 3. Priorities are then alice 1, bob 99, carol none, after the 99, 3.0 and 1 calls at line 165. So it cannot catch the defect it is named for. Spec section 3 says a priority number is never an account reference; breaking that rule switches the wrong account.",
+  "failure_scenario": "Mutation: in AccountResolver.resolve, add `if let n = Int(ref), let hit = accounts.first(where: { $0.priority == n }) { return hit }` before the position lookup. The suite stays 1154 passed, 0 failed, although `pixelswitch switch 3` (or MCP switch_account \"3\") would now switch to whichever account has P3, not the third row.",
+  "fix": "Just before line 169, set a priority on a different account than the third row and confirm it: `_ = setPriority(\"alice@work.com\", .number(3))`, then check that `account(app, \"alice@work.com\", api: api)?[\"position\"] != .number(3)`. Then assert that `accounts.switch` with \"3\" switches to the account at position 3, and that its email differs from alice@work.com."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "PixelSwitchCLI/MCPServer.swift",
+  "line": 62,
+  "problem": "Spec section 4 says the `account` descriptions say they are 'never a priority number'. get_usage (line 62, 'Optional: only this account.') and start_sign_in (line 72, 'Optional: re-sign this account instead of adding a new one.') do not. The test at ControlSplitTests.swift:419-422 is labelled 'every account argument' but only checks 4 tools, so it stays green.",
+  "failure_scenario": "An AI agent reads the list_accounts output, sees `priority: 3`, and calls start_sign_in {account: \"3\"} or get_usage {account: \"3\"}. That re-signs or reports on the third row, not the P3 account, and neither tool's description warns against it.",
+  "fix": "Add ', never a priority number' to both descriptions. Example: 'Optional: only this account (an email, label, id or position, never a priority number).' Write the start_sign_in one the same way. In the test, replace the hard-coded list with every tool that has an account property: `tools.filter { $0[\"inputSchema\"]?[\"properties\"]?[\"account\"] != nil }`, then assert each description contains 'never a priority number'."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "PixelSwitch/Control/SettingsStore.swift",
+  "line": 34,
+  "problem": "Spec 2.1 names a test: 'with only autoSwitchThreshold = 98 stored ... settings.get returns 98 for both new keys'. Only the first half exists, in TwoWindowTests.swift:68-71 (effective defaults read 98). SettingsStore.value for .autoSwitchSessionThreshold and .autoSwitchWeeklyThreshold (lines 34-37) is not compiled in the harness and is not tested anywhere.",
+  "failure_scenario": "Someone changes line 35 to read the raw key, for example `defaults.object(forKey: AutoSwitchSettings.sessionThresholdKey) as? Double`, wrapped as a JSONValue. `pixelswitch settings autoSwitch.sessionThreshold` on the Beeco Mac (base 98) then prints null or 0 instead of 98, and scripts expecting a number break. Every test stays green.",
+  "fix": "Move the three threshold reads into a pure function in a file the harness compiles, for example in SettingsCatalog.swift: `static func autoSwitchThresholdValue(_ key: SettingKey, in defaults: UserDefaults) -> JSONValue?`, built on AutoSwitchSettings.windowDefaults(base:session:weekly:) and storedThreshold(forKey:in:). Have SettingsStore.value call it. In ControlSplitTests, store only thresholdKey = 98 in a suite UserDefaults and assert the function returns .number(98) for autoSwitch.threshold, autoSwitch.sessionThreshold and autoSwitch.weeklyThreshold."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "Tests/integration/remote-control.sh",
+  "line": 45,
+  "problem": "Spec 5.7 item 2 says every scratch test, 'remote-control.sh included, checks testMode: true first'. The script only checks protocolVersion. It also still says 'Needs PixelSwitch 1.2 or later' (line 14), but its MCP step now requires a 2.0 CLI (20 tools). If lane LB owns the Linux guard, move this finding there, but it must land before any laptop run.",
+  "failure_scenario": "On the founder's laptop the script is pointed at a daemon that is not in test mode, for example the real install or a stray `PIXELSWITCH_CLI`. It then flips autoSwitch.drainWithinHours and menuBar.lowRemainingWarningThreshold on the live service, runs a real `usage.refresh` against Anthropic, and starts and cancels a real `claude auth login` beside the CabDesign farm. Nothing stops it.",
+  "fix": "After line 47, inside the successful-status branch, add: `if [ \"$(echo \"$status\" | field platform)\" = \"linux\" ] && [ \"$(echo \"$status\" | field testMode)\" != \"True\" ]; then echo \"Refusing: this Linux PixelSwitch is not in test mode (spec 5.7).\"; exit 2; fi`. Note that `field` prints Python's `True`. Also exit 2 when status fails on Linux. Change line 14 to 'Needs PixelSwitch 2.0 or later (the MCP check counts 20 tools)'."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "Tests/UnitTests/ControlSplitTests.swift",
+  "line": 464,
+  "problem": "Nothing runs the new CLI commands end to end against a 2.0 app; only the old-app stop is exercised. So the CLI-to-wire presence mapping (CLIRunner.swift:163-174), `none` becoming null, and the D6 sentence that depends on the live strategy have no test.",
+  "failure_scenario": "Mutation 1: at CLIRunner.swift:166, `params[\"weekly\"] = weekly?.parameter ?? .null`. Then `pixelswitch accounts threshold bob --session 80` silently wipes bob's own weekly 50 back to the default. Mutation 2: `strategy: \"myOrder\"` at line 174, so the D6 sentence is never printed. Both mutations leave the suite at 1154 passed, 0 failed.",
+  "fix": "Add a second stand-in ControlServer, like the one at lines 483-493, whose status.get returns Payload19.status plus `\"features\":[\"priority\",\"splitThresholds\"]`. It should record each request's params and answer setThresholds and setPriority from ControlAPI over a FakeApp. Then assert:\n- `accounts threshold 1 --weekly 50` sends exactly {\"account\":\"1\",\"weekly\":50}, with no session key;\n- `--session default` sends \"session\":null;\n- `accounts priority 1 none` sends \"priority\":null;\n- with strategy mostRoom, stdout contains 'Auto-switch follows these numbers only when it chooses by Priority.', and with myOrder it does not."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "Tests/UnitTests/ControlSplitTests.swift",
+  "line": 258,
+  "problem": "For accountsChanged, only the payload builder (api.accountsChangedData) is tested. The ControlEventHub wiring in RemoteControlService.swift:136-160 is untested: the AccountFields and DefaultFields change detection, dropFirst, the UserDefaults path for the autoSwitch.*Threshold keys, and the sign-in-succeeded trigger.",
+  "failure_scenario": "A refactor drops `threshold` or `priority` from AccountFields, or drops the didChangeNotification sink. `pixelswitch watch` then never sees a priority edit or a window-default change. Every test stays green, because the hub needs AppState and is not compiled in the harness.",
+  "fix": "Move the change key into ControlAPI.swift, which the harness compiles. For example: `ControlSnapshots.accountsChangeKey(_ accounts: [Account], base: Double, defaults: AutoSwitchEngine.WindowPair) -> some Equatable`, and use it in the hub. Test that a label, threshold, window threshold, priority, order or window-default change alters the key, and that a usage change does not."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "Tests/UnitTests/ControlSplitTests.swift",
+  "line": 165,
+  "problem": "`setPriority(\"1\", .number(99)) != nil` is always true, because the helper returns an RPCResponse for errors too. So the upper bound 99 is never checked. The 'account vanished after resolve' notFound path is also untested for both new methods (ControlAPI.swift:182-184, 207-209).",
+  "failure_scenario": "Mutation: change ControlAPI's priority guard to `(1...98)`. The suite stays 1154 passed, 0 failed, while `pixelswitch accounts priority 2 99` (the documented maximum) is refused.",
+  "fix": "Replace the first clause with `kind(setPriority(\"1\", .number(99))) == nil && priorities(setPriority(\"1\", .number(99))).contains(99)`. Add a FakeApp switch that makes setPriority and setWindowThresholds return false. Assert that both methods then answer notFound 'That account no longer exists.'"
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "Tests/UnitTests/ControlSplitTests.swift",
+  "line": 72,
+  "problem": "The check labelled 'half away from zero' uses 49.5, which also rounds to 50 under round-half-to-even. So it cannot tell the two rule sets apart, and spec section 4 requires half away from zero. The same blind spot covers the settings keys: 72.4 at line 189 is not a .5 case.",
+  "failure_scenario": "Mutation: `number.rounded(.toNearestOrEven)` in ControlAPI.windowEdit. The suite stays green, while accounts.setThresholds with session 48.5 then stores 48 instead of 49. This matters because the Python port's round() is half-to-even, so it can disagree with the Mac.",
+  "fix": "Change the value to 48.5 and expect 49 (`.number(48.5)` gives sessionThreshold `.number(49)`). Add `norm(key, .number(72.5)) == .number(73)` to the settings-key check at line 189."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "Tests/UnitTests/ControlSplitTests.swift",
+  "line": 533,
+  "problem": "The l10n test uses a hand-typed key list. It leaves out three new long 2.0 strings from the 'translated, not English' check:\n- 'Moves you to the account with the lowest priority number ...'\n- 'Manual only accounts are never switched to automatically; ...'\n- 'Auto-switch tries accounts with lower numbers first ...'\nIt also never checks that each translation keeps the same format specifiers as the English. All five tables are correct today; I checked every key with a script.",
+  "failure_scenario": "A later edit pastes English into de for one of the three strings, or drops one of the five %@ from the ja help sentence. The suite stays green, and the Settings help then shows English, or a sentence with a number missing or misplaced.",
+  "fix": "Build the key list from the en table's '2.0:' block instead of typing it by hand. Add a check over every key that the sorted list of %@, %lld and %% tokens in each translation equals the English key's list."
+ }
+]
