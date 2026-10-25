@@ -16,6 +16,21 @@ enum CLIOpenChoice: Equatable, Sendable {
     }
 }
 
+/// What `--session` or `--weekly` was given: a number, or `default`.
+enum CLIWindowValue: Equatable, Sendable {
+    /// Follow the default again.
+    case follow
+    case percent(Double)
+
+    /// The `session` or `weekly` parameter `accounts.setThresholds` takes.
+    var parameter: JSONValue {
+        switch self {
+        case .follow: return .null
+        case .percent(let value): return .number(value)
+        }
+    }
+}
+
 /// One `pixelswitch` command, parsed.
 enum CLICommand: Equatable, Sendable {
     case help
@@ -33,6 +48,11 @@ enum CLICommand: Equatable, Sendable {
     case label(String, String?)
     /// nil: back to the default; 0: manual only.
     case threshold(String, Double?)
+    /// 2.0: `accounts threshold <account> --session <n|default> --weekly <n|default>`;
+    /// a window that was not named stays as it is.
+    case windowThresholds(String, session: CLIWindowValue?, weekly: CLIWindowValue?)
+    /// 2.0: `accounts priority <account> <1-99|none>`; nil = none.
+    case priority(String, Int?)
     case order([String])
     case usage(String?)
     case refresh
@@ -156,7 +176,10 @@ enum CLIParser {
             let text = rest.dropFirst().joined(separator: " ")
             return .label(account, text == "--clear" ? nil : text)
         case "threshold":
-            guard rest.count == 2 else { throw CLIUsageError("Usage: pixelswitch accounts threshold <account> <1-100|default|manual>") }
+            if rest.contains(where: { $0.hasPrefix("--") }) { return try windowThresholds(rest) }
+            guard rest.count == 2 else {
+                throw CLIUsageError("Usage: pixelswitch accounts threshold <account> <1-100|default|manual>  or  --session <1-100|default> --weekly <1-100|default>")
+            }
             if rest[1].lowercased() == "default" { return .threshold(rest[0], nil) }
             // Manual only is 0. A literal, because this target does not compile
             // AutoSwitchSettings. "off", "never" and "disable" are deliberately
@@ -166,12 +189,57 @@ enum CLIParser {
                 throw CLIUsageError("The threshold must be a number from 1 to 100, \"default\", or \"manual\" (0 means manual too).")
             }
             return .threshold(rest[0], value)
+        case "priority":
+            guard rest.count == 2 else { throw CLIUsageError("Usage: pixelswitch accounts priority <account> <1-99|none>") }
+            if rest[1].lowercased() == "none" { return .priority(rest[0], nil) }
+            // A priority is a whole number. The "P" some screens show is not typed here.
+            guard let value = Int(rest[1]), (1...99).contains(value) else {
+                throw CLIUsageError("The priority must be a whole number from 1 to 99, or \"none\". Lower numbers are tried first.")
+            }
+            return .priority(rest[0], value)
         case "order":
             guard !rest.isEmpty else { throw CLIUsageError("Usage: pixelswitch accounts order <account> <account> ...") }
             return .order(rest)
         default:
             throw CLIUsageError("Unknown command \"accounts \(sub)\". Run `pixelswitch help`.")
         }
+    }
+
+    /// `accounts threshold <account> [--session <1-100|default>] [--weekly <1-100|default>]`.
+    private static func windowThresholds(_ words: [String]) throws -> CLICommand {
+        let usage = "Usage: pixelswitch accounts threshold <account> [--session <1-100|default>] [--weekly <1-100|default>]"
+        var account: String?
+        var session: CLIWindowValue?
+        var weekly: CLIWindowValue?
+        var index = 0
+        while index < words.count {
+            let word = words[index]
+            switch word {
+            case "--session", "--weekly":
+                index += 1
+                guard index < words.count else { throw CLIUsageError("\(word) needs 1-100 or \"default\".") }
+                let value = try windowValue(words[index], flag: word)
+                if word == "--session" { session = value } else { weekly = value }
+            default:
+                guard !word.hasPrefix("--"), account == nil else { throw CLIUsageError(usage) }
+                account = word
+            }
+            index += 1
+        }
+        guard let account, session != nil || weekly != nil else { throw CLIUsageError(usage) }
+        return .windowThresholds(account, session: session, weekly: weekly)
+    }
+
+    private static func windowValue(_ text: String, flag: String) throws -> CLIWindowValue {
+        if text.lowercased() == "default" { return .follow }
+        let number = Double(text.replacingOccurrences(of: "%", with: ""))
+        if text.lowercased() == "manual" || number == 0 {
+            throw CLIUsageError("Manual only is for the whole account, not one window. Use: pixelswitch accounts threshold <account> manual")
+        }
+        guard let number, number.isFinite, (1.0...100.0).contains(number.rounded()) else {
+            throw CLIUsageError("\(flag) needs a number from 1 to 100, or \"default\".")
+        }
+        return .percent(number.rounded())
     }
 
     private static func signInOptions(_ words: [String]) throws -> (CLIOpenChoice, Bool, [String]) {
@@ -219,8 +287,12 @@ enum CLIParser {
       pixelswitch accounts remove <account> --yes    Deletes the account's saved login
       pixelswitch accounts label <account> <text> | --clear
       pixelswitch accounts threshold <account> <1-100|default|manual>
-                                                     manual (or 0): never switched to automatically
-      pixelswitch accounts order <account> <account> ...   The full priority order
+                                                     Both windows at once. manual (or 0): never switched to automatically
+      pixelswitch accounts threshold <account> [--session <1-100|default>] [--weekly <1-100|default>]
+                                                     One window or both: the 5-hour limit, the 7-day limit
+      pixelswitch accounts priority <account> <1-99|none>
+                                                     Lower numbers are tried first (shown as P1, P2, ...)
+      pixelswitch accounts order <account> <account> ...   The full order; numbers every account from 1
 
     Usage
       pixelswitch usage [<account>]                  Session, weekly and Fable use; cost today
@@ -234,7 +306,8 @@ enum CLIParser {
       pixelswitch quit
       pixelswitch mcp                                Run as an MCP server on stdin/stdout
 
-    <account> is an email address, a label, an id, or a position (1, 2, ...).
+    <account> is an email address, a label, an id, or a position (the # column: 1, 2, ...).
+    It is never a priority number (P1, P2, ...): set those with `accounts priority`.
     Add --json for exact JSON, --timeout <seconds> to wait longer.
     Exit codes: 0 ok, 1 failed, 2 usage, 3 busy, 4 no such account, 5 PixelSwitch unreachable.
     """

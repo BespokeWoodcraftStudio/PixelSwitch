@@ -212,13 +212,10 @@
 "Also switch when Fable runs out" = "Basculer aussi quand Fable est épuisé";
 
 /* Auto-switch rules: Settings → General (1.2) */
-"Default threshold" = "Seuil par défaut";
 "Choose the next account by" = "Choisir le compte suivant selon";
 "Most room left" = "Plus de marge restante";
-"My order" = "Mon ordre";
 "Resets soonest (use quota before it expires)" = "Réinitialisation la plus proche (utiliser le quota avant qu'il n'expire)";
 "Moves you to the account with the most room left, preferring one that still has Fable to spare." = "Bascule vers le compte qui a le plus de marge, en privilégiant un compte à qui il reste du Fable.";
-"Moves you to the highest account in your order (Settings → Accounts) that has room. It always starts from the top." = "Bascule vers le compte le plus haut dans votre ordre (Réglages → Comptes) qui a de la marge. La recherche part toujours du haut.";
 "Moves you to the account whose weekly quota resets soonest, so quota about to expire is used before it is lost." = "Bascule vers le compte dont le quota hebdomadaire se réinitialise le plus tôt, pour utiliser le quota avant qu'il ne soit perdu.";
 "Switch early to use quota before it resets" = "Basculer plus tôt pour utiliser le quota avant sa réinitialisation";
 "Within %lld hours" = "Dans les %lld heures";
@@ -312,3 +309,21 @@
 "Status" = "État";
 "Try again now" = "Réessayer maintenant";
 "Open status.claude.com" = "Ouvrir status.claude.com";
+
+/* 2.0: separate session and weekly limits, priority numbers */
+"Session (5-hour) default" = "Valeur par défaut de la session (5 heures)";
+"Weekly default" = "Valeur par défaut hebdomadaire";
+"When no account under its weekly limit can take you, the session limit decides." = "Quand aucun compte sous sa limite hebdomadaire ne peut prendre le relais, c'est la limite de session qui décide.";
+"Fable uses the weekly limit." = "Fable utilise la limite hebdomadaire.";
+"Priority (lowest number first)" = "Priorité (plus petit numéro d'abord)";
+"Moves you to the account with the lowest priority number (Settings → Accounts) that has room. It always starts from the lowest number." = "Bascule vers le compte au plus petit numéro de priorité (Réglages → Comptes) qui a de la marge. La recherche part toujours du plus petit numéro.";
+"Priority" = "Priorité";
+"None" = "Aucune";
+"Lower numbers are tried first. Dragging renumbers every account from 1." = "Les numéros les plus bas sont essayés en premier. Un glisser-déposer renumérote tous les comptes à partir de 1.";
+"Auto-switch follows these numbers only when it chooses by Priority." = "Le changement automatique ne suit ces numéros que lorsqu'il choisit par priorité.";
+"Use priority" = "Utiliser la priorité";
+"Auto-switch moves you off this account at %@ of its session or %@ of its week, and moves you to it only while it is at %@ or less of its session and %@ or less of its week (up to %@ of its week when no account under its weekly limit can take you)." = "Le changement automatique quitte ce compte à %@ de sa session ou à %@ de sa semaine, et n'y bascule que tant qu'il est à %@ ou moins de sa session et à %@ ou moins de sa semaine (jusqu'à %@ de sa semaine quand aucun compte sous sa limite hebdomadaire ne peut prendre le relais).";
+"Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default thresholds (%@ of its session or %@ of its week)." = "Le changement automatique ne bascule jamais vers ce compte. Vous pouvez toujours y basculer vous-même ; tant que vous l'utilisez, le changement automatique le quitte aux seuils par défaut (%@ de la session ou %@ de la semaine).";
+"You're using it now. Auto-switch moves you off it at %@ of its session or %@ of its week and won't move you back to it." = "Vous l'utilisez en ce moment. Le changement automatique le quittera à %@ de sa session ou à %@ de sa semaine et n'y reviendra pas.";
+"Manual only accounts are never switched to automatically; you can still switch to them yourself." = "Le changement automatique ne bascule jamais vers les comptes en « Manuel uniquement » ; vous pouvez toujours y basculer vous-même.";
+"Auto-switch tries accounts with lower numbers first when it chooses by Priority. Accounts with no number come last." = "Le changement automatique essaie d'abord les comptes aux numéros les plus bas lorsqu'il choisit par priorité. Les comptes sans numéro viennent en dernier.";

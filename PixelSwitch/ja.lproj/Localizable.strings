@@ -212,13 +212,10 @@
 "Also switch when Fable runs out" = "Fable を使い切ったときも切り替える";
 
 /* Auto-switch rules: Settings → General (1.2) */
-"Default threshold" = "デフォルトのしきい値";
 "Choose the next account by" = "次のアカウントの選び方";
 "Most room left" = "残りが最も多い";
-"My order" = "自分の順番";
 "Resets soonest (use quota before it expires)" = "リセットが最も早い（期限切れ前に使い切る）";
 "Moves you to the account with the most room left, preferring one that still has Fable to spare." = "残りが最も多いアカウントに切り替えます。Fable に余裕のあるアカウントを優先します。";
-"Moves you to the highest account in your order (Settings → Accounts) that has room. It always starts from the top." = "自分の順番（設定 → アカウント）で最も上にある、余裕のあるアカウントに切り替えます。常に一番上から探します。";
 "Moves you to the account whose weekly quota resets soonest, so quota about to expire is used before it is lost." = "週間の上限が最も早くリセットされるアカウントに切り替え、期限切れ間近の分を無駄にせず使います。";
 "Switch early to use quota before it resets" = "リセット前に使い切るため早めに切り替える";
 "Within %lld hours" = "%lld 時間以内";
@@ -312,3 +309,21 @@
 "Status" = "ステータス";
 "Try again now" = "今すぐ再試行";
 "Open status.claude.com" = "status.claude.com を開く";
+
+/* 2.0: separate session and weekly limits, priority numbers */
+"Session (5-hour) default" = "セッション（5時間）のデフォルト";
+"Weekly default" = "週間のデフォルト";
+"When no account under its weekly limit can take you, the session limit decides." = "週間の上限に達していないアカウントが引き継げないときは、セッションの上限で判断します。";
+"Fable uses the weekly limit." = "Fable は週間の上限を使います。";
+"Priority (lowest number first)" = "優先度（番号が小さい順）";
+"Moves you to the account with the lowest priority number (Settings → Accounts) that has room. It always starts from the lowest number." = "優先度の番号が最も小さい、余裕のあるアカウント（設定 → アカウント）に切り替えます。常に番号が小さいほうから探します。";
+"Priority" = "優先度";
+"None" = "なし";
+"Lower numbers are tried first. Dragging renumbers every account from 1." = "番号が小さいアカウントから順に試します。ドラッグすると、すべてのアカウントに 1 から番号を振り直します。";
+"Auto-switch follows these numbers only when it chooses by Priority." = "自動切り替えがこの番号に従うのは、優先度で選ぶ設定のときだけです。";
+"Use priority" = "優先度を使う";
+"Auto-switch moves you off this account at %@ of its session or %@ of its week, and moves you to it only while it is at %@ or less of its session and %@ or less of its week (up to %@ of its week when no account under its weekly limit can take you)." = "自動切り替えは、セッションが %@、または週間が %@ に達するとこのアカウントから切り替えます。このアカウントに切り替えるのは、セッションが %@ 以下で、かつ週間が %@ 以下の間だけです（週間の上限に達していないアカウントが引き継げないときは、週間が %@ 以下まで）。";
+"Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default thresholds (%@ of its session or %@ of its week)." = "自動切り替えがこのアカウントに切り替えることはありません。自分で切り替えることはできます。使用中は、デフォルトのしきい値（セッション %@、または週間 %@）でこのアカウントから切り替えます。";
+"You're using it now. Auto-switch moves you off it at %@ of its session or %@ of its week and won't move you back to it." = "現在使用中です。自動切り替えは、セッションが %@、または週間が %@ に達するとこのアカウントから切り替え、このアカウントに戻ることはありません。";
+"Manual only accounts are never switched to automatically; you can still switch to them yourself." = "「手動のみ」のアカウントに自動で切り替わることはありません。自分で切り替えることはできます。";
+"Auto-switch tries accounts with lower numbers first when it chooses by Priority. Accounts with no number come last." = "優先度で選ぶ設定のとき、自動切り替えは番号が小さいアカウントから順に試します。番号のないアカウントは最後です。";

@@ -212,13 +212,10 @@
 "Also switch when Fable runs out" = "Fable 用尽时也切换账户";
 
 /* Auto-switch rules: Settings → General (1.2) */
-"Default threshold" = "默认阈值";
 "Choose the next account by" = "下一个账户的选择方式";
 "Most room left" = "剩余额度最多";
-"My order" = "我的顺序";
 "Resets soonest (use quota before it expires)" = "最早重置（在额度过期前用完）";
 "Moves you to the account with the most room left, preferring one that still has Fable to spare." = "切换到剩余额度最多的账户，并优先选择仍有 Fable 余量的账户。";
-"Moves you to the highest account in your order (Settings → Accounts) that has room. It always starts from the top." = "切换到你的顺序（设置 → 账户）中排在最前且有余量的账户。始终从顶部开始查找。";
 "Moves you to the account whose weekly quota resets soonest, so quota about to expire is used before it is lost." = "切换到每周额度最早重置的账户，让即将过期的额度在失效前用掉。";
 "Switch early to use quota before it resets" = "提前切换，在重置前用完额度";
 "Within %lld hours" = "%lld 小时内";
@@ -312,3 +309,21 @@
 "Status" = "状态";
 "Try again now" = "立即重试";
 "Open status.claude.com" = "打开 status.claude.com";
+
+/* 2.0: separate session and weekly limits, priority numbers */
+"Session (5-hour) default" = "会话（5 小时）默认值";
+"Weekly default" = "每周默认值";
+"When no account under its weekly limit can take you, the session limit decides." = "当没有未达每周上限的账户可以接替时，以会话上限为准。";
+"Fable uses the weekly limit." = "Fable 使用每周上限。";
+"Priority (lowest number first)" = "优先级（编号小的优先）";
+"Moves you to the account with the lowest priority number (Settings → Accounts) that has room. It always starts from the lowest number." = "切换到优先级编号最小（设置 → 账户）且有余量的账户。始终从编号最小的开始查找。";
+"Priority" = "优先级";
+"None" = "无";
+"Lower numbers are tried first. Dragging renumbers every account from 1." = "编号小的账户优先尝试。拖动会从 1 开始为所有账户重新编号。";
+"Auto-switch follows these numbers only when it chooses by Priority." = "只有在按优先级选择时，自动切换才会遵循这些编号。";
+"Use priority" = "使用优先级";
+"Auto-switch moves you off this account at %@ of its session or %@ of its week, and moves you to it only while it is at %@ or less of its session and %@ or less of its week (up to %@ of its week when no account under its weekly limit can take you)." = "自动切换会在会话用量达到 %@ 或本周用量达到 %@ 时离开此账户，且仅在其会话用量不超过 %@、本周用量不超过 %@ 时切换到它（当没有未达每周上限的账户可以接替时，本周用量不超过 %@ 即可）。";
+"Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default thresholds (%@ of its session or %@ of its week)." = "自动切换永远不会切换到此账户。您仍可自行切换到它；使用它时，自动切换会在默认阈值（会话 %@ 或每周 %@）时离开它。";
+"You're using it now. Auto-switch moves you off it at %@ of its session or %@ of its week and won't move you back to it." = "您正在使用它。自动切换会在会话用量达到 %@ 或本周用量达到 %@ 时离开它，且不会再切换回来。";
+"Manual only accounts are never switched to automatically; you can still switch to them yourself." = "自动切换永远不会切换到“仅手动”账户；您仍可自行切换到它们。";
+"Auto-switch tries accounts with lower numbers first when it chooses by Priority. Accounts with no number come last." = "按优先级选择时，自动切换会先尝试编号较小的账户。没有编号的账户排在最后。";

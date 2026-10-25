@@ -214,13 +214,10 @@
 "Also switch when Fable runs out" = "Also switch when Fable runs out";
 
 /* Auto-switch rules: Settings → General (1.2) */
-"Default threshold" = "Default threshold";
 "Choose the next account by" = "Choose the next account by";
 "Most room left" = "Most room left";
-"My order" = "My order";
 "Resets soonest (use quota before it expires)" = "Resets soonest (use quota before it expires)";
 "Moves you to the account with the most room left, preferring one that still has Fable to spare." = "Moves you to the account with the most room left, preferring one that still has Fable to spare.";
-"Moves you to the highest account in your order (Settings → Accounts) that has room. It always starts from the top." = "Moves you to the highest account in your order (Settings → Accounts) that has room. It always starts from the top.";
 "Moves you to the account whose weekly quota resets soonest, so quota about to expire is used before it is lost." = "Moves you to the account whose weekly quota resets soonest, so quota about to expire is used before it is lost.";
 "Switch early to use quota before it resets" = "Switch early to use quota before it resets";
 "Within %lld hours" = "Within %lld hours";
@@ -314,3 +311,21 @@
 "Status" = "Status";
 "Try again now" = "Try again now";
 "Open status.claude.com" = "Open status.claude.com";
+
+/* 2.0: separate session and weekly limits, priority numbers */
+"Session (5-hour) default" = "Session (5-hour) default";
+"Weekly default" = "Weekly default";
+"When no account under its weekly limit can take you, the session limit decides." = "When no account under its weekly limit can take you, the session limit decides.";
+"Fable uses the weekly limit." = "Fable uses the weekly limit.";
+"Priority (lowest number first)" = "Priority (lowest number first)";
+"Moves you to the account with the lowest priority number (Settings → Accounts) that has room. It always starts from the lowest number." = "Moves you to the account with the lowest priority number (Settings → Accounts) that has room. It always starts from the lowest number.";
+"Priority" = "Priority";
+"None" = "None";
+"Lower numbers are tried first. Dragging renumbers every account from 1." = "Lower numbers are tried first. Dragging renumbers every account from 1.";
+"Auto-switch follows these numbers only when it chooses by Priority." = "Auto-switch follows these numbers only when it chooses by Priority.";
+"Use priority" = "Use priority";
+"Auto-switch moves you off this account at %@ of its session or %@ of its week, and moves you to it only while it is at %@ or less of its session and %@ or less of its week (up to %@ of its week when no account under its weekly limit can take you)." = "Auto-switch moves you off this account at %@ of its session or %@ of its week, and moves you to it only while it is at %@ or less of its session and %@ or less of its week (up to %@ of its week when no account under its weekly limit can take you).";
+"Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default thresholds (%@ of its session or %@ of its week)." = "Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default thresholds (%@ of its session or %@ of its week).";
+"You're using it now. Auto-switch moves you off it at %@ of its session or %@ of its week and won't move you back to it." = "You're using it now. Auto-switch moves you off it at %@ of its session or %@ of its week and won't move you back to it.";
+"Manual only accounts are never switched to automatically; you can still switch to them yourself." = "Manual only accounts are never switched to automatically; you can still switch to them yourself.";
+"Auto-switch tries accounts with lower numbers first when it chooses by Priority. Accounts with no number come last." = "Auto-switch tries accounts with lower numbers first when it chooses by Priority. Accounts with no number come last.";

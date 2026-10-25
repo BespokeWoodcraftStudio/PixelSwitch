@@ -49,7 +49,7 @@ final class RemoteControlService: ObservableObject {
         }
         self.api = api
         self.server = server
-        hub = ControlEventHub(appState: appState) { [weak server] event in
+        hub = ControlEventHub(appState: appState, api: api) { [weak server] event in
             guard let server, let params = try? JSONValue.encode(event) else { return }
             let line = RPCNotification(method: ControlEvent.notificationMethod, params: params).line
             server.subscribers().forEach { $0.send(line) }
@@ -77,9 +77,34 @@ final class ControlEventHub {
     private var subscriptions = Set<AnyCancellable>()
     private var signInSubscription: AnyCancellable?
     private let send: @MainActor (ControlEvent) -> Void
+    private let api: ControlAPI
+    /// Anything that can change what `accounts.list` says apart from usage.
+    private let accountsSignal = PassthroughSubject<Void, Never>()
 
-    init(appState: AppState, send: @escaping @MainActor (ControlEvent) -> Void) {
+    /// What `AccountInfo` carries apart from usage, as stored on the list. A
+    /// change here (and only here) is an `accountsChanged` event.
+    private struct AccountFields: Equatable {
+        let id: UUID, email: String, label: String?, subscription: String?, isActive: Bool
+        let threshold: Double?, session: Double?, weekly: Double?, priority: Int?
+        init(_ account: Account) {
+            id = account.id; email = account.email; label = account.customLabel; subscription = account.subscriptionType
+            isActive = account.isActive; threshold = account.switchThreshold; session = account.sessionThreshold
+            weekly = account.weeklyThreshold; priority = account.priority
+        }
+    }
+
+    /// The global defaults every account's effective thresholds depend on.
+    private struct DefaultFields: Equatable {
+        let base: Double, session: Double, weekly: Double
+        static var current: DefaultFields {
+            DefaultFields(base: AutoSwitchSettings.defaultThreshold, session: AutoSwitchSettings.defaultSessionThreshold,
+                          weekly: AutoSwitchSettings.defaultWeeklyThreshold)
+        }
+    }
+
+    init(appState: AppState, api: ControlAPI, send: @escaping @MainActor (ControlEvent) -> Void) {
         self.send = send
+        self.api = api
 
         appState.$activeAccount
             .map { $0?.id }
@@ -102,8 +127,35 @@ final class ControlEventHub {
             .compactMap { $0 }
             .removeDuplicates()
             .sink { [weak self] record in
-                self?.emit("autoSwitched", ["from": .string(record.from.uuidString), "to": .string(record.to.uuidString),
-                                            "limit": .string(record.limit.rawValue), "trigger": .string(record.trigger.rawValue)])
+                self?.emit("autoSwitched", ControlSnapshots.autoSwitchedData(from: record.from, to: record.to, limit: record.limit,
+                                                                              trigger: record.trigger, window: record.window,
+                                                                              relaxed: record.relaxed))
+            }
+            .store(in: &subscriptions)
+
+        // accountsChanged: the list or a field of it changed (add, remove,
+        // label, threshold, priority, order, sign-in), or a global default did.
+        appState.$accounts
+            .map { $0.map(AccountFields.init) }
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in self?.accountsSignal.send() }
+            .store(in: &subscriptions)
+
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .map { _ in DefaultFields.current }
+            .prepend(DefaultFields.current)
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in self?.accountsSignal.send() }
+            .store(in: &subscriptions)
+
+        // One event for a burst of changes, read after they have landed.
+        accountsSignal
+            .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
+            .sink { [weak self] in
+                guard let self else { return }
+                self.emit("accountsChanged", self.api.accountsChangedData().objectValue ?? [:])
             }
             .store(in: &subscriptions)
 
@@ -129,6 +181,7 @@ final class ControlEventHub {
             .sink { [weak self] info in
                 guard let data = try? JSONValue.encode(info) else { return }
                 self?.emit("signInChanged", ["signIn": data])
+                if info.state == "succeeded" { self?.accountsSignal.send() }
             }
     }
 

@@ -31,6 +31,10 @@ final class SettingsStore {
             return .bool(defaults.bool(forKey: AutoSwitchSettings.enabledKey))
         case .autoSwitchThreshold:
             return .number(AutoSwitchSettings.defaultThreshold)
+        case .autoSwitchSessionThreshold:
+            return .number(AutoSwitchSettings.defaultSessionThreshold)
+        case .autoSwitchWeeklyThreshold:
+            return .number(AutoSwitchSettings.defaultWeeklyThreshold)
         case .autoSwitchOnFable:
             return .bool(AutoSwitchFableSetting.isOn)
         case .autoSwitchStrategy:
@@ -91,8 +95,16 @@ final class SettingsStore {
         case .autoSwitchEnabled:
             defaults.set(try bool(value, key), forKey: AutoSwitchSettings.enabledKey)
         case .autoSwitchThreshold:
-            guard let number = value.doubleValue else { throw wrongShape(key) }
-            defaults.set(number, forKey: AutoSwitchSettings.thresholdKey)
+            // A "both windows" write: it also clears the two window defaults (D8).
+            guard let number = value.doubleValue, setBaseThreshold(number) else { throw wrongShape(key) }
+        case .autoSwitchSessionThreshold, .autoSwitchWeeklyThreshold:
+            // null clears: the window follows autoSwitch.threshold again.
+            let window: AutoSwitchEngine.Window = key == .autoSwitchSessionThreshold ? .session : .weekly
+            if value.isNull {
+                setWindowDefault(window, to: nil)
+            } else {
+                guard let number = value.doubleValue, setWindowDefault(window, to: number) else { throw wrongShape(key) }
+            }
         case .autoSwitchOnFable:
             defaults.set(try bool(value, key), forKey: AutoSwitchSettings.onFableKey)
         case .autoSwitchStrategy:
@@ -192,6 +204,21 @@ final class SettingsStore {
         defaults.set(path, forKey: kClaudeBinaryPathPreferenceKey)
         ClaudeService.shared.setPath(path.isEmpty ? nil : path)
         lookbackChanged()
+    }
+
+    /// Settings → General and `autoSwitch.threshold`: the base default, which
+    /// also clears both window defaults. Through `AppState` when it is running
+    /// (it logs); the same write either way.
+    @discardableResult
+    func setBaseThreshold(_ value: Double) -> Bool {
+        appState?.setBaseThreshold(value) ?? AutoSwitchSettings.setBaseThreshold(value)
+    }
+
+    /// Settings → General and `autoSwitch.sessionThreshold` / `.weeklyThreshold`:
+    /// one window default (50–100), or nil to follow the base again.
+    @discardableResult
+    func setWindowDefault(_ window: AutoSwitchEngine.Window, to value: Double?) -> Bool {
+        appState?.setDefaultWindowThreshold(window, to: value) ?? AutoSwitchSettings.setDefaultThreshold(window, to: value)
     }
 
     // MARK: - Helpers

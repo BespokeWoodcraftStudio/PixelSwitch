@@ -36,7 +36,9 @@ final class AppController: AppControlling {
             onFable: AutoSwitchFableSetting.isOn,
             strategy: AutoSwitchSettings.strategy.rawValue,
             drainEarly: AutoSwitchSettings.drainEarly,
-            drainWithinHours: AutoSwitchSettings.drainWithinHours
+            drainWithinHours: AutoSwitchSettings.drainWithinHours,
+            defaultSessionThreshold: appState.windowDefaults.session,
+            defaultWeeklyThreshold: appState.windowDefaults.weekly
         )
     }
 
@@ -66,8 +68,10 @@ final class AppController: AppControlling {
         return appState.isSwitchable(account)
     }
 
-    func effectiveSwitchThreshold(for account: Account) -> Double {
-        appState.effectiveSwitchThreshold(for: account)
+    var windowDefaults: AutoSwitchEngine.WindowPair { appState.windowDefaults }
+
+    func leaveAt(for account: Account) -> AutoSwitchEngine.WindowPair {
+        appState.leaveAt(for: account)
     }
 
     // MARK: - Actions
@@ -163,6 +167,16 @@ final class AppController: AppControlling {
     func setSwitchThreshold(_ threshold: Double?, for id: UUID) {
         guard let account = try? self.account(id) else { return }
         appState.setSwitchThreshold(threshold, for: account)
+    }
+
+    func setWindowThresholds(session: AutoSwitchSettings.WindowEdit, weekly: AutoSwitchSettings.WindowEdit, for id: UUID) -> Bool {
+        guard let account = try? self.account(id) else { return false }
+        return appState.setWindowThresholds(session: session, weekly: weekly, for: account)
+    }
+
+    func setPriority(_ priority: Int?, for id: UUID) -> Bool {
+        guard let account = try? self.account(id) else { return false }
+        return appState.setPriority(priority, for: account)
     }
 
     func setAccountOrder(_ ids: [UUID]) -> Bool {

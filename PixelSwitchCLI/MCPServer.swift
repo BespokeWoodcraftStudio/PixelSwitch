@@ -21,10 +21,12 @@ final class MCPServer {
     static let instructions = """
     Controls PixelSwitch, the Claude Code account switcher on the Mac this server runs on. \
     list_accounts and get_usage show every account with its session, weekly and Fable usage and reset times; \
-    switch_account changes which Claude login Claude Code uses on that Mac; the set_* tools change order, \
-    thresholds, labels and settings. start_sign_in adds or re-signs an account and returns links: a person must \
+    switch_account changes which Claude login Claude Code uses on that Mac; the set_* tools change priority, \
+    order, thresholds (one for both limits, or separate session and weekly), labels and settings. A priority \
+    number (P1, P2, …) says which account auto-switch tries first when it chooses by Priority; it is never an \
+    account reference. start_sign_in adds or re-signs an account and returns links: a person must \
     open one in a browser and sign in to Anthropic (an AI cannot finish that step); poll get_sign_in_status until \
-    it reports succeeded, failed or cancelled. Accounts are named by email address, label, id, or position (1, 2, …).
+    it reports succeeded, failed or cancelled. Accounts are named by email address, label, id, or position (1, 2, …), never by priority number.
     """
 
     /// One MCP tool and the control method behind it.
@@ -49,12 +51,12 @@ final class MCPServer {
     // MARK: - Tools
 
     static let tools: [Tool] = {
-        let account = ["account": prop("string", "Email address, label, id, or position (1, 2, …) of the account.")]
+        let account = ["account": prop("string", "An email, label, id or position (1, 2, …) of the account, never a priority number.")]
         let pass: @Sendable ([String: JSONValue]) -> JSONValue? = { .object($0) }
         return [
             Tool(name: "get_status", description: "PixelSwitch's version, the active account, auto-switch settings and any sign-in in progress.",
                  properties: [:], required: [], method: .statusGet, params: { _ in nil }),
-            Tool(name: "list_accounts", description: "Every account in priority order, with its usage, its switch threshold (manualOnly true: auto-switch never switches to it; effectiveThreshold is where auto-switch moves off it while it is active), and whether it can be switched to.",
+            Tool(name: "list_accounts", description: "Every account in priority order, with its priority number (absent when none; lower is tried first), its usage, its switch thresholds (manualOnly true: auto-switch never switches to it; effectiveSessionThreshold and effectiveWeeklyThreshold are where auto-switch moves off it while it is active, per window, and effectiveThreshold is the lower of the two), and whether it can be switched to. position is the 1-based place in the list, not the priority number.",
                  properties: [:], required: [], method: .accountsList, params: { _ in nil }),
             Tool(name: "get_usage", description: "Session (5-hour), weekly and Fable usage with reset times for every account, or one; plus this Mac's cost and activity today. Non-active accounts are read in turn, so check sampledAt.",
                  properties: ["account": prop("string", "Optional: only this account.")], required: [], method: .usageGet, params: pass),
@@ -79,13 +81,27 @@ final class MCPServer {
             Tool(name: "set_account_label", description: "Give an account a label, or clear it with an empty or null label.",
                  properties: account.merging(["label": .object(["type": .array([.string("string"), .string("null")]), "description": .string("The label; empty or null clears it.")])]) { a, _ in a },
                  required: ["account"], method: .accountsSetLabel, params: pass),
-            Tool(name: "set_account_threshold", description: "Set the usage percentage (1–100) at which auto-switch moves off this account; another account is switched to only while it is under its own threshold by at least a point. 0 makes it manual only: auto-switch never switches to it; a person or switch_account still can, and while it is active auto-switch moves off it at the default threshold. Null or omitted: follow the default threshold. 100 uses the account until it is empty.",
+            Tool(name: "set_account_threshold", description: "Set the usage percentage (1–100) at which auto-switch moves off this account, for BOTH the 5-hour session and the weekly limit (it clears any separate session or weekly value; use set_account_thresholds for those). Another account is switched to only while it is under its own threshold by at least a point. 0 makes it manual only: auto-switch never switches to it; a person or switch_account still can, and while it is active auto-switch moves off it at the default threshold. Null or omitted: follow the default threshold. 100 uses the account until it is empty.",
                  properties: account.merging(["threshold": .object(["type": .array([.string("number"), .string("null")]), "minimum": .number(0), "maximum": .number(100)])]) { a, _ in a },
                  required: ["account"], method: .accountsSetThreshold, params: pass),
-            Tool(name: "set_account_order", description: "Set the priority order: list every account exactly once, first choice first. \"My order\" auto-switching follows it.",
+            Tool(name: "set_account_thresholds", description: "Set the usage percentage (1–100) at which auto-switch moves off this account for the 5-hour session limit and the weekly limit separately, for example session 90 and weekly 50. A key you leave out is left as it is; null makes that limit follow the default again. Fable follows the weekly limit. For manual only use set_account_threshold with 0; null on a manual-only account changes nothing.",
+                 properties: account.merging([
+                    "session": .object(["type": .array([.string("number"), .string("null")]), "minimum": .number(1), "maximum": .number(100),
+                                        "description": .string("The 5-hour session limit; null follows the default; omit to leave it.")]),
+                    "weekly": .object(["type": .array([.string("number"), .string("null")]), "minimum": .number(1), "maximum": .number(100),
+                                       "description": .string("The 7-day weekly limit (Fable too); null follows the default; omit to leave it.")])
+                 ]) { a, _ in a },
+                 required: ["account"], method: .accountsSetThresholds, params: pass),
+            Tool(name: "set_account_priority", description: "Give an account a priority number from 1 to 99; lower is tried first when auto-switch chooses by Priority (settings autoSwitch.strategy \"priority\"). Gaps are fine (1, 4, 9). Accounts with no number come after every numbered one. null clears the account's number. The reply is every account in the new order.",
+                 properties: account.merging([
+                    "priority": .object(["type": .array([.string("integer"), .string("null")]), "minimum": .number(1), "maximum": .number(99),
+                                         "description": .string("1–99, lower first; null clears it.")])
+                 ]) { a, _ in a },
+                 required: ["account"], method: .accountsSetPriority, params: pass),
+            Tool(name: "set_account_order", description: "Set the whole order: list every account exactly once, first choice first. It numbers every account from 1 in that order (priority 1, 2, 3, …), replacing any priority numbers set before. Auto-switching by Priority follows it.",
                  properties: ["accounts": .object(["type": .string("array"), "items": .object(["type": .string("string")]), "description": .string("Every account, in order.")])],
                  required: ["accounts"], method: .accountsSetOrder, params: pass),
-            Tool(name: "get_settings", description: "Every setting and its value, or one (key). Keys include autoSwitch.enabled, autoSwitch.threshold, autoSwitch.strategy (mostRoom, myOrder, resetsSoonest), autoSwitch.drainEarly, autoSwitch.drainWithinHours, refreshInterval, launchAtLogin, menuBar.modules, updates.automatic (install updates by itself).",
+            Tool(name: "get_settings", description: "Every setting and its value, or one (key). Keys include autoSwitch.enabled, autoSwitch.threshold (both limits; setting it clears the two below), autoSwitch.sessionThreshold and autoSwitch.weeklyThreshold (50–100, or null/\"default\" to follow autoSwitch.threshold), autoSwitch.strategy (mostRoom, myOrder, resetsSoonest; \"priority\" is accepted for myOrder and means: lowest priority number first), autoSwitch.drainEarly, autoSwitch.drainWithinHours, refreshInterval, launchAtLogin, menuBar.modules, updates.automatic (install updates by itself).",
                  properties: ["key": prop("string", "Optional: one setting.")], required: [], method: .settingsGet, params: pass),
             Tool(name: "set_setting", description: "Change one setting. The value is checked; an invalid one is refused with the allowed values.",
                  properties: ["key": prop("string", "The setting's name, as get_settings lists it."),
