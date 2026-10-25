@@ -22,7 +22,9 @@ from .api import (
 from .credtools import applying_renewal_expiry
 from .logfile import CategoryLog
 from .logins import loads_object
-from .usage_guard import UsageRequestError, UsageRequestGuard, fingerprint_for_log, fingerprint_of
+from .usage_guard import (
+    UsageRequestError, UsageRequestGuard, fingerprint_for_log, fingerprint_of, parse_retry_after,
+)
 from .usage_model import UsageDecodeError, UsageResponse, is_number, swift_double
 
 #: ClaudeService.swift:394, the OAuth error codes that may appear in a log line.
@@ -110,8 +112,10 @@ class ClaudeService:
         status = response.status
         if status == 401:
             self.guard.record_rejected(account, access_token, self._clock())
-        elif status == 429 and account is not None:
-            retry = swift_double(response.header("retry-after"))
+        elif status == 429:
+            # Recorded whether or not an account is known (spec D20 revision 4,
+            # ClaudeService.swift:313-318): a lookup with no active account must not be able to repeat.
+            retry = parse_retry_after(response.header("retry-after"))
             self.guard.record_rate_limited(account, access_token, retry, self._clock())
         if status != 200:
             self._log.warning(f"[accountIdentity] Profile lookup failed (HTTP {status})")

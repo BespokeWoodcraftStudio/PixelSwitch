@@ -201,10 +201,29 @@ class ProfileTests(ServiceCase):
         until = self.guard.decision("acct", False, _login("tok"), self.clock.now).until
         self.assertAlmostEqual(until - self.clock.now, 3600.0, delta=1)  # clamped to the longest park
 
-    def test_a_429_without_an_account_is_not_recorded(self):
-        self.mock.script("profile", "tok", R(429, "slow"))
+    def test_a_429_without_an_account_parks_that_token(self):
+        """Spec D20 revision 4 (ClaudeService.swift:313-318): a 429 is recorded against the token
+        whether or not an account is known. May-use is False until Retry-After, then through the
+        20-minute cool-down, then True (LB review, claude_service.py:113)."""
+        self.mock.script("profile", "tok", R(429, "slow", {"Retry-After": "300"}))
         self.assertIsNone(self.service.account_identity("tok", None, None))
-        self.assertTrue(self.guard.may_use("tok", None, self.clock.now))
+        now = self.clock.now
+        self.assertFalse(self.guard.may_use("tok", None, now))
+        self.assertFalse(self.guard.may_use("tok", None, now + 299))
+        self.assertFalse(self.guard.may_use("tok", None, now + 301))   # parked for 300, cooling down for 1200
+        self.assertFalse(self.guard.may_use("tok", None, now + 1199))
+        self.assertTrue(self.guard.may_use("tok", None, now + 1201))
+        # another token is not held by it
+        self.assertTrue(self.guard.may_use("other", None, now))
+        # and a second ask inside the park sends nothing
+        self.assertIsNone(self.service.account_identity("tok", None, None))
+        self.assertEqual(len(self.mock.calls_to("profile")), 1)
+
+    def test_retry_after_inf_parks_for_the_longest(self):
+        self.mock.script("profile", "tok", R(429, "slow", {"Retry-After": "inf"}))
+        self.assertIsNone(self.service.account_identity("tok", None, "acct"))
+        until = self.guard.decision("acct", False, _login("tok"), self.clock.now).until
+        self.assertAlmostEqual(until - self.clock.now, 3600.0, delta=1)
 
 
 def _login(token):
