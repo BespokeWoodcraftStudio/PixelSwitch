@@ -9,8 +9,11 @@ import Foundation
     removalPlanTests()
     removalFallbackTests()
     shortcutTests()
+    liveLoginDisposalTests()
+    removedLoginsTests()
     liveBackupResultTests()
     rereadDecisionTests()
+    firstPassResultTests()
     stayingPutTests()
 }
 
@@ -154,6 +157,146 @@ private let blankedLogin = #"{"claudeAiOauth":{"accessToken":"","refreshToken":"
     check(!SwitchShortcut.alreadyLive(liveOwnerId: nil, believedActiveId: a, targetId: b), "shortcut: an unproven login and a different target switches")
 }
 
+
+// MARK: - D20 revision 4: a switch with no active account
+
+@MainActor private func liveLoginDisposalTests() {
+    typealias D = LiveLoginDisposal
+    let k = UUID(), l = UUID()
+    func decide(usable: Bool = true, api: D.APIAnswer = .couldNotSay, remaining: [UUID]? = [], removed: Bool = false) -> D.Decision {
+        D.decide(liveLoginUsable: usable, api: api, remainingSameGrant: remaining, sameGrantAsRemovedLogin: removed)
+    }
+
+    // Nothing to lose.
+    check(decide(usable: false) == .proceed(.nothingToLose) && decide(usable: false, api: .namesRemainingAccount, remaining: [k, l]) == .proceed(.nothingToLose),
+          "D20 r4: a live credential that is absent or holds a blanked login has nothing to lose, whatever else is known")
+
+    // The API proves the login is nobody's on the list (Claude Code was busy and the removed account's login was renewed).
+    check(decide(api: .namesNoRemainingAccount) == .proceed(.apiNamesNoRemainingAccount),
+          "D20 r4: the API naming no remaining account proves the login disposable")
+    check(decide(api: .namesNoRemainingAccount, remaining: nil) == .proceed(.apiNamesNoRemainingAccount),
+          "D20 r4: ...even when the backup store cannot be read")
+    check(decide(api: .namesNoRemainingAccount, remaining: [k]) == .proceed(.apiNamesNoRemainingAccount),
+          "D20 r4: the API's proof wins over a saved login that may have been saved wrongly")
+
+    // The same grant as the removed account's logins (Claude Code idle, tokens unchanged).
+    check(decide(removed: true) == .proceed(.sameGrantAsRemovedAccount), "D20 r4: the same grant as the removed account's login is disposable")
+    check(decide(api: .couldNotSay, remaining: [], removed: true) == .proceed(.sameGrantAsRemovedAccount),
+          "D20 r4: ...when the API could not say")
+    check(decide(remaining: nil, removed: true) == .refuse,
+          "D20 r4: lineage proves nothing while the backup store cannot be read, so the removed account's grant is not enough")
+
+    // The same grant as exactly one remaining account: that account is believed active (never discarded).
+    check(decide(remaining: [k]) == .treatAsActive(k), "D20 r4: the same grant as exactly one remaining account's saved login treats that account as active")
+    check(decide(remaining: [k], removed: true) == .treatAsActive(k),
+          "D20 r4: a login that is both a remaining account's and a removed one's is never discarded as the removed account's")
+
+    // Otherwise refuse.
+    check(decide() == .refuse, "D20 r4: unknown to the API, to the saved logins and to the removed logins is refused")
+    check(decide(remaining: [k, l]) == .refuse && decide(remaining: [k, l], removed: true) == .refuse,
+          "D20 r4: the same grant as two remaining accounts is ambiguous and refused")
+    check(decide(api: .namesRemainingAccount) == .refuse && decide(api: .namesRemainingAccount, removed: true) == .refuse
+          && decide(api: .namesRemainingAccount, remaining: [k]) == .refuse,
+          "D20 r4: an API answer that names a remaining account without settling on one refuses; nothing is discarded on contradictory data")
+
+    // Every combination: a decision never discards a login that is a remaining account's, and refuses unless something proves it disposable.
+    var discardedARemainingLogin = false, proceededWithoutProof = false
+    for usable in [true, false] { for api in [D.APIAnswer.couldNotSay, .namesNoRemainingAccount, .namesRemainingAccount] {
+        for remaining in [nil, [], [k], [k, l]] as [[UUID]?] { for removed in [true, false] {
+            let d = decide(usable: usable, api: api, remaining: remaining, removed: removed)
+            if case .proceed(let basis) = d {
+                if usable, api != .namesNoRemainingAccount, (remaining?.count ?? 0) > 0 { discardedARemainingLogin = true }
+                if usable, basis == .nothingToLose { proceededWithoutProof = true }
+                if usable, api != .namesNoRemainingAccount, !removed { proceededWithoutProof = true }
+            }
+        } }
+    } }
+    check(!discardedARemainingLogin && !proceededWithoutProof,
+          "D20 r4: over every combination, a usable live login is replaced only on the API's word or the removed account's grant")
+
+    // The sentence is in all five tables and the English one is the founder-readable text.
+    let languages = ["en", "de", "fr", "ja", "zh-Hans"]
+    let tables = languages.map { NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String] ?? [:] }
+    check(tables.allSatisfy { ($0[D.refusalSentence] ?? "").isEmpty == false },
+          "D20 r4: the refusal sentence exists in all five string tables")
+    check(tables[0][D.refusalSentence] == D.refusalSentence && !D.refusalSentence.contains("\u{2014}"),
+          "D20 r4: the English refusal sentence is the source text, with no em dash")
+    check(zip(languages, tables).dropFirst().allSatisfy { $1[D.refusalSentence] != D.refusalSentence },
+          "D20 r4: the four other tables carry a translation, not the English text")
+}
+
+@MainActor private func removedLoginsTests() {
+    func login(_ access: String, _ refresh: String?) -> CredentialOwnership.Login {
+        CredentialOwnership.Login(accessToken: access, refreshToken: refresh)
+    }
+    let saved = goodLogin("SAVED-A", refresh: "R-SAVED"), live = goodLogin("LIVE-A", refresh: "R-LIVE")
+    let fingerprints = RemovedLogins.fingerprints(ofCredentials: [saved, live, nil, blankedLogin])
+    check(fingerprints.count == 2 && !fingerprints.contains { $0.contains("R-SAVED") || $0.contains("R-LIVE") },
+          "removed logins: the saved and live refresh tokens are kept as fingerprints, a missing or blanked credential adds nothing, and no token is kept")
+    check(RemovedLogins.isRemovedLogin(login("any", "R-SAVED"), fingerprints: fingerprints)
+          && RemovedLogins.isRemovedLogin(login("other", "R-LIVE"), fingerprints: fingerprints),
+          "removed logins: a live login with a recorded refresh token is the removed account's, whatever its access token")
+    check(!RemovedLogins.isRemovedLogin(login("SAVED-A", "R-NEW"), fingerprints: fingerprints)
+          && !RemovedLogins.isRemovedLogin(login("any", nil), fingerprints: fingerprints)
+          && !RemovedLogins.isRemovedLogin(login("any", "R-SAVED"), fingerprints: []),
+          "removed logins: a rotated refresh token, no refresh token, or nothing recorded is not a match")
+
+    var memory: [String] = []
+    memory = RemovedLogins.remembering(["a", "b"], existing: memory)
+    memory = RemovedLogins.remembering(["b", "c"], existing: memory)
+    check(memory == ["a", "b", "c"], "removed logins: a second removal adds to the first without repeats")
+    let many = RemovedLogins.remembering((0..<40).map { "f\($0)" }, existing: ["old"])
+    check(many.count == RemovedLogins.limit && many.last == "f39" && !many.contains("old"), "removed logins: the memory is bounded and keeps the newest")
+}
+
+// MARK: - The first pass refuses an unchanged login it could not save (the open P2)
+
+@MainActor private func firstPassResultTests() {
+    typealias Backup = LiveLoginBackup
+    let a1 = goodLogin("A1", refresh: "R1"), a2 = goodLogin("A2", refresh: "R2")
+    func first(_ result: Backup.Result, owner: Bool = true, seen: String? = a1, now: String? = a1) -> Backup.FirstPassStep {
+        Backup.afterFirstPass(seen: seen, liveNow: now, ownerKnown: owner, result: result)
+    }
+
+    check(first(.notSaved(.unproven)) == .abort(.notSaved(.unproven)),
+          "first pass: a login renewed since the proof, that could not be proven again, is not written over (the owner's backup would keep a rotated-away refresh token)")
+    check(first(.notSaved(.storeRefused)) == .abort(.notSaved(.storeRefused)), "first pass: a save the store refused stops the switch with nothing written")
+    check(first(.saved) == .proceed && first(.nothingWorthSaving) == .proceed, "first pass: a saved login, or one with nothing worth saving, goes ahead")
+    check(first(.notSaved(.identityMismatch)) == .proceed && first(.notSaved(.noOwner)) == .proceed,
+          "first pass: only the two reasons the review named stop an unchanged login")
+    check(first(.notSaved(.unproven), owner: false) == .proceed && first(.notSaved(.storeRefused), owner: false) == .proceed,
+          "first pass: with no proven owner nothing could be saved for anyone, so these reasons do not stop the switch")
+    check(first(.notSaved(.unproven), now: a2) == .retry && first(.notSaved(.storeRefused), now: a2) == .retry,
+          "first pass: a login that changed is looked at again with proof before anything is refused")
+
+    // It cannot refuse every switch: over every fact that can hold with an unchanged, usable login and a known owner,
+    // only a login that differs from the proven one AND was not vouched for by the API, or a store that failed, stops it.
+    let verified = CredentialOwnership.login(fromCredential: a1)!
+    var refusedWithProof = false, stoppedForTheRightReason = true
+    for fresh in [a1, a2] {
+        let freshLogin = CredentialOwnership.login(fromCredential: fresh)
+        let proof = Backup.freshLoginProof(verified: verified, fresh: freshLogin)
+        for apiVouches in [true, false] { for identity in [true, false] { for store in [true, false] {
+            let proven = proof == .sameGrant || (proof == .needsAPI && apiVouches)
+            let result = Backup.result(fresh: fresh, ownerKnown: true, proven: proven, identityMatches: identity, storeAccepted: store)
+            let step = Backup.afterFirstPass(seen: fresh, liveNow: fresh, ownerKnown: true, result: result)
+            if proof == .sameGrant, identity, store, step != .proceed { refusedWithProof = true }
+            if case .abort = step {
+                let becauseUnproven = proof == .needsAPI && !apiVouches
+                let becauseStore = proven && identity && !store
+                if !(becauseUnproven || becauseStore) { stoppedForTheRightReason = false }
+            }
+        } } }
+    }
+    check(!refusedWithProof, "first pass: an unchanged login that is the one the API proved, with its identity on record and a working store, is never refused")
+    check(stoppedForTheRightReason, "first pass: it stops only for an unproven renewed login or a store that failed")
+
+    check(Backup.freshLoginProof(verified: verified, fresh: verified) == .sameGrant
+          && Backup.freshLoginProof(verified: verified, fresh: CredentialOwnership.login(fromCredential: a2)) == .needsAPI
+          && Backup.freshLoginProof(verified: nil, fresh: verified) == .none && Backup.freshLoginProof(verified: verified, fresh: nil) == .none,
+          "first pass: the same grant needs no second question, a renewed login needs the API, and nothing to compare is .none")
+}
+
 // MARK: - Step 1: what "saved" means
 
 @MainActor private func liveBackupResultTests() {
@@ -189,15 +332,15 @@ private let blankedLogin = #"{"claudeAiOauth":{"accessToken":"","refreshToken":"
     let a1 = goodLogin("A1", refresh: "R1"), a2 = goodLogin("A2", refresh: "R2"), a3 = goodLogin("A3", refresh: "R3")
 
     // First pass.
-    check(Backup.afterFirstPass(seen: a1, liveNow: a1, ownerKnown: true) == .proceed, "reread: an unchanged login goes ahead")
-    check(Backup.afterFirstPass(seen: a1, liveNow: a2, ownerKnown: true) == .retry, "reread: a renewed login is backed up again")
-    check(Backup.afterFirstPass(seen: nil, liveNow: nil, ownerKnown: true) == .abort(.unreadable),
+    check(Backup.afterFirstPass(seen: a1, liveNow: a1, ownerKnown: true, result: .saved) == .proceed, "reread: an unchanged login goes ahead")
+    check(Backup.afterFirstPass(seen: a1, liveNow: a2, ownerKnown: true, result: .saved) == .retry, "reread: a renewed login is backed up again")
+    check(Backup.afterFirstPass(seen: nil, liveNow: nil, ownerKnown: true, result: .notSaved(.unreadable)) == .abort(.unreadable),
           "reread: a login proven a moment ago that now reads as nothing, twice, stops with nothing written")
-    check(Backup.afterFirstPass(seen: nil, liveNow: a1, ownerKnown: true) == .abort(.unreadable),
+    check(Backup.afterFirstPass(seen: nil, liveNow: a1, ownerKnown: true, result: .notSaved(.unreadable)) == .abort(.unreadable),
           "reread: a login that could not be read for step 1 is not written over, even if it can be read now")
-    check(Backup.afterFirstPass(seen: nil, liveNow: nil, ownerKnown: false) == .proceed,
+    check(Backup.afterFirstPass(seen: nil, liveNow: nil, ownerKnown: false, result: .notSaved(.unreadable)) == .proceed,
           "reread: with no login on this Mac at all (no proven owner) the switch is not refused")
-    check(Backup.afterFirstPass(seen: nil, liveNow: a1, ownerKnown: false) == .retry, "reread: a login that appeared since step 1 is looked at again")
+    check(Backup.afterFirstPass(seen: nil, liveNow: a1, ownerKnown: false, result: .notSaved(.unreadable)) == .retry, "reread: a login that appeared since step 1 is looked at again")
 
     // The review's P1: the retry reads nothing twice.
     check(Backup.afterRetry(firstSeen: a1, seen: nil, result: .notSaved(.unreadable), liveNow: nil, ownerKnown: true) == .unreadable,
@@ -347,6 +490,32 @@ private func comesBefore(_ first: String, _ second: String, in text: String) -> 
     let perform = member(app, startingAt: "func performSwitch(to account: Account) async throws {")
     check(perform.contains("SwitchShortcut.alreadyLive(") && perform.contains("guard !accounts.isEmpty") && !perform.contains("guard let currentActive = activeAccount"),
           "pins D20: performSwitch no longer refuses just because no account is active")
+    // D20 revision 4: the switch with no active account is decided by LiveLoginDisposal before anything is written.
+    check(perform.contains("unownedLiveLoginDecision(") && comesBefore("unownedLiveLoginDecision(", "validatedTargetBackup(for: account)", in: perform)
+          && comesBefore("unownedLiveLoginDecision(", "claudeService.switchAccount(", in: perform)
+          && perform.contains("case .refuse:") && perform.contains("PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again.")
+          && perform.contains("forgetRemovedLogins()"),
+          "pins D20 r4: performSwitch decides a switch with no active account before it validates or writes, refuses with the sentence, and forgets the removed logins once a switch succeeds")
+    let decision = member(app, startingAt: "private func unownedLiveLoginDecision(")
+    check(decision.contains("LiveLoginDisposal.decide(") && decision.contains("RemovedLogins.isRemovedLogin(") && decision.contains("CredentialOwnership.lineageMatches("),
+          "pins D20 r4: AppState gathers the facts and asks LiveLoginDisposal.decide")
+    check(remove.contains("RemovedLogins.fingerprints(") && comesBefore("RemovedLogins.fingerprints(", "keychain.removeAccountBackup(", in: remove),
+          "pins D20 r4: removeAccount records the removed account's logins before its backup is deleted")
+    if let gaveUp = after.range(of: "case .busyGaveUp"), let worked = after.range(of: "case .noneWorked") {
+        let branch = String(after[gaveUp.lowerBound..<worked.lowerBound])
+        check(branch.contains("activeAccount = nil") && branch.contains("activeAccount?.id == removed.id") && branch.contains("errorMessage = message"),
+              "pins D20 r4: when the busy wait gives up the removed account stops being the current account (only if nothing else became active) and the message stays")
+    } else {
+        check(false, "pins D20 r4: switchAfterRemoval has a busyGaveUp branch before noneWorked")
+    }
+    let signInBackup = member(app, startingAt: "private func backUpBeforeSignIn(")
+    check(signInBackup.components(separatedBy: "accounts.contains(where: { $0.id == current.id })").count == 3,
+          "pins D20 r4: both sign-in backups skip a current account that is no longer on the list")
+    let identity = member(claude, startingAt: "func accountIdentity(")
+    check(identity.contains("requestGuard.recordRateLimited(account: account,") && !identity.contains("if let account { requestGuard.recordRateLimited"),
+          "pins D20 r4: a 429 on the profile request is recorded whether or not an account is known")
+    check(switchAccount.contains("ownerKnown: liveOwner != nil, result: step1.result)"),
+          "pins 5.3: the first pass passes step 1's result to LiveLoginBackup.afterFirstPass")
     let update = member(app, startingAt: "private func updateActiveAccount(from status: AuthStatus) {")
     check(update.contains("AccountRemoval.mayCreateFromLiveLogin("), "pins D20: a refresh decides whether to create the first account with AccountRemoval.mayCreateFromLiveLogin")
     let staying = member(app, startingAt: "private func noteStayingPut(")

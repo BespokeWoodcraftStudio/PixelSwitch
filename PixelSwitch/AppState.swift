@@ -324,6 +324,7 @@ final class AppState: ObservableObject {
         accounts.append(account)
         sortAccountsByPriority()
         UserDefaults.standard.removeObject(forKey: removedLastAccountKey)
+        forgetRemovedLogins()
         saveAccounts()
         log.info("[addAccount] Account saved. Total accounts: \(self.accounts.count)")
         return account
@@ -422,17 +423,17 @@ final class AppState: ObservableObject {
     private func backUpBeforeSignIn(for purpose: SignInPurpose) async {
         switch purpose {
         case .newAccount:
-            if let current = activeAccount {
+            if let current = activeAccount, accounts.contains(where: { $0.id == current.id }) {
                 log.info("[loginNewAccount] Step 1: Backing up current account (\(current.email))...")
                 let backed = await claudeService.captureCurrentCredentials(for: current)
                 log.info("[loginNewAccount] Step 1: Backup result: \(backed)")
                 if backed { noteCredentialChanged(for: current) }
             } else {
-                log.info("[loginNewAccount] Step 1: No active account, skipping backup")
+                log.info("[loginNewAccount] Step 1: No active account on the list, skipping backup")
             }
             log.info("[loginNewAccount] Step 2: Running `claude auth login`...")
         case .reauthenticate(let accountId, _):
-            if let current = activeAccount, current.id != accountId {
+            if let current = activeAccount, current.id != accountId, accounts.contains(where: { $0.id == current.id }) {
                 log.info("[reauth] Backing up current account before login...")
                 if await claudeService.captureCurrentCredentials(for: current) { noteCredentialChanged(for: current) }
             }
@@ -554,6 +555,7 @@ final class AppState: ObservableObject {
             accounts.append(account)
             sortAccountsByPriority()
             UserDefaults.standard.removeObject(forKey: removedLastAccountKey)
+            forgetRemovedLogins()
             activeAccount = account
             // A login is a deliberate account choice; grant it the same
             // auto-switch grace period a manual switch gets.
@@ -879,6 +881,26 @@ final class AppState: ObservableObject {
     /// D20). Cleared when any account is added. Kept across launches.
     private let removedLastAccountKey = "ai.pixelventures.pixelswitch.removedLastAccount"
 
+    /// Fingerprints (never tokens) of the refresh tokens of the logins of accounts
+    /// the user removed: the removed account's saved login and, when it was the
+    /// active one, the login Claude Code held at that moment. Lets a switch made
+    /// with no active account recognise the live login as the removed account's
+    /// and so disposable (spec D20 revision 4). Kept across launches; forgotten
+    /// by the next successful switch or add (`forgetRemovedLogins`).
+    private let removedLoginsKey = "ai.pixelventures.pixelswitch.removedAccountLoginFingerprints"
+
+    private var removedLoginFingerprints: [String] {
+        get { UserDefaults.standard.stringArray(forKey: removedLoginsKey) ?? [] }
+        set {
+            if newValue.isEmpty { UserDefaults.standard.removeObject(forKey: removedLoginsKey) }
+            else { UserDefaults.standard.set(newValue, forKey: removedLoginsKey) }
+        }
+    }
+
+    private func forgetRemovedLogins() {
+        if !removedLoginFingerprints.isEmpty { removedLoginFingerprints = [] }
+    }
+
     /// Removes `account` and its saved login. Removing the account Claude Code
     /// is using also moves Claude Code to another one (spec D20, credentials
     /// recon section 8, option A): nothing is marked active until its switch
@@ -889,6 +911,14 @@ final class AppState: ObservableObject {
     func removeAccount(_ account: Account) {
         log.info("[removeAccount] Removing account \(account.id)")
         let wasActive = account.isActive || activeAccount?.id == account.id
+        // Remember which grants were this account's before its backup goes (spec D20
+        // revision 4): its saved login, and the live login when it was the active one.
+        removedLoginFingerprints = RemovedLogins.remembering(
+            RemovedLogins.fingerprints(ofCredentials: [
+                keychain.getAccountBackup(forAccountId: account.id.uuidString)?.token,
+                wasActive ? keychain.readClaudeToken() : nil,
+            ]),
+            existing: removedLoginFingerprints)
         keychain.removeAccountBackup(forAccountId: account.id.uuidString)
         accounts.removeAll { $0.id == account.id }
         // Drop every per-account cache too, or a re-added account inherits the
@@ -953,10 +983,20 @@ final class AppState: ObservableObject {
         case .switched, .stoodDown:
             break
         case .busyGaveUp(let message):
-            // Nothing was tried, so nothing is cleared: Claude Code is still on the
-            // removed account's login and a switch the user starts still works.
+            // Nothing was tried, but the removed account is gone from the list, so it
+            // must not stay the current account: a later sign-in would back its login
+            // up again under the removed id, and status would report it as active. No
+            // remaining account is marked active already. This does not wedge the
+            // app: a switch is allowed with no active account, and the live login (the
+            // removed account's) is recognised as disposable by the fingerprints
+            // recorded at removal. Only if nothing else became active meanwhile.
+            if activeAccount?.id == removed.id {
+                activeAccount = nil
+                for i in accounts.indices { accounts[i].isActive = false }
+                saveAccounts()
+            }
             errorMessage = message
-            log.warning("[removeAccount] Gave up waiting for a switch or sign-in to finish; no fallback was tried")
+            log.warning("[removeAccount] Gave up waiting for a switch or sign-in to finish; no fallback was tried, and no account is active. A switch the user starts still works.")
         case .noneWorked(let lastFailure):
             // Only if nothing else made another account active meanwhile
             // (`stillNeeded` was true when the loop ended).
@@ -991,13 +1031,16 @@ final class AppState: ObservableObject {
         // accounts but none active (the state a removal leaves when no fallback
         // worked, kept across launches) a switch is still allowed: otherwise
         // nothing could ever set an active account again and the user would be
-        // stuck until a full sign-in. The live login's owner is still proven by
-        // the API below, and nothing is backed up under an unproven owner.
+        // stuck until a full sign-in. But nothing is backed up under an unproven
+        // owner, so such a switch OVERWRITES the live login without saving it.
+        // In that state it therefore goes ahead only when the live login is
+        // provably disposable (`LiveLoginDisposal`, spec D20 revision 4, decided
+        // below once the API has been asked); otherwise it is refused.
         guard !accounts.isEmpty else {
             log.info("[switchTo] No switch needed (no accounts)")
             throw ActionError(kind: .noActiveAccount, message: String(localized: "No account is active yet, so there is nothing to switch from. Add the current account first.", bundle: L10n.bundle))
         }
-        let currentActive = activeAccount
+        var currentActive = activeAccount
 
         // One credential mutation at a time: a switch already in flight (its
         // awaits leave the main actor free) or a running login must finish
@@ -1018,18 +1061,43 @@ final class AppState: ObservableObject {
         // is the target's, there is nothing to switch; just make sure we know it.
         let liveCredential = keychain.readClaudeToken()
         var live: (account: Account, identity: ClaudeService.AccountIdentity)?
+        var liveIdentity: ClaudeService.AccountIdentity?
         if let liveCredential {
-            live = await provenOwner(ofCredential: liveCredential, believedAccount: currentActive?.id)
+            let lookup = await liveLookup(ofCredential: liveCredential, believedAccount: currentActive?.id)
+            liveIdentity = lookup.identity
+            if let owner = lookup.owner, let identity = lookup.identity { live = (owner, identity) }
         }
         let liveOwner = live?.account
-        if SwitchShortcut.alreadyLive(liveOwnerId: liveOwner?.id, believedActiveId: currentActive?.id, targetId: account.id) {
-            log.info("[switchTo] No switch needed: \(account.email)'s login is already live")
-            if liveOwner?.id == account.id, currentActive?.id != account.id { adoptActive(account) }
-            return
+
+        // No active account and no proven owner (spec D20 revision 4): the login
+        // being replaced is not saved anywhere, so decide whether that is safe.
+        var adoptsBelievedActive = false
+        if currentActive == nil, liveOwner == nil {
+            var decision = unownedLiveLoginDecision(credential: liveCredential, identity: liveIdentity)
+            if case .treatAsActive(let believedId) = decision {
+                if let believed = accounts.first(where: { $0.id == believedId }) {
+                    log.warning("[switchTo] No account is active, but the live login is the same grant as \(believed.email)'s saved login; treating \(believed.email) as the active account")
+                    currentActive = believed
+                    adoptsBelievedActive = true
+                } else {
+                    decision = .refuse
+                }
+            }
+            switch decision {
+            case .proceed(let basis):
+                log.warning("[switchTo] No account is active and the live login's owner is not proven; switching anyway (\(basis)), and saving nothing for the login being replaced")
+            case .treatAsActive:
+                break
+            case .refuse:
+                log.error("[switchTo] REFUSED: no account is active and the live login cannot be shown to be the removed account's or to be nobody's on the list; nothing was changed")
+                throw ActionError(kind: .failed, message: String(localized: "PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again.", bundle: L10n.bundle))
+            }
         }
 
-        if currentActive == nil, liveOwner == nil {
-            log.warning("[switchTo] No account is active and the live login's owner is not proven; switching anyway, and saving nothing for the login being replaced")
+        if SwitchShortcut.alreadyLive(liveOwnerId: liveOwner?.id, believedActiveId: currentActive?.id, targetId: account.id) {
+            log.info("[switchTo] No switch needed: \(account.email)'s login is already live")
+            if (liveOwner?.id == account.id && currentActive?.id != account.id) || (adoptsBelievedActive && currentActive?.id == account.id) { adoptActive(account) }
+            return
         }
         log.info("[switchTo] ===== Switching from \((liveOwner ?? currentActive)?.email ?? "an unproven login") to \(account.email) =====")
 
@@ -1064,6 +1132,7 @@ final class AppState: ObservableObject {
                 }
             }
             activeAccount = account
+            forgetRemovedLogins()
             saveAccounts()
             // The switch wrote the target's saved login as the live one, and
             // saved the old live login under its owner: both credentials changed.
@@ -1111,20 +1180,29 @@ final class AppState: ObservableObject {
     /// account id (`accountUuid` in that account's saved identity) and by
     /// email. nil if neither names exactly one account, or if they disagree.
     private func account(matching identity: ClaudeService.AccountIdentity) -> Account? {
-        let claude = accounts.filter { $0.provider == .claudeCode }
-        let backups = keychain.allAccountBackups() ?? [:]
-        var byUuid: Account?
-        if let uuid = identity.uuid {
-            let hits = claude.filter { (backups[$0.id.uuidString]?.oauthAccount["accountUuid"]?.value as? String) == uuid }
-            if hits.count == 1 { byUuid = hits[0] }
-        }
-        var byEmail: Account?
-        if let email = identity.email {
-            let hits = claude.filter { $0.email.caseInsensitiveCompare(email) == .orderedSame }
-            if hits.count == 1 { byEmail = hits[0] }
-        }
+        let (uuidHits, emailHits) = accountsNamed(by: identity)
+        let byUuid = uuidHits.count == 1 ? uuidHits[0] : nil
+        let byEmail = emailHits.count == 1 ? emailHits[0] : nil
         if let byUuid, let byEmail, byUuid.id != byEmail.id { return nil }
         return byUuid ?? byEmail
+    }
+
+    /// Every Claude Code account an API identity names, by the permanent account
+    /// id and by email. Several in either list, or both lists naming different
+    /// accounts, is why `account(matching:)` can return nil for an identity that
+    /// does name someone on the list.
+    private func accountsNamed(by identity: ClaudeService.AccountIdentity) -> (byUuid: [Account], byEmail: [Account]) {
+        let claude = accounts.filter { $0.provider == .claudeCode }
+        let backups = keychain.allAccountBackups() ?? [:]
+        var byUuid: [Account] = []
+        if let uuid = identity.uuid {
+            byUuid = claude.filter { (backups[$0.id.uuidString]?.oauthAccount["accountUuid"]?.value as? String) == uuid }
+        }
+        var byEmail: [Account] = []
+        if let email = identity.email {
+            byEmail = claude.filter { $0.email.caseInsensitiveCompare(email) == .orderedSame }
+        }
+        return (byUuid, byEmail)
     }
 
     /// The account the credential's login belongs to, per Anthropic's API, with
@@ -1136,10 +1214,42 @@ final class AppState: ObservableObject {
     /// against it. A token that is expired, was refused, or is cooling down is
     /// not sent at all.
     private func provenOwner(ofCredential credential: String, believedAccount: UUID?) async -> (account: Account, identity: ClaudeService.AccountIdentity)? {
-        guard let login = CredentialOwnership.login(fromCredential: credential),
-              let identity = await claudeService.accountIdentity(forAccessToken: login.accessToken, expiresAt: login.expiresAt, account: believedAccount),
-              let owner = account(matching: identity) else { return nil }
+        let lookup = await liveLookup(ofCredential: credential, believedAccount: believedAccount)
+        guard let owner = lookup.owner, let identity = lookup.identity else { return nil }
         return (owner, identity)
+    }
+
+    /// What the API said about a credential: the identity it answered with (nil if
+    /// it could not say) and the one account on the list that identity names
+    /// (nil if it names none or no single one). A 401 or 429 is recorded against
+    /// the token whether or not `believedAccount` is known.
+    private func liveLookup(ofCredential credential: String, believedAccount: UUID?) async -> (identity: ClaudeService.AccountIdentity?, owner: Account?) {
+        guard let login = CredentialOwnership.login(fromCredential: credential),
+              let identity = await claudeService.accountIdentity(forAccessToken: login.accessToken, expiresAt: login.expiresAt, account: believedAccount) else { return (nil, nil) }
+        return (identity, account(matching: identity))
+    }
+
+    /// Spec D20 revision 4: with no active account and no proven owner, whether the
+    /// switch may overwrite the live login, which nothing saves. Gathers the facts
+    /// and asks `LiveLoginDisposal`.
+    private func unownedLiveLoginDecision(credential: String?, identity: ClaudeService.AccountIdentity?) -> LiveLoginDisposal.Decision {
+        let usable = CredentialOwnership.isUsableLogin(credential: credential)
+        guard usable, let credential, let login = CredentialOwnership.login(fromCredential: credential) else {
+            return LiveLoginDisposal.decide(liveLoginUsable: false, api: .couldNotSay, remainingSameGrant: nil, sameGrantAsRemovedLogin: false)
+        }
+        let api: LiveLoginDisposal.APIAnswer
+        if let identity {
+            let named = accountsNamed(by: identity)
+            api = (named.byUuid.isEmpty && named.byEmail.isEmpty) ? .namesNoRemainingAccount : .namesRemainingAccount
+        } else {
+            api = .couldNotSay
+        }
+        let remaining = savedLogins().map { CredentialOwnership.lineageMatches(login, in: $0).compactMap { UUID(uuidString: $0) } }
+        let decision = LiveLoginDisposal.decide(
+            liveLoginUsable: true, api: api, remainingSameGrant: remaining,
+            sameGrantAsRemovedLogin: RemovedLogins.isRemovedLogin(login, fingerprints: removedLoginFingerprints))
+        log.info("[switchTo] Live login (token \(TokenFingerprint.forLog(TokenFingerprint.of(login.accessToken)))) with no active account: API \(api), \(remaining.map { String($0.count) } ?? "unreadable") remaining saved login(s) share its grant, \(removedLoginFingerprints.count) removed login(s) remembered, decision \(decision)")
+        return decision
     }
 
     /// Whether saved identity details describe the owner the API named.

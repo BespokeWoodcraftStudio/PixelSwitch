@@ -81,6 +81,47 @@ import Foundation
               "guard: a token refused before its owner was known is blocked for every account")
     }
 
+    // A 429 where no account was known is recorded too (spec D20 revision 4): with no active account the live
+    // login is looked up with no account, and the hourly 429 loop of 1.9 must not come back through that path.
+    do {
+        let g = UsageRequestGuard()
+        let id = UUID()
+        let until = g.recordRateLimited(account: nil, accessToken: "ORPHAN-429", retryAfter: 3600, now: t0)
+        check(until == t0.addingTimeInterval(3600), "guard: a 429 with no account known parks for the server's Retry-After")
+        let valid = login("ORPHAN-429", expiresIn: 6 * hour)
+        check(!g.mayUse(accessToken: "ORPHAN-429", now: t0.addingTimeInterval(minute))
+              && !g.mayUse(accessToken: "ORPHAN-429", now: t0.addingTimeInterval(59 * minute))
+              && g.mayUse(accessToken: "ORPHAN-429", now: t0.addingTimeInterval(61 * minute))
+              && g.mayUse(accessToken: "OTHER", now: t0.addingTimeInterval(minute)),
+              "guard: a token that got a 429 with no account known is refused until the park ends, and other tokens are not")
+        check(g.decision(for: id, isActive: false, login: valid, now: t0.addingTimeInterval(30 * minute)) == .parked(until: until)
+              && g.decision(for: id, isActive: true, login: valid, now: t0.addingTimeInterval(30 * minute)) == .parked(until: until),
+              "guard: once an account owns that token its usage reading is held by the same park")
+        check(g.decision(for: id, isActive: false, login: login("ORPHAN-429-RENEWED", expiresIn: 6 * hour), now: t0.addingTimeInterval(30 * minute)) == .request,
+              "guard: a renewed token is not held by the old token's park")
+
+        // The 20-minute cool-down applies even after a short Retry-After, like the account-bound case.
+        let short = UsageRequestGuard()
+        short.recordRateLimited(account: nil, accessToken: "SHORT", retryAfter: 0, now: t0)
+        check(!short.mayUse(accessToken: "SHORT", now: t0.addingTimeInterval(19 * minute)) && short.mayUse(accessToken: "SHORT", now: t0.addingTimeInterval(21 * minute)),
+              "guard: a 429 with no account known rests the token 20 minutes even if Retry-After was 0")
+
+        // Repeated lookups cannot loop: after the first 429 every later ask is refused by mayUse.
+        var asks = 0
+        let loop = UsageRequestGuard()
+        for step in 0..<59 {
+            let now = t0.addingTimeInterval(Double(step) * minute)
+            if loop.mayUse(accessToken: "LOOP", now: now) { asks += 1; loop.recordRateLimited(account: nil, accessToken: "LOOP", retryAfter: 3600, now: now) }
+        }
+        check(asks == 1, "guard: a profile lookup that gets 429 every time is sent once in the hour, not every cycle", "asked \(asks) times")
+
+        // The record is bounded.
+        let many = UsageRequestGuard()
+        for index in 0..<200 { many.recordRateLimited(account: nil, accessToken: "T\(index)", retryAfter: 3600, now: t0) }
+        check(!many.mayUse(accessToken: "T199", now: t0.addingTimeInterval(minute)),
+              "guard: the newest 429s with no account are kept when the record is full")
+    }
+
     // MARK: a 429 park belongs to its token (rule c)
 
     do {

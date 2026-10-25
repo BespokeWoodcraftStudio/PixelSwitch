@@ -91,6 +91,16 @@ final class UsageRequestGuard: @unchecked Sendable {
     /// before its owner was proven). Oldest forgotten first.
     private var refusedWithoutAccount: [String] = []
     private static let refusedWithoutAccountLimit = 64
+    /// Tokens that got a 429 where no account was known (the live login before
+    /// its owner was proven, spec D20 revision 4): the park and the 20-minute
+    /// cool-down, keyed by fingerprint, so the hourly 429 loop of 1.9 cannot
+    /// come back through a lookup that has no account to record it against.
+    private struct Unowned {
+        var park: Date
+        var cooldown: Date
+    }
+    private var rateLimitedWithoutAccount: [String: Unowned] = [:]
+    private static let rateLimitedWithoutAccountLimit = 64
 
     init(needsReauth: Set<UUID> = []) {
         restoreNeedsReauth(needsReauth)
@@ -121,6 +131,11 @@ final class UsageRequestGuard: @unchecked Sendable {
         if isActive && isDead { return .waitForClaudeCode }
         if let park = state.park, park.until > now { return .parked(until: park.until) }
         if let cooldown = state.cooldown, cooldown.until > now { return .coolingDown(until: cooldown.until) }
+        // A 429 this token earned while no account was known still holds.
+        if let unowned = rateLimitedWithoutAccount[fingerprint] {
+            if unowned.park > now { return .parked(until: unowned.park) }
+            if unowned.cooldown > now { return .coolingDown(until: unowned.cooldown) }
+        }
         // A saved login that is expired or was refused is renewed first (a POST
         // to the token endpoint); the renewed token carries no park.
         if isDead { return .refreshFirst }
@@ -135,6 +150,7 @@ final class UsageRequestGuard: @unchecked Sendable {
         if Self.isExpired(expiresAt, now: now) { return false }
         let fingerprint = TokenFingerprint.of(accessToken)
         if refusedWithoutAccount.contains(fingerprint) { return false }
+        if let unowned = rateLimitedWithoutAccount[fingerprint], unowned.park > now || unowned.cooldown > now { return false }
         for state in states.values {
             if state.rejectedFingerprint == fingerprint { return false }
             if let park = state.park, park.fingerprint == fingerprint, park.until > now { return false }
@@ -180,10 +196,24 @@ final class UsageRequestGuard: @unchecked Sendable {
     }
 
     /// The server answered 429 for this exact token. Returns the park's end.
+    /// With no account known (`account` nil) the park and the cool-down are
+    /// kept against the token's fingerprint alone, so every later `mayUse` and
+    /// `decision` for that token refuses it until they end (spec D20 revision 4).
     @discardableResult
-    func recordRateLimited(account: UUID, accessToken: String, retryAfter: TimeInterval?, now: Date = Date()) -> Date {
+    func recordRateLimited(account: UUID?, accessToken: String, retryAfter: TimeInterval?, now: Date = Date()) -> Date {
         lock.lock(); defer { lock.unlock() }
         let fingerprint = TokenFingerprint.of(accessToken)
+        guard let account else {
+            let parkFor = min(max(retryAfter ?? Self.defaultPark, Self.shortestPark), Self.longestPark)
+            let until = now.addingTimeInterval(parkFor)
+            rateLimitedWithoutAccount = rateLimitedWithoutAccount.filter { $0.value.park > now || $0.value.cooldown > now }
+            if rateLimitedWithoutAccount[fingerprint] == nil, rateLimitedWithoutAccount.count >= Self.rateLimitedWithoutAccountLimit,
+               let oldest = rateLimitedWithoutAccount.min(by: { $0.value.cooldown < $1.value.cooldown })?.key {
+                rateLimitedWithoutAccount[oldest] = nil
+            }
+            rateLimitedWithoutAccount[fingerprint] = Unowned(park: until, cooldown: now.addingTimeInterval(Self.cooldown))
+            return until
+        }
         var state = states[account] ?? State()
         Self.dropWhatIsNotAboutThisToken(&state, fingerprint: fingerprint)
         let parkFor = min(max(retryAfter ?? Self.defaultPark, Self.shortestPark), Self.longestPark)

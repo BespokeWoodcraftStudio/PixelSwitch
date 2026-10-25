@@ -284,6 +284,7 @@
 "Remote control could not start: %@" = "Remote control could not start: %@";
 "To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH." = "To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH.";
 "No account is active yet, so there is nothing to switch from. Add the current account first." = "No account is active yet, so there is nothing to switch from. Add the current account first.";
+"PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again." = "PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again.";
 "A switch or sign-in is in progress. Try again in a moment." = "A switch or sign-in is in progress. Try again in a moment.";
 
 /* Manual only (0%) and thresholds below 50% (1.5) */

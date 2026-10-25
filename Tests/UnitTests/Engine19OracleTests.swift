@@ -29,7 +29,10 @@ private let now = ISO8601DateFormatter().date(from: "2026-10-24T12:00:00Z")!
 /// The raw values the grid feeds both engines (the brief's list, plus the edges around 98).
 private let switchThresholds: [Double?] = [nil, 0, 0.4, -5, 1, 3, 50, 90, 98, 100, 100.4]
 private let bases: [Double?] = [nil, 0, 30, 98, 120]
-private let utilizations: [Double?] = [nil, 0, 10, 49, 50, 89, 90, 97, 98, 99, 100]
+/// Includes small values (so the half-threshold ceiling of thresholds 1 and 3,
+/// `ceiling(1) = 0.5` and `ceiling(3) = 2`, is exercised on both sides) and
+/// halves around the 50, 90, 97, 98 and 99 edges.
+private let utilizations: [Double?] = [nil, 0, 0.4, 0.5, 0.6, 1, 1.5, 2, 2.5, 3, 10, 49, 49.5, 50, 89, 89.5, 90, 96.5, 97, 97.5, 98, 98.5, 99, 99.5, 100]
 
 private enum ResetKind: CaseIterable { case missing, past, atNow, soon, later, muchLater }
 
@@ -108,6 +111,9 @@ private func limit19(_ limit: AutoSwitchEngine.Limit) -> AutoSwitchEngine19.Limi
 @MainActor private func eligibilityGrid() {
     var rng = SeededGenerator(seed: 0x2_0_1024)
     var compared = 0, eligible = 0
+    /// Eligible readings above 0 at an effective threshold of 1 or 3: proof the
+    /// small-threshold ceiling path was exercised, not just passed over.
+    var smallCeilingEligible = 0
     var firstMismatch: String?
     var mismatches = 0
     let limits: [AutoSwitchEngine.Limit] = [.windows, .fable]
@@ -142,6 +148,7 @@ private func limit19(_ limit: AutoSwitchEngine.Limit) -> AutoSwitchEngine19.Limi
                                 drainWithin: drain, watchFable: watchFable, asOf: now)
                             compared += 1
                             if old != nil { eligible += 1 }
+                            if (threshold == 1 || threshold == 3), let old, old > 0 { smallCeilingEligible += 1 }
                             if old != new || old != compat {
                                 mismatches += 1
                                 if firstMismatch == nil {
@@ -156,6 +163,7 @@ private func limit19(_ limit: AutoSwitchEngine.Limit) -> AutoSwitchEngine19.Limi
     }
     check(mismatches == 0, "oracle: eligibleWindowed answers exactly as 1.9's eligibleUtilization for equal windows (\(compared) comparisons)", firstMismatch ?? "")
     check(eligible > compared / 20 && eligible < compared, "oracle: the eligibility grid is not vacuous (\(eligible) of \(compared) eligible)")
+    check(smallCeilingEligible > 0, "oracle: the grid reaches the small-threshold ceiling (\(smallCeilingEligible) eligible readings above 0 at threshold 1 or 3)")
 }
 
 // MARK: - plan against planWindowed

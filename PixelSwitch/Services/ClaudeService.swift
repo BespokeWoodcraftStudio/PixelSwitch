@@ -292,8 +292,8 @@ final class ClaudeService: @unchecked Sendable {
     /// Nothing is sent for a token the guard knows is dead (expired by its
     /// `expiresAt`, refused with a 401 before, or inside a 429 park or
     /// cool-down): the profile endpoint counts refused calls the same way the
-    /// usage endpoint does. A 401 or 429 from here is recorded for `account`
-    /// (nil when the token's owner is not yet known).
+    /// usage endpoint does. A 401 or 429 from here is recorded for `account`, or
+    /// against the token's fingerprint alone when the token's owner is not yet known.
     func accountIdentity(forAccessToken accessToken: String, expiresAt: Double? = nil, account: UUID? = nil) async -> AccountIdentity? {
         guard requestGuard.mayUse(accessToken: accessToken, expiresAt: expiresAt) else {
             log.info("[accountIdentity] Not asking: token \(TokenFingerprint.forLog(TokenFingerprint.of(accessToken))) is expired, was refused, or is cooling down")
@@ -312,7 +312,9 @@ final class ClaudeService: @unchecked Sendable {
                 requestGuard.recordRejected(account: account, accessToken: accessToken)
             } else if status == 429 {
                 let retryAfter = http?.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
-                if let account { requestGuard.recordRateLimited(account: account, accessToken: accessToken, retryAfter: retryAfter) }
+                // Recorded whether or not an account is known (spec D20 revision 4):
+                // a lookup with no active account must not be able to repeat.
+                requestGuard.recordRateLimited(account: account, accessToken: accessToken, retryAfter: retryAfter)
             }
             guard status == 200,
                   let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -484,17 +486,22 @@ final class ClaudeService: @unchecked Sendable {
             log.info("[switchAccount] Step 1: Backing up the live login...")
             let freshCredential = keychain.readClaudeToken()
             var provenFresh = false
-            if let owner = liveOwner,
-               let verified = verifiedLiveCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }),
-               let fresh = freshCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }) {
-                if CredentialOwnership.sameGrant(verified, fresh) {
+            let verifiedLogin = verifiedLiveCredential.flatMap { CredentialOwnership.login(fromCredential: $0) }
+            let freshLogin = freshCredential.flatMap { CredentialOwnership.login(fromCredential: $0) }
+            if let owner = liveOwner, let fresh = freshLogin {
+                switch LiveLoginBackup.freshLoginProof(verified: verifiedLogin, fresh: fresh) {
+                case .sameGrant:
                     provenFresh = true
-                } else if let identity = await accountIdentity(forAccessToken: fresh.accessToken, expiresAt: fresh.expiresAt, account: owner.id),
-                          CredentialOwnership.detailsBelong(uuid: identity.uuid, email: identity.email,
-                                                            toOwnerUuid: liveOwnerIdentity?.uuid, ownerEmail: owner.email) {
-                    // The CLI renewed the login during the checks; the API confirms it is
-                    // still the owner's, and this is the only copy of the newest login.
-                    provenFresh = true
+                case .needsAPI:
+                    if let identity = await accountIdentity(forAccessToken: fresh.accessToken, expiresAt: fresh.expiresAt, account: owner.id),
+                       CredentialOwnership.detailsBelong(uuid: identity.uuid, email: identity.email,
+                                                         toOwnerUuid: liveOwnerIdentity?.uuid, ownerEmail: owner.email) {
+                        // The CLI renewed the login during the checks; the API confirms it is
+                        // still the owner's, and this is the only copy of the newest login.
+                        provenFresh = true
+                    }
+                case .none:
+                    break
                 }
             }
             var identityMatches = false
@@ -543,7 +550,7 @@ final class ClaudeService: @unchecked Sendable {
         // A read that returns nothing never passes this check silently
         // (`LiveLoginBackup`).
         var liveNow = keychain.readClaudeToken()
-        switch LiveLoginBackup.afterFirstPass(seen: step1.seen, liveNow: liveNow, ownerKnown: liveOwner != nil) {
+        switch LiveLoginBackup.afterFirstPass(seen: step1.seen, liveNow: liveNow, ownerKnown: liveOwner != nil, result: step1.result) {
         case .proceed:
             break
         case .abort(let abort):
