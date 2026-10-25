@@ -92,8 +92,19 @@ fi
 # 2. Accounts and usage (read only)
 accounts=$("$CLI" --json accounts) && count=$(echo "$accounts" | field accounts '#') \
     && ok "accounts lists $count account(s)" || bad "accounts"
-usage=$("$CLI" --json usage) && echo "$usage" | field machine todayCost >/dev/null \
-    && ok "usage reports every account and this Mac's cost" || bad "usage"
+# Linux leaves the machine line out by design (spec D15), so the cost check is
+# skipped there; the usage reply must still come back.
+if usage=$("$CLI" --json usage); then
+    if [ "${platform:-}" = "linux" ]; then
+        echo "skipped on Linux: machine.todayCost (the Linux daemon omits the machine line, spec D15)"
+        ok "usage reports every account"
+    else
+        echo "$usage" | field machine todayCost >/dev/null \
+            && ok "usage reports every account and this Mac's cost" || bad "usage"
+    fi
+else
+    bad "usage"
+fi
 "$CLI" usage nobody-at-all-xyz >/dev/null 2>&1; code=$?
 [ "$code" = "4" ] && ok "an unknown account exits 4" || bad "unknown account exit code" "$code"
 

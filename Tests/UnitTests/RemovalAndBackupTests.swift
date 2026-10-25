@@ -594,8 +594,18 @@ private func comesBefore(_ first: String, _ second: String, in text: String) -> 
     check(adopt.contains("forgetRemovedLogins()") && updateActive.contains("forgetRemovedLogins()")
           && app.components(separatedBy: "forgetRemovedLogins()").count >= 8,
           "pins D20 r4 (FD): adopting an account, a matched refresh, every add and every sign-in forget the removed logins")
+    let reauthFinish = member(app, startingAt: "private func finishReauthentication(accountId: UUID, expectedEmail: String) async -> SignInState {")
+    check(reauthFinish.contains("forgetRemovedLogins()") && comesBefore("activeAccount = accounts[index]", "forgetRemovedLogins()", in: reauthFinish),
+          "pins D20 r4 (FE): finishReauthentication forgets the removed logins when the re-authenticated account becomes active")
     check(perform.contains("judgedLiveLogin = LiveLoginBackup.JudgedLogin(credential: liveCredential)") && perform.contains("judgedLiveLogin: judgedLiveLogin,"),
           "pins D20 r4 (FD): a switch that goes ahead on LiveLoginDisposal's word hands the login it judged to switchAccount")
+    if let treat = perform.range(of: "case .treatAsActive:"), let refuse = perform.range(of: "case .refuse:", range: treat.upperBound..<perform.endIndex) {
+        let branch = String(perform[treat.lowerBound..<refuse.lowerBound])
+        check(branch.contains("judgedLiveLogin = LiveLoginBackup.JudgedLogin(credential: liveCredential)"),
+              "pins D20 r4 (FE): the .treatAsActive branch of performSwitch also binds the switch to the live login it judged")
+    } else {
+        check(false, "pins D20 r4 (FE): performSwitch has a .treatAsActive branch before .refuse")
+    }
     check(switchAccount.contains("LiveLoginBackup.afterJudgedLogin(") && comesBefore("LiveLoginBackup.afterJudgedLogin(", "LiveLoginBackup.afterFirstPass(", in: switchAccount)
           && comesBefore("LiveLoginBackup.afterJudgedLogin(", "keychain.writeClaudeToken(", in: switchAccount),
           "pins D20 r4 (FD): switchAccount compares the live login with the judged one before the first-pass check and before it writes")

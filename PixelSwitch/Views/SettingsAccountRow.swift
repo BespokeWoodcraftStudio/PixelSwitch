@@ -102,10 +102,13 @@ struct SettingsAccountRow: View {
     /// list sorts by priority, so saving every click would move the row out
     /// from under the pointer and the next click would land on another
     /// account. It is saved when the pointer leaves the row, when the row goes
-    /// away, and, for a person who is not using the pointer (keyboard,
-    /// VoiceOver), after a short pause with no click. While the pointer is over
-    /// the row nothing is saved, so the row cannot move between slow clicks. A
-    /// step still waiting is dropped when the saved number changes underneath
+    /// away, when the app is about to quit or loses focus, and, for a person who
+    /// is not using the pointer (keyboard, VoiceOver), after a short pause with
+    /// no click. While the pointer is over the row it is held so the row cannot
+    /// move between slow clicks, but never longer than `hoverHold` after the last
+    /// click: a pointer that rests on the row with no exit event (the row was
+    /// re-sorted from under it, or the app deactivated) cannot hold a step
+    /// forever. A step still waiting is dropped when the saved number changes underneath
     /// it (a drag, or a change from the command line or an MCP client), so it
     /// never overwrites a newer value.
     ///
@@ -118,6 +121,9 @@ struct SettingsAccountRow: View {
         nonmutating set { pendingStorage.wrappedValue = newValue }
     }
     private static let priorityPause: Duration = .milliseconds(800)
+    /// The longest a step is held after the last click while the pointer is
+    /// over the row.
+    private static let hoverHold: Duration = .seconds(10)
 
     /// Whether the pointer is over the row (written out like `pendingStorage`).
     private let hoverStorage = State<Bool>(initialValue: false)
@@ -181,6 +187,15 @@ struct SettingsAccountRow: View {
         }
         // The saved number changed underneath a waiting step: the newer value wins.
         .onChange(of: priority) { _, _ in pendingPriority = nil }
+        // A waiting step must not be lost when the app stops or loses focus with
+        // the pointer still resting on the row (a remote quit, an update
+        // relaunch, logout); neither fires a hover exit or a disappear.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            commitPriority()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            commitPriority()
+        }
     }
 
     // MARK: - Priority
@@ -248,11 +263,16 @@ struct SettingsAccountRow: View {
         }
         // Restarts whenever the number being stepped to changes, so the save
         // waits for a pause after the LAST click; cancelled with the row. With
-        // the pointer over the row it saves nothing: leaving the row does.
+        // the pointer over the row it waits for the pointer to leave, but saves
+        // anyway once `hoverHold` has passed since the last click.
         .task(id: pendingPriority) {
             guard pendingPriority != nil else { return }
             try? await Task.sleep(for: Self.priorityPause)
-            guard !Task.isCancelled, !hovering else { return }
+            guard !Task.isCancelled else { return }
+            if hovering {
+                try? await Task.sleep(for: Self.hoverHold - Self.priorityPause)
+                guard !Task.isCancelled else { return }
+            }
             commitPriority()
         }
         .onDisappear {
