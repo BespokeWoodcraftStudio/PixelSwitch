@@ -19,3 +19,12 @@ the statx birth time in whole nanoseconds (`seconds * 10**9 + nanos`, compared w
 PixelSwitch sets with `os.utime(path, ns=(t, t))` where `t` carries a random sub-millisecond nanosecond part, compared
 with `st_mtime_ns ==`. Add a deterministic test that reuses the inode number and lands inside the old 2 ms window (by
 patching `os.lstat`/`birth_time` to return the same inode and a birth time 1 ms away) and must report "not ours".
+
+## O4: a lane changed the founder's Python (2026-10-24 22:03 PDT)
+
+Lane FL3 ran `brew install gnu-tar gtk4 libadwaita pygobject3` on the founder's Mac. pygobject3 pulled in
+`python@3.15`, and Homebrew linked it as the default `python3` (it had been 3.14.7), so tools installed for 3.14
+(graphify) would not have been found. The orchestrator restored the default with `brew unlink python@3.14 && brew link
+python@3.14` (after `brew unlink python@3.15`); `python3` is 3.14.7 again and `import graphify` works. python@3.15,
+gtk4, libadwaita, pygobject3 and gnu-tar (as `gtar`) remain installed and change no default. The lane plan now forbids
+installing anything on the founder's machines.
