@@ -6,10 +6,12 @@ from __future__ import annotations
 import os
 import shutil
 import socket
+import struct
 import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from pixelswitch import client as cl
 from pixelswitch import protocol as p
@@ -469,6 +471,55 @@ class TimeoutAndGateTests(unittest.TestCase):
 
     def test_choices_line(self):
         self.assertEqual(cl.candidates_text(["a", "b"]), "  choices: a, b")
+
+
+class PeerCredentialTests(ClientTestCase):
+    """The client talks only to a daemon running as this user (SO_PEERCRED, spec 5.2): the one defence against a socket
+    another local user planted at a path the client tries."""
+
+    class FakeSock:
+        def __init__(self, uid=None, raises=False):
+            self.uid, self.raises = uid, raises
+
+        def getsockopt(self, *args):
+            if self.raises:
+                raise OSError("no credentials")
+            return struct.pack("iII", 1234, self.uid, 100)
+
+    def with_option(self):
+        # SO_PEERCRED exists only on Linux; the tests fake its number so they run (and can fail) anywhere.
+        return mock.patch.object(cl.socket, "SO_PEERCRED", 17, create=True)
+
+    def test_the_servers_uid_must_be_ours(self):
+        with self.with_option():
+            self.assertTrue(cl._server_is_us(self.FakeSock(os.getuid())))
+            self.assertFalse(cl._server_is_us(self.FakeSock(os.getuid() + 1)))
+            self.assertFalse(cl._server_is_us(self.FakeSock(raises=True)))
+
+    def test_a_uid_of_2_to_the_31_or_more_is_read_as_the_unsigned_number_it_is(self):
+        big = 2 ** 31 + 5
+        with self.with_option(), mock.patch("os.getuid", return_value=big):
+            self.assertTrue(cl._server_is_us(self.FakeSock(big)))  # read as signed, this was negative and refused
+            self.assertFalse(cl._server_is_us(self.FakeSock(big + 1)))
+
+    def test_where_the_option_does_not_exist_there_is_nothing_to_check(self):
+        with mock.patch.object(cl.socket, "SO_PEERCRED", None, create=True):
+            self.assertTrue(cl._server_is_us(self.FakeSock(os.getuid() + 1)))
+
+    @unittest.skipUnless(hasattr(socket, "SO_PEERCRED"), "this platform has no SO_PEERCRED")
+    def test_a_real_socket_owned_by_another_uid_is_refused_without_a_byte_sent(self):
+        server = self.serve()
+        c = self.client()
+        c.connect(launch=False)  # our own uid: accepted
+        c.disconnect()
+        server.requests.clear()
+        c = self.client()
+        with mock.patch("os.getuid", return_value=os.getuid() + 1):
+            with self.assertRaises(ClientError) as caught:
+                c.connect(launch=False)
+        self.assertEqual(caught.exception.kind, "unreachable")
+        time.sleep(0.2)
+        self.assertEqual(server.requests, [])
 
 
 if __name__ == "__main__":

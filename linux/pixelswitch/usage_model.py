@@ -26,7 +26,7 @@ SEVEN_DAY_SECONDS = 7 * 24 * 60 * 60
 
 _ISO = re.compile(
     r"([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})"
-    r"(?:\.([0-9]{1,9}))?(Z|[+-][0-9]{2}:[0-9]{2})\Z",
+    r"(?:\.([0-9]+))?(Z|[+-][0-9]{2}(?::?[0-9]{2})?)\Z",
     re.ASCII,
 )
 
@@ -54,20 +54,31 @@ def trim_whitespace(text: str) -> str:
 
 
 _PLAIN_NUMBER = re.compile(r"[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z", re.ASCII)
+_HEX_NUMBER = re.compile(r"[+-]?0[xX](?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?\Z", re.ASCII)
 
 
 def swift_double(text: str | None) -> float | None:
     """Swift ``Double(String)`` for the texts a person or a header can carry.
 
-    Plain decimal and exponent forms only (``72.4``, ``1e3``, ``-5``); no
-    underscores, no non-ASCII digits, no ``inf`` / ``nan`` words. The caller
-    trims whitespace first when Swift's caller does.
+    Decimal and exponent forms (``72.4``, ``1e3``, ``-5``) and C hex-float forms (``0x1E`` is 30, ``0x1.8p3``
+    is 12), as Swift reads them; no underscores and no non-ASCII digits. The caller trims whitespace first when
+    Swift's caller does.
+
+    One deliberate difference: Swift also reads the words ``inf``, ``infinity`` and ``nan`` (to infinity and
+    not-a-number); here those, and any text that overflows a double, give None. Every caller rejects a
+    non-finite value anyway, so the outcome is the same, and a ``Retry-After`` of ``inf`` (which Swift parks
+    for the longest time) is handled by ``usage_guard.parse_retry_after``.
     """
-    if not isinstance(text, str) or _PLAIN_NUMBER.match(text) is None:
+    if not isinstance(text, str):
         return None
     try:
-        number = float(text)
-    except ValueError:
+        if _PLAIN_NUMBER.match(text) is not None:
+            number = float(text)
+        elif _HEX_NUMBER.match(text) is not None:
+            number = float.fromhex(text)
+        else:
+            return None
+    except (ValueError, OverflowError):
         return None
     return number if math.isfinite(number) else None
 
@@ -76,9 +87,10 @@ def parse_iso8601(text: str | None) -> float | None:
     """POSIX seconds for an ISO 8601 internet date-time, or None.
 
     UsageData.swift:157-164: tried with fractional seconds, then without; an
-    unparseable value is nil. Accepts 0 to 9 fractional digits and ``Z`` or
-    ``+HH:MM`` offsets (the colon is required, as ``.withInternetDateTime``
-    requires it).
+    unparseable value is nil. Accepts any number of fractional digits (kept to
+    milliseconds, as Apple's formatter keeps them) and ``Z`` or an offset as
+    ``+HH:MM``, ``+HHMM`` or ``+HH``: the forms Apple's ISO8601DateFormatter
+    parses (probed on a Mac, review LA 2026-10-24).
     """
     if not isinstance(text, str):
         return None
@@ -95,13 +107,13 @@ def parse_iso8601(text: str | None) -> float | None:
     offset = 0
     if zone != "Z":
         sign = 1 if zone[0] == "+" else -1
-        zone_hours, zone_minutes = int(zone[1:3]), int(zone[4:6])
+        zone_hours, zone_minutes = int(zone[1:3]), int(zone[3:].lstrip(":") or "0")
         if zone_hours > 23 or zone_minutes > 59:
             return None
         offset = sign * (zone_hours * 3600 + zone_minutes * 60)
     seconds = float(calendar.timegm(moment.timetuple()) - offset)
     if fraction:
-        seconds += int(fraction) / (10 ** len(fraction))
+        seconds += int(fraction[:3].ljust(3, "0")) / 1000
     return seconds
 
 
@@ -111,7 +123,13 @@ def _opt_number(obj: dict, key: str) -> float | None:
         return None
     if not is_number(value):
         raise UsageDecodeError(f"{key} is not a number")
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError:
+        raise UsageDecodeError(f"{key} is too large") from None
+    if not math.isfinite(number):  # Foundation's decoder refuses the whole body for 1e400, NaN and Infinity
+        raise UsageDecodeError(f"{key} is not finite")
+    return number
 
 
 def _opt_string(obj: dict, key: str) -> str | None:

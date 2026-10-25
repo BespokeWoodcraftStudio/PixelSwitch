@@ -149,16 +149,24 @@ class UsageModelTests(unittest.TestCase):
         with_fraction = parse_iso8601("2026-09-25T18:00:00.000000+00:00")
         without = parse_iso8601("2026-09-25T18:00:00+00:00")
         self.assertEqual(with_fraction, without)
+        # kept to milliseconds, as Apple's formatter keeps them
         self.assertAlmostEqual(parse_iso8601("2026-09-28T18:00:00.177837+00:00")
-                               - parse_iso8601("2026-09-28T18:00:00+00:00"), 0.177837, places=3)
+                               - parse_iso8601("2026-09-28T18:00:00+00:00"), 0.177, places=6)
         self.assertEqual(parse_iso8601("2026-09-25T18:00:00Z"), without)
         self.assertEqual(parse_iso8601("2026-09-25T20:00:00+02:00"), without)
         self.assertAlmostEqual(parse_iso8601("2026-09-25T18:00:00.5Z") - without, 0.5, places=3)
-        self.assertAlmostEqual(parse_iso8601("2026-09-25T18:00:00.123456789Z") - without, 0.123456789, places=3)
+        self.assertAlmostEqual(parse_iso8601("2026-09-25T18:00:00.123456789Z") - without, 0.123, places=6)
+        # more than nine fractional digits, and the offset forms Apple's formatter accepts without a colon
+        self.assertAlmostEqual(parse_iso8601("2026-09-25T18:00:00.12345678901234Z") - without, 0.123, places=6)
+        self.assertEqual(parse_iso8601("2026-09-25T18:00:00+0000"), without)
+        self.assertEqual(parse_iso8601("2026-09-25T18:00:00+00"), without)
+        self.assertEqual(parse_iso8601("2026-09-25T20:00:00+0200"), without)
+        self.assertEqual(parse_iso8601("2026-09-25T20:00:00+02"), without)
+        self.assertEqual(parse_iso8601("2026-09-25T16:30:00-0130"), without)
 
     def test_unparseable_reset_is_none(self):
         for bad in (None, "", "tomorrow", "2026-09-25", "2026-09-25 18:00:00Z", "2026-13-25T18:00:00Z",
-                    "2026-09-25T25:00:00Z", "2026-09-25T18:00:00+0000", "2026-09-25T18:00:00", 5):
+                    "2026-09-25T25:00:00Z", "2026-09-25T18:00:00+00:0", "2026-09-25T18:00:00+000", "2026-09-25T18:00:00", 5):
             self.assertIsNone(parse_iso8601(bad), bad)
 
     def test_a_limits_entry_of_an_unexpected_shape_is_skipped(self):
@@ -207,8 +215,14 @@ class UsageModelTests(unittest.TestCase):
     def test_swift_double(self):
         self.assertEqual([swift_double("72.4"), swift_double("3474"), swift_double("-5"), swift_double("1e3")],
                          [72.4, 3474.0, -5.0, 1000.0])
-        for bad in ("", "soon", "1_0", "inf", "nan", " 3", "٣", None, "0x10"):
+        for bad in ("", "soon", "1_0", " 3", "٣", None, "0x", "0xg", "0x1p", "1e999", "0x1p99999"):
             self.assertIsNone(swift_double(bad), bad)
+        # Swift reads C hex floats: "0x1E" is 30 (so `settings set autoSwitch.threshold 0x50` is 80 on both platforms)
+        self.assertEqual([swift_double("0x1E"), swift_double("0X1e"), swift_double("-0x10"), swift_double("0x1.8p3"), swift_double("+0x.8")],
+                         [30.0, 30.0, -16.0, 12.0, 0.5])
+        # The one deliberate difference: Swift reads inf and nan; here they are None, and callers reject non-finite anyway.
+        for word in ("inf", "-inf", "Infinity", "nan", "NaN"):
+            self.assertIsNone(swift_double(word), word)
 
 
 if __name__ == "__main__":

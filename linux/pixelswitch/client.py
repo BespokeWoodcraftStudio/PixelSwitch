@@ -170,8 +170,10 @@ def _server_is_us(sock: socket.socket) -> bool:
     if option is None:
         return True
     try:
-        creds = sock.getsockopt(socket.SOL_SOCKET, option, struct.calcsize("3i"))
-        _pid, uid, _gid = struct.unpack("3i", creds)
+        # struct ucred is { pid_t pid; uid_t uid; gid_t gid; }: a signed int, then two UNSIGNED ones. Read as
+        # signed, a uid of 2**31 or more is negative and the client would refuse its own daemon.
+        creds = sock.getsockopt(socket.SOL_SOCKET, option, struct.calcsize("iII"))
+        _pid, uid, _gid = struct.unpack("iII", creds)
     except (OSError, struct.error):
         return False
     return uid == os.getuid()

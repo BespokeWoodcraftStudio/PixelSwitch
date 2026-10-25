@@ -45,7 +45,14 @@ entry to the applications menu. **Auto-switch stays off** until you turn it on.
 Other options: `--from <tarball> [--signature <file>]` installs a local build (labelled unverified without a
 signature), `--no-systemd` and `--no-autostart` leave those out, `--uninstall` removes the program and keeps your
 settings and saved logins, `--uninstall --purge` removes those too. The installer keeps a copy of itself at
-`~/.local/share/pixelswitch/install-linux.sh` for that.
+`~/.local/share/pixelswitch/install-linux.sh` for that, also after the one-line install: the release tarball carries the
+installer, so the kept copy is covered by the same signature. Running the installer again repairs or updates an
+install; it never moves you back to an older release (it stops and says so; `--from` with that build's tarball is the
+way to go back on purpose) and never turns Launch at login back on after you turned it off.
+
+Every delete in the installer goes to `/bin/rm`, so a guard script named `rm` earlier on your `PATH` cannot stop an
+install or an uninstall half way. Nothing runs until the whole script has arrived, so a dropped `curl | bash`
+download changes nothing.
 
 After an install, `pixelswitch accounts add-current` saves the account Claude Code is signed in as, or use Sign in
 another account from the tray menu.
@@ -53,14 +60,21 @@ another account from the tray menu.
 **Updates.** The service checks `latest-linux.json` two minutes after it starts and every 6 hours, verifies the
 download the same way, runs the new version's `--self-check`, and only then flips `current` and restarts itself.
 If a new version fails to start twice before it has completed one cycle, the rollback check that runs before every
-start flips `current` back. Turn it off with `pixelswitch settings set updates.automatic false`.
+start flips `current` back, and the build it rolled back from is written to `~/.local/state/pixelswitch/bad-builds`
+(`{"builds": [32, ...]}`). A build that failed its own self-check is recorded there too. The updater never installs a
+recorded build again and still installs any later, higher one; without that file the rolled-back service would find
+the same build in the feed two minutes later and flip straight back to it. Turn updates off with
+`pixelswitch settings set updates.automatic false`.
 
 ## Use
 
 `pixelswitch` is the same command line as the Mac's: `pixelswitch help` lists every command, and the output, `--json`
 shapes and exit codes (0 ok, 1 failed, 2 usage, 3 busy, 4 no such account, 5 unreachable) are the Mac's. Differences,
-all on purpose: there is no "This Mac today" cost line in `usage`, `status` prints the daemon's warnings (one line
-each) and `pixelswitch --version` prints the app version.
+all on purpose and all of them: there is no "This Mac today" cost line in `usage`; `status` prints the daemon's
+warnings (one line each); `pixelswitch --version` prints the app version; `update-check` says a newer version, if
+there is one, installs by itself, instead of naming the Mac's window; the sign-in link line says "On the computer
+running PixelSwitch" instead of "On the Mac running PixelSwitch"; and the `--open-in` hint names Firefox, not Safari.
+A script that greps for one of the Mac's sentences needs the Linux one on this machine.
 
 ```
 pixelswitch accounts                                   every account, in priority order
@@ -96,9 +110,14 @@ From another machine:
 {"mcpServers": {"pixelswitch": {"command": "ssh", "args": ["<host>", "/home/<user>/.local/bin/pixelswitch", "mcp"]}}}
 ```
 
-Use the absolute path: a non-interactive ssh shell may not have `~/.local/bin` on its `PATH`. The tool descriptions are
-the Mac's word for word, so they say "Mac" where this machine is meant. `add_current_account` waits up to 120 seconds
-(the Mac server gives it 30).
+Use the absolute path: a non-interactive ssh shell may not have `~/.local/bin` on its `PATH`. The tool names, schemas
+(types, limits, required keys) and descriptions are the Mac's, with five fixed rewordings where the Mac's sentence is
+false on Linux (`mcp.LINUX_TEXT`, and the test compares the Swift text after the same substitution, so any other drift
+fails): "that Mac" and "the Mac this server runs on" say "computer"; `get_usage` does not promise "this Mac's cost and
+activity today" (D15: Linux sends no cost); `check_for_updates` says "a newer version installs by itself" instead of
+"its window opens on that Mac"; and the `open` example is "Firefox", not "Safari". Spec section 4 says "identical";
+this is the one place it is not, on purpose: an AI that read "cost today" or "an update window opens" would report a
+fault that is not there. `add_current_account` waits up to 120 seconds (the Mac server gives it 30).
 
 ## Not in the Linux version
 
@@ -111,7 +130,17 @@ The cost and activity dashboard (so no "This Mac today" line), the widget, menu-
 bytes; it needs GNU tar) and `install-linux.sh`, and prints the installer's SHA-256, which goes into the release notes.
 With `--signing-key` it also writes `latest-linux.json`. CI builds the package unsigned on every run; only the tag-only
 `linux-publish` job signs (the signing secret is the environment of that one step) and uploads the tarball and the
-installer first and the feed last. `scripts/verify-release.sh <tag> [--linux-only]` checks the Linux assets of a tag.
+installer first and the feed last. `linux-publish` needs the Linux tests (`linux-test`, both Ubuntu versions) as well
+as the macOS build, so a red Linux suite stops the signing; the unit-test step also fails if any test was skipped
+(only the lock tests on a file system that keeps no birth time may skip). The tarball carries `install-linux.sh`
+(written first, then packed), which is what the kept uninstall copy comes from.
+
+**The installer's SHA-256 is checked three times.** `scripts/release.sh` refuses to tag unless `RELEASE_NOTES.md`
+contains the SHA-256 of the published `install-linux.sh` (it is `linux/install.sh` with the `SU_PUBLIC_ED_KEY` line set
+from `project.yml`, the same edit `build-release.sh` makes, so the hash is known before the tag) and refuses the
+`INSTALLER_SHA256_PLACEHOLDER`; the publish job fails before uploading if the notes lack it; and
+`scripts/verify-release.sh <tag> [--linux-only]` checks the Linux assets of a tag and that the release body carries
+the hash.
 Tests: `python3 -m unittest discover -s linux/tests -t linux`; the settings window renders come from
 `xvfb-run -a python3 linux/tests/render_settings.py --out DIR`.
 
@@ -208,7 +237,10 @@ leave the lock, ask the API, take the lock again (once).
 
 * `<claudeDir>/.storage-write` (`dwn`, `{realpath: false, retries: 10, minTimeout 100, maxTimeout 1000, stale: 15000}`)
   wraps every read-modify-write of `.credentials.json`. PixelSwitch takes it (up to 10 s) around its own write of
-  that file, so Claude Code's save cannot overwrite a switch with a copy it read before.
+  that file, so a Claude Code save that starts after that sees the switched file. This narrows the window; it does
+  not close it. A Claude Code that had already read the file before the switch, and writes back after it, can still
+  put its older copy on disk; PixelSwitch reads the file back after its write and the next cycle's reconcile follows
+  whichever login is really there, so such a save is noticed, but it is not prevented.
 * `<~/.claude.json>.lock` (`ii`, i.e. `~/.claude.json.lock`, default `proper-lockfile` options: stale 10 s, touched
   every 5 s) wraps every save of `~/.claude.json`, which it does by re-reading the file under the lock. PixelSwitch
   takes it (up to 10 s) around its rewrite of `oauthAccount`.
@@ -247,8 +279,13 @@ by a millisecond if the two writes landed in the same clock tick. The write is a
 * A failed `~/.claude.json` write after the login was written puts the previous login back.
 * Texts that say "Mac" say "computer" ("The claude command could not be found on this computer.").
 * `status.get` carries an optional `warnings` list (one line when the daemon's environment sets
-  `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR`), and `autoSwitched.data` carries `relaxed: true` when
-  the weekly overflow made the call. Both are additive and optional.
+  `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR`). It is additive and optional. (`autoSwitched.data`'s
+  `relaxed` is not a difference: the Mac sends it on every switch too, and so does Linux.)
+* **Retry is Refresh.** On the Mac a failed account's Retry reads that one account. The control protocol has no
+  method that refreshes one account (21 methods, a wire change to add one), so Retry on Linux sends `usage.refresh`,
+  which reads every account, the same as the Refresh button. Retry still shows only where the Mac's would (the
+  usage-service failures worth trying again), and like Refresh it is a person's click: the faces never send
+  `usage.refresh` by themselves.
 * The machine-usage line is omitted (D15). Sign-in has no 10-second fallback (spec 5.3): with no link a notice
   appears and the sign-in waits for Cancel or the 15-minute limit.
 * Saved-login credentials are compared by their parsed content, not their text, so a formatting difference alone
@@ -256,12 +293,19 @@ by a millisecond if the two writes landed in the same clock tick. The write is a
 
 ## Test mode and the scratch run (spec 5.7)
 
-`PIXELSWITCH_TEST_MODE=1` makes the daemon refuse to start unless `HOME` is under `~/.cache/pixelswitch-dev/` and
-`INVOCATION_ID` is not set; it honours `PIXELSWITCH_TEST_API_BASE` (one base for the usage, profile and token
+`PIXELSWITCH_TEST_MODE=1` makes the daemon refuse to start unless `HOME` is under `~/.cache/pixelswitch-dev/`, its
+control socket is too (so an `XDG_RUNTIME_DIR` of `/run/user/<uid>` is refused), and `INVOCATION_ID` is not set; it honours `PIXELSWITCH_TEST_API_BASE` (one base for the usage, profile and token
 endpoints), `PIXELSWITCH_TEST_RELEASE_BASE` and `PIXELSWITCH_TEST_PUBLIC_KEY`; it refuses any request to an
 `anthropic.com` or `claude.com` host; it will run only a `claude` under the scratch root; it never opens a browser
 and never restarts the service; and `status.get` reports `testMode: true`. Outside test mode all of those variables
 are ignored.
+
+"`~/.cache/pixelswitch-dev/`" always means the REAL user's home from the password database, never `$HOME`: a test
+that sets `HOME` to a scratch folder still creates its scratch folders in the real `~/.cache/pixelswitch-dev/` (test
+mode reads the password database, so overriding `HOME` does not move it). Every test that makes one there uses its own
+unique subfolder and removes it afterwards, so two test runs at once never share a folder. The installer's tests take
+the same route (`install.sh` accepts `PIXELSWITCH_TEST_RELEASE_BASE` and `PIXELSWITCH_TEST_PUBLIC_KEY` only in test
+mode with `HOME` there), serving a fake signed release from a local http server.
 
 ```
 python3 -m unittest discover -s linux/tests -t linux        # from the repository root; Python 3.12 or newer
