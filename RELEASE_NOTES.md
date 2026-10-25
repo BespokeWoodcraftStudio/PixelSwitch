@@ -20,7 +20,25 @@
 
 ### Linux
 
-LINUX_INSTALL_PLACEHOLDER
+For Ubuntu 24.04 or 26.04 with GNOME (Python 3.12 or later). It installs for your user only, never asks for sudo, and updates itself from these releases (each update is checked against PixelSwitch's signing key before it is installed).
+
+Install in one line:
+
+```
+curl -fsSL https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/latest/download/install-linux.sh | bash
+```
+
+Or check the installer first:
+
+```
+curl -fsSLO https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/download/v2.0/install-linux.sh
+sha256sum install-linux.sh   # must print INSTALLER_SHA256_PLACEHOLDER
+bash install-linux.sh
+```
+
+Then add the account Claude Code is using now with `pixelswitch accounts add-current`, or open PixelSwitch from the top bar and choose Sign in another account. The top-bar icon shows the active account's 5-hour session use; its menu lists your accounts in priority order. Settings has the same accounts, limits and priority controls as the Mac. To remove it: `bash install-linux.sh --uninstall` (your saved logins are kept unless you add `--purge`).
+
+Not in the Linux version yet: the cost and activity dashboard, the widget, menu-bar module choices, and languages other than English.
 
 On a computer where other tools use the same Claude Code login (for example the CabDesign farm's Claude jobs on the Ubuntu laptop), switching accounts, by hand or automatically, changes the account those tools use too. Auto-switch starts off on Linux; turn it on in Settings → General when you want it.
 
