@@ -32,7 +32,7 @@ Or check the installer first:
 
 ```
 curl -fsSLO https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/download/v2.0/install-linux.sh
-sha256sum install-linux.sh   # must print INSTALLER_SHA256_PLACEHOLDER
+sha256sum install-linux.sh   # must print 31bdbeeb70388cf40da5797b881455ef0f7c1489e66ebbb4e07c5b9de03247a0
 bash install-linux.sh
 ```
 
