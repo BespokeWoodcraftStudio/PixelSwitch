@@ -1,0 +1,362 @@
+[
+ {
+  "lens": "engine-protocol",
+  "severity": "P1",
+  "section": "2.2 / 2.4 / 4 (accounts.setThresholds)",
+  "problem": "The account's existing single threshold (`switchThreshold` 1-100, which applies to both windows) has no place in the new two-menu GUI, and 'Default' or null for one window cannot return that window to the global default. By 2.2, session = sessionThreshold ?? switchThreshold ?? defaults.session. For an account with switchThreshold 70 (any 1.9 user who used per-account thresholds, which the founder asked for on 2026-09-25), choosing 'Default (90%)' in the Session menu either: (a) sets sessionThreshold = nil, so session stays at 70 while the menu says Default 90; or (b) calls today's setSwitchThreshold(nil), so D8 also clears the weekly window and the other menu changes too. `pixelswitch accounts threshold x --session default` (null, 'clears to follow') likewise follows 70, not the default. The spec does not say what each menu label shows for such an account. Builders will each choose differently, and the user cannot get back to the global default for one window.",
+  "evidence": "Spec lines 64-65 (the resolution order: window value, then switchThreshold, then the default); line 102-106 ('Each menu offers Default (with the default's number) ... Choosing a number while Manual only clears Manual only, sets that window, and the other window follows its default'); line 136 ('null clears to follow'). /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Views/SettingsAccountsTab.swift:161-163 (today's Default calls setSwitchThreshold(nil)) and :177-183 (the label is derived from switchThreshold only).",
+  "fix": "Add to 2.1 and repeat in 2.4 and in the accounts.setThresholds bullet: \"Splitting the single value: before any per-window write (a Session or Weekly menu choice other than Manual only, Default included; accounts.setThresholds with a number or null; CLI --session/--weekly), if the account's switchThreshold is 1-100, copy it into each of sessionThreshold/weeklyThreshold that is nil, set switchThreshold to nil, then apply the write. So Default / null / 'default' always means the global window default. Each window menu's label is 'Switch at N%' when the account has its own value for that window (sessionThreshold ?? switchThreshold), else 'Default (N%)' with N = defaults.session or defaults.weekly.\" Add a unit case and a conformance case: switchThreshold 70, Session set to Default, gives session = defaults.session, weekly = 70, switchThreshold = nil."
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P1",
+  "section": "2.3 (engine rules) and the AppState auto-switch cycle",
+  "problem": "Section 2 changes only the engine ('everything else in AutoSwitchEngine is unchanged') and adds a single-threshold compatibility overload, but never names AppState's own calls. The step that checks a chosen account with a fresh reading before switching still calls the engine with effectiveSwitchThreshold(for: target), which is one number. The 'staying put' note and the decision log compare max(s,w) with one leave-at number. A builder who keeps these on the overload (or on Q1's lower-of-two number) makes the ranking and that check disagree. Example: weekly default 50, base 90. A candidate is ranked at weekly 45, and its fresh reading is weekly 55. The check passes against 89, so PixelSwitch switches to an account already past its weekly limit, and moves off it again after the cooldown. With lower-of-two (50), the check refuses valid targets such as session 85 / weekly 10. noteStayingPut never logs the weekly-50 stuck state, because 55 < 90. That is the silent stall it was added in 1.7 to expose.",
+  "evidence": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/AppState.swift:1230-1236 (the check uses targetThreshold = effectiveSwitchThreshold), :1279-1291 (noteStayingPut with one leaveAt), :1200-1207 (log of binding max and one threshold). /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Services/AutoSwitchEngine.swift:182-186 ('plan ranks with it and AppState verifies ... so ranking and verification cannot disagree'). Recon autoswitch.md:504 ('Verification and ranking must keep sharing one rule'). Spec line 73 and line 93-94.",
+  "fix": "Add rule 2.3.9: \"AppState (and the Linux coordinator) call only the two-window entry points. plan receives each account's resolved {session, weekly, manualOnly} from 2.2 and the defaults pair. The fresh-reading check at AppState.swift:1230-1236 calls the two-window eligibility with the TARGET's resolved pair. noteStayingPut (1279-1291) and the log lines (1200-1207, 1241-1243) use the active account's leaveAt pair and name the window that fired. AutoSwitchRecord gains window. The single-threshold overloads are for tests only: no non-test file may call them (add a grep to the \u00a77 Mac acceptance).\""
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P1",
+  "section": "2.1 / 2.2 (global window defaults)",
+  "problem": "The spec says an absent global window key 'follows the base', but not how 'absent' is detected on the Mac. The existing reader uses UserDefaults.double(forKey:), which returns 0 for a missing key. The existing @AppStorage bindings default to fallbackThreshold (90). Copy that pattern into clamp50to100(globalSession ?? base) without the 0 check and you get clamp(0) = 50. Every upgraded user's session and weekly defaults would drop to 50% within 6 h of release; the Beeco Mac runs at 98%. Copying the @AppStorage default shows 90 on a 98% Mac until the user touches the slider. Recon autoswitch.md D1 gave this exact rule; the spec dropped it.",
+  "evidence": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Services/AutoSwitchEngine.swift:494-497 (double(forKey:), 0 means unset). /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Views/SettingsView.swift:14 and SettingsAccountsTab.swift:15 (@AppStorage(...) = fallbackThreshold). Recon autoswitch.md:340-342 ('Read with object(forKey:), not double(forKey:)'). Spec lines 54-55 and 60-61.",
+  "fix": "Add to 2.1: \"A global window key counts as set only when it is present and holds a finite number: on the Mac, UserDefaults.object(forKey:) as? Double, never double(forKey:); on Linux, the key is present and numeric. Absent, null, 0 or non-finite all mean follow the base. While its key is absent, each Settings slider shows the effective value (defaults.session / defaults.weekly), not fallbackThreshold. Unit test: with only autoSwitchThreshold = 98 stored, both effective defaults read 98 and settings.get returns 98 for both new keys.\""
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P1",
+  "section": "4 (accounts.setPriority, set_account_priority)",
+  "problem": "\u00a74 adopts recon control.md 4.3-4.5 'in full'. Recon 4.3 defines setPriority as `{account, priority:int}` in the range 1...count, built on an `AccountOrder.moved` position helper, and recon 4.5 makes the MCP `priority` argument required. The spec instead says 1-99 with null clearing, but never says which recon parts are replaced. A required MCP argument cannot be null: the MCP server refuses null for required keys, so the MCP can never clear a priority. If `priority` is not required and the app decodes params into a struct with `Int?` (the ThresholdParams pattern), a missing key and null decode the same, so `{account}` silently clears the priority. Non-integer input (2.5) also has no defined error kind.",
+  "evidence": "Spec line 127 ('Adopt recon control.md section 4.3 to 4.5 in full'), line 139, line 154. Recon control.md:472-474 (1...count, AccountOrder.moved), :519 (**priority** required), :434-435 (Double? cannot tell absent from null). /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitchCLI/MCPServer.swift:197-199 (a required key that is absent or null is refused). /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Control/ControlProtocol.swift:294-299.",
+  "fix": "Replace the setPriority bullet: \"accounts.setPriority {account, priority}: the priority key must be present (absent gives invalidParams; read presence from request.params.objectValue, never from an Int? struct). A whole number 1-99 sets it; null clears it; anything else gives invalidValue 'A priority must be a whole number from 1 to 99, or null for none.' Recon 4.3's 1...count range and AccountOrder.moved do not apply.\" MCP: \"set_account_priority required: [\\\"account\\\"] only; priority schema {\\\"type\\\":[\\\"integer\\\",\\\"null\\\"],\\\"minimum\\\":1,\\\"maximum\\\":99}; the description says null clears it.\""
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P1",
+  "section": "2.4 / 3 / 4 / 5.1 (how priority is shown vs. how accounts are referenced)",
+  "problem": "Priority is shown as '#n' in the Settings rows, the switcher menu, the dashboard, the Linux tray and the new CLI Priority column. But '#' in the CLI table is the list position, and a bare number in `pixelswitch switch 3`, in every `<account>` argument and in MCP `account` also means position. With gaps or unnumbered accounts (D2 allows both, and the founder's own example 'gmail = 3, pixelventures = 1' produces them), positions and priorities differ. Accounts pv(#1), gmail(#3), X, Y have positions 1-4. The menu shows '#3 ahmed@gmail.com', but `pixelswitch switch 3`, or an AI calling switch_account {\"account\":\"3\"} after reading '#3', switches to X.",
+  "evidence": "Spec line 101 (shown as \"#1\"), 111 ('show \"#n\" before an account's name'), 149 (Priority column '#n'), 171 (tray '#n'), 133 (position keeps its meaning). /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Control/AccountResolver.swift:28-30 (a number resolves as position). /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitchCLI/CLIRunner.swift:270,276 (the '#' column is position). /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitchCLI/MCPServer.swift:51 ('position (1, 2, \u2026) of the account'). CLIParser.swift help: '<account> is ... a position (1, 2, ...)'.",
+  "fix": "Show priority as 'P1' (GUI rows, menus, dashboard, tray) and print `P1` / `\u2014` in the CLI Priority column. '#' keeps meaning position wherever it appears. Add to \u00a74: \"Account references stay id, email, label, position. A priority number is never a reference.\" Make the CLI help line and the MCP `account` descriptions say 'position (the # column, list_accounts position), not the priority number'."
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P2",
+  "section": "2.3 rule 8 (equivalence and the compatibility overload)",
+  "problem": "(1) As written the equivalence is false: an active Manual only account leaves at defaults.session / defaults.weekly, so plans match 1.9 only if the two global defaults are also equal. (2) The tests call more than plan. eligibleUtilization(...threshold: Double...) is called at 7 sites and explanation is used too. Both plan helpers declare the 1.9 3-tuple return, so a plan that returns window in a 4-tuple does not compile against them. (3) The same file's l10n checks require the 'Drag an account\u2026 \"My order\"\u2026' caption in all five tables, which D4 and 2.4 replace. 'Pass unchanged' then forces a dead string to be kept.",
+  "evidence": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Services/AutoSwitchEngine.swift:546-548. /Users/ahamade/Documents/GitHub/PixelSwitch/Tests/UnitTests/AutoSwitchRulesTests.swift:32,35-47 (Plan 3-tuple), :369-375, :522-524, :703 (eligibleUtilization with threshold:), :459 (explanation), :625 (the caption required). /Users/ahamade/Documents/GitHub/PixelSwitch/Tests/UnitTests/main.swift:315. Spec lines 92-94.",
+  "fix": "Rewrite rule 8: \"When every account's session and weekly rules are equal AND defaults.session == defaults.weekly, every plan is identical to 1.9's. The engine checks in AutoSwitchRulesTests.swift and Tests/UnitTests/main.swift compile and pass unchanged through compatibility overloads of plan (returning the 1.9 (limit, trigger, targets) tuple), eligibleUtilization(...threshold:...), drainEligibleUtilization and explanation. Each maps one threshold to equal windows and one default to equal defaults. The l10n lists in thresholdStringsTests (:617-640) are edited with the strings: the 'My order' caption moves to retired and its replacement to added.\""
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P2",
+  "section": "2.3 rules 2 and 6 (Fable)",
+  "problem": "The text leaves out two 1.9 details that a Python port must copy. First, keepsFable is false when the candidate has no Fable reading. Second, the active account's Fable reading is held to the same strict expiry rule as s and w when its sample is retained. The preamble states the expiry rule for s and w only.",
+  "evidence": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Services/AutoSwitchEngine.swift:405-406 (`?? false`), :113-114 and :323-324 (Fable read with requireKnownWindow: !activeSampledThisCycle). Spec lines 75-77 and 89.",
+  "fix": "Rule 6: \"keepsFable = f known AND f <= ceiling(rule.weekly, hysteresis); false when f is unknown.\" Preamble: \"f is read under the same expiry rule as s and w, strict on the active side when the sample is retained.\" Add one vector for each."
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P2",
+  "section": "6 (conformance vectors)",
+  "problem": "The format cannot express cases its own list requires, and leaves the expected outputs ambiguous:\n- `usage` is mandatory, so there is no way to write 'no reading at all', which 1.9 treats as not eligible.\n- `utilization` cannot be null and `resets_at` cannot be absent, yet the active-side strict rule turns on a missing resets_at.\n- It does not say whether candidates come from the input array order or from the sorted `order`; under ties, gaps and unnumbered accounts the two suites will differ.\n- It does not say when `window` is present (threshold only, or also drainEarly / noSubscription).\n- `defaults.base` raw versus effective is not stated.\n- setPriority and setOrder renumbering (D3) cannot be written as cases at all, so the two lanes can diverge on them.",
+  "evidence": "Spec lines 251-259. /Users/ahamade/Documents/GitHub/PixelSwitch/Tests/UnitTests/AutoSwitchRulesTests.swift:59-66 (the existing fixtures need a null utilization and an absent resets_at) and :204, :690 (no-reading cases).",
+  "fix": "Change the schema to `usage?{five_hour?{utilization: number|null, resets_at?}, seven_day?{...}, fable?{...}}`. State: \"settings.defaults holds raw stored values (absent = unset) and 2.2 normalisation applies. The harness first applies sortedByPriority to `accounts` (input order = current index) and checks it against expect.order; plan's candidates are that order minus the active account. expect.plan.window is present only when trigger == threshold and limit == windows.\" Add an optional `ops: [{op: setPriority|setOrder, id?, priority?, ids?}]` applied before sorting, so the D2 and D3 renumbering rules are pinned for both lanes."
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P2",
+  "section": "4 (validation and exact texts)",
+  "problem": "Several rules and texts that must be byte-identical between the Mac and Linux lanes (\u00a75.3) are not given:\n- Whether `accounts.setThresholds` with null on a Manual only account clears Manual only. The spec says only 'setting a window clears Manual only'.\n- Whether input is rounded before the 1-100 range check (0.6, 100.4).\n- The invalidValue summary for the two new settings keys.\n- Whether the `autoSwitch.strategy` error lists `priority`.\n- The `<do that>` words in the CLI's 'cannot \u2026 update it' sentence.\n- The CLI parse error for `accounts priority`.",
+  "evidence": "Spec lines 136-138, 142-144, 152-153. /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Control/ControlAPI.swift:155 (1.9 rounds and then checks the range). Recon control.md:270-272 (the summaries are user-visible and pinned).",
+  "fix": "Add to \u00a74:\n- \"Only a number clears Manual only; null on a Manual only account changes nothing.\"\n- \"Window values: round half away from zero, then require 1-100.\"\n- \"Summary: 'autoSwitch.sessionThreshold must be 50\u2013100, whole numbers, or \\\"default\\\".' (the same for weekly).\"\n- \"The strategy summary stays the three raw names.\"\n- \"The feature-check sentences: 'This PixelSwitch (<version>) cannot set separate session and weekly thresholds; update it.' and '... cannot set account priorities; update it.'\"\n- \"The parser error: 'The priority must be a whole number from 1 to 99, or \\\"none\\\".'\""
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P2",
+  "section": "4 (CLI output)",
+  "problem": "'Keep every existing command and its exact output when windows are equal' contradicts two changes the same section requires: the new last column Priority (which changes every `accounts` and `accounts order` table) and 'next by priority' (which changes `status` for myOrder users). It also gives no split-value text for `thresholdSet` and `switched`. Those print one effectiveThreshold, so after `--weekly 50` the CLI would say 'now switches at 50%' while the session window is at 90.",
+  "evidence": "Spec lines 147-152. /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitchCLI/CLIRunner.swift:242-248, :268-290, :298-318. /Users/ahamade/Documents/GitHub/PixelSwitch/Tests/UnitTests/ControlTests.swift:703-724, :731 (pinned strings).",
+  "fix": "Replace the first sentence with: \"Every existing output stays byte-identical when the windows are equal, except the deliberate changes listed here: the Priority column, and 'priority' replacing 'my order'.\" Add exact split strings: thresholdSet 'X now switches at 5h 90% / 7d 50%.' and 'X now follows the default thresholds (5h 90% / 7d 50%).'; switched or manual-only active '\u2026moves you off it at 5h 90% / 7d 50%\u2026'. When the new fields are absent (an old app), print today's text."
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P2",
+  "section": "1 D8 (an old-style write clears window values)",
+  "problem": "setSwitchThreshold returns early when the value equals the stored switchThreshold. So an old-style `accounts threshold A 80` on an account already at 80 that also has sessionThreshold 95, or choosing the current value in the menu, never reaches the D8 clearing. The override survives, against D8's purpose ('Otherwise \"set 80\" silently does not apply').",
+  "evidence": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/AppState.swift:701 (`guard accounts[index].switchThreshold != value else { return }`). Spec line 36.",
+  "fix": "Add to D8: \"The clearing happens even when switchThreshold is unchanged. The setter's no-op check compares (switchThreshold, sessionThreshold, weeklyThreshold) as a whole.\" Add a unit case."
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P2",
+  "section": "2.2 (normalising a window value)",
+  "problem": "A stored window value of 0, a negative value, or 0.4 is clamped to 1. The account is then left at 1% and is a target only at 0.5% or below, a hidden second 'never'. The founder ruled out that pattern for low thresholds. Such a value can come only from a hand edit (Linux accounts.json) or a bug, and a typical Python reader (`if acct.get('sessionThreshold'):`) would treat 0 as 'follow', so the two engines disagree unless this is pinned.",
+  "evidence": "Spec line 71 ('round to whole; then clamp to 1-100') and line 52 ('Window values are never 0'). Recon autoswitch.md:83 ('so 5% is not a hidden second \"never\"').",
+  "fix": "Change line 71 to: \"not a finite number gives nil; else round half away from zero; a result <= 0 gives nil (follow the next layer); above 100 gives 100.\" Add the 0, -5 and 0.4 window values to the \u00a76 vector list."
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P2",
+  "section": "4 (events) / 5.1 (tray)",
+  "problem": "`accountsChanged` is emitted only for threshold, priority, order and label changes. The Linux tray keeps its account list current from events, yet adding an account (addCurrent, a finished sign-in), removing one, and re-signing one emit nothing that carries accounts. Changing a global window default changes every account's effective thresholds, also with no event. The tray will show stale or missing accounts.",
+  "evidence": "Spec lines 145-146 and 171 ('Live via events.subscribe'). Recon control.md:227 (1.9 emits nothing for these).",
+  "fix": "Change to: \"accountsChanged {accounts:[AccountInfo]} after any change to the accounts list or to a field AccountInfo carries apart from usage: add, remove, sign-in or re-sign completion, label, threshold, priority, order, and settings.set of autoSwitch.threshold / sessionThreshold / weeklyThreshold (or a slider move).\""
+ },
+ {
+  "lens": "engine-protocol",
+  "severity": "P2",
+  "section": "1 D2 / D3 (equal priority numbers)",
+  "problem": "After any drag or setOrder, D3 numbers every account 1..N, so later typing any number creates a tie. 'Equal numbers keep their existing relative order' then gives a result that depends on direction. From [A#1, B#2, C#3], setting C to 1 gives A, C, B: both show #1 and A is still tried first. Setting A to 3 gives B, A, C: A goes before the other #3. The number he typed then does not decide the order, which D2's own reason says must not happen.",
+  "evidence": "Spec line 30 (D2: 'A number he types must stay the number he typed', 'Equal numbers keep their existing relative order') and line 31 (D3: a drag numbers 1..N; sort key (priority ?? +inf, current index)).",
+  "fix": "Either: (a) sort key (priority ?? +inf, changedAccount ? 0 : 1, current index), so the account just set goes first among its equals; or (b) keep D2 and have the setPriority reply, the GUI and the CLI say 'ties with <account>, which stays ahead'. Pin whichever is chosen with an `ops` vector (see the \u00a76 finding)."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P1",
+  "section": "5.3 (switch, refresh lock)",
+  "problem": "'Taking Claude Code's own refresh lock around the write' does not stop the leaving account's rotated refresh token from being lost (risk R3). Claude Code holds its lock across its refresh POST and then saves with a compare-and-swap. If PixelSwitch reads and backs up the leaving login (step 4) outside the lock and locks only for the write, this can happen: Claude Code refreshes RT1 to RT2 while PixelSwitch waits on the lock, Claude Code saves RT2 and releases, and then PixelSwitch overwrites RT2 with the target. The backup holds the dead RT1. The Mac also re-reads the live credential for the merge without comparing it with what step 4 saved, and that window includes a possible 15 s profile re-proof. The lock is not a plain lock directory: it has holder records and takeover rules. A rough copy (mkdir only, no holder record, held too long, broken as stale) gets taken over by Claude Code, or stalls every farm session's refresh.",
+  "evidence": "spec.md:190-193 'taking Claude Code's own refresh lock around the write exactly as Claude Code takes it'. credentials.md:152 (lock around its refresh; re-reads under the lock; CAS 'adopts the newer write' and drops its own result). ClaudeService.swift:468 (step 1 reads the live credential and backs it up) and :509 (step 3 reads it again for the merge, with no comparison). Claude Code 2.1.307 bundle strings next to '.oauth_refresh.lock.owner': 'holder is gone', 'holder has not touched it for', 'has no live holder on record and has not been touched for', 'askTakeover', 'takeTakeover'.",
+  "fix": "Replace the S1 sentence in 5.3 with this. S1 is written atomically (5.2). If the installed bundle's source confirms Claude Code's refresh lock (path, holder record, touch interval, takeover rule), PixelSwitch takes the lock BEFORE step 4's final read of the live credential. It holds it through the merge read (step 5), the write and the read-back (step 6), and releases it in a finally block. Under the lock it re-reads the live credential; if claudeAiOauth differs from the proven one, it re-proves per G1 or skips the snapshot. It waits at most 35 s to take the lock (Claude Code's refresh timeout is 30 s); after that it fails the switch with no write ('Claude Code is renewing this login; try again in a minute'). It holds the lock at most 10 s, keeps it touched as Claude Code does, and writes a holder record Claude Code reads as live. It never removes, breaks or takes over a lock it did not create. If the lock cannot be confirmed: take no lock, say so in the README, and on BOTH platforms re-read the live credential immediately before the write. If its claudeAiOauth accessToken or refreshToken differs from what step 4 saved, do not write: repeat step 4 (with proof) once, else fail the switch with nothing written. Add a unit test for this compare."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P1",
+  "section": "1 (D12 blank-login guard)",
+  "problem": "D12 guards saving only, and its wording has holes. 'Empty' does not cover a claudeAiOauth that is missing, null or not an object, or a missing or null accessToken or refreshToken. A Python get('accessToken') == '' check lets None through. 'Never saved over anything' still allows a blank as an account's FIRST backup. Most importantly, it does not stop an unusable saved login from being written into Claude Code's live store. The Mac's target validation returns success when the saved login cannot be parsed, isSwitchable checks only that a backup exists, and the merge writes a target with no claudeAiOauth verbatim. Switching to such an account (manually or from the CLI) replaces the live login with a blank one and signs Claude Code out on that machine. 'Must match the Mac exactly' would port this.",
+  "evidence": "spec.md:40 'whose claudeAiOauth.accessToken or refreshToken is empty, or whose expiresAt is 0, is never saved over anything'. AppState.swift:945 'guard var login = CredentialOwnership.login(fromCredential: backup.token) else { return .success(backup) }'. AppState.swift:1115-1121 (isSwitchable = backup exists, not needs-reauth, no isExpired card error). AppState.swift:1366-1369 (no token: logs 'No token' and skips, so no error is set). ClaudeCredentialMerge.swift:21-24 (targetOnly writes the target verbatim). ClaudeService.swift:616-641 (the R4 path).",
+  "fix": "Rewrite D12. A credential is a usable login only if it parses as a JSON object whose claudeAiOauth is an object with accessToken a non-empty string, refreshToken a non-empty string, and expiresAt (when present) a number greater than 0. Missing, null or wrongly typed values count as blank. A credential that is not a usable login: (a) is never saved, whether or not a backup exists. This is enforced inside the one store-save function, so every path inherits it (capture, reconcile, switch snapshot, sign-in, add-current, renewal). (b) Is never written to Claude Code's live store: target validation returns the re-authenticate failure instead of success (Mac and Linux). (c) Makes the account not switchable, with the re-sign message on its card. Tests: blank tokens, missing claudeAiOauth, null fields and expiresAt 0, each for save, switch and isSwitchable."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P1",
+  "section": "5.3 (saved-login renewal), both platforms",
+  "problem": "The renewal port copies the Mac, which never updates refreshTokenExpiresAt and ignores refresh_token_expires_in (risk R7, impact 'unknown' in the recon). The installed Claude Code does gate on that field. Its existing-sign-in check accepts a stored login with an expired access token only if refreshTokenExpiresAt is not a number or is in the future. A login PixelSwitch renews for weeks keeps the expiry from its first capture. After a switch, once its access token expires, Claude Code can treat it as signed out even though the refresh token is valid. The laptop's credential file carries this field.",
+  "evidence": "credentials.md:67 and :281 (R7). ClaudeService.swift:409-413 (writes only accessToken, expiresAt, refreshToken). laptop.md:206-216 (refreshTokenExpiresAt: int present on the laptop). Claude Code 2.1.307 bundle, existing-sign-in check: 'h=!!s?.refreshToken&&(typeof s.refreshTokenExpiresAt!==\"number\"||s.refreshTokenExpiresAt>Date.now()),y=...(h||!HT(s.expiresAt))'. Its own token handling sets 'refreshTokenExpiresAt:JWr(e.refresh_token_expires_in,!0)'.",
+  "fix": "Add to the renewal bullet in 5.3, for Mac and Linux: on a successful renewal, if the response has a positive refresh_token_expires_in, set claudeAiOauth.refreshTokenExpiresAt = now_ms + refresh_token_expires_in * 1000. If the response has none and the stored refreshTokenExpiresAt is in the past, remove that key (Claude Code treats a non-number as valid). Nothing else changes; scopes stay untouched. Add unit tests for both cases."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P1",
+  "section": "5.4 and 5.1 (updater restart, service stop)",
+  "problem": "The updater restarts the service 'when no switch or sign-in is running', which copies the Mac's install gate. It ignores an in-flight saved-login renewal. A renewal gets the rotated refresh token from the server, then does a profile lookup (up to 15 s), then saves. A stop in that window loses the only copy of the new refresh token (the 'rotationLost' case: the account needs re-sign-in). On Linux, stops come from the updater, shutdown, logout and reinstall, and Python's default SIGTERM action kills the process at once. The spec gives the daemon no SIGTERM handling and the unit no stop timeout.",
+  "evidence": "spec.md:215-216 'the service restarted when no switch or sign-in is running'. AutoUpdatePolicy.swift:11-12 (gate is isSwitching or isLoggingIn only). AppState.swift:1628-1642 (POST, then accountIdentity on the renewed token, then save, retry after 1 s). usage.md:379-382 'a rotation that cannot be persisted kills the account'.",
+  "fix": "In 5.4, replace 'when no switch or sign-in is running' with: 'when no switch, sign-in, saved-login renewal (renewals in flight empty) or store write is in progress'. Add to 5.1: pixelswitchd handles SIGTERM and SIGINT by starting no new cycle, switch, renewal or sign-in. It lets in-flight renewals finish their POST, ownership check and save (bounded by the request timeouts, at most 80 s in total), cancels a running sign-in as Cancel does, then exits 0. The unit sets KillMode=mixed and TimeoutStopSec=90."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P1",
+  "section": "5.1 (systemd unit)",
+  "problem": "The spec makes pixelswitchd a systemd service but sets no Restart policy or start limit. The guard's 401 refusals, 429 parks and cool-downs are deliberately not persisted, and every launch runs an immediate cycle plus a profile audit of every saved login. On the Mac a crash ends the app, so the cost is 'one extra request per account' per relaunch. Under systemd, a crash in the first cycle with Restart=always or on-failure at the default 100 ms delay restarts the daemon again and again. Each start re-sends refused tokens and the live token. Anthropic answers about the fourth refused call in an hour with a 429 and Retry-After 3600, which recreates the 1.9 incident.",
+  "evidence": "spec.md:169 (unit described with no Restart, RestartSec or StartLimit). usage.md:348-350 'NOT persisted, on purpose: parks, cool-downs, rejected fingerprints ... worse than one extra request per account'. usage.md:171 (one refresh immediately at start). usage.md:205-206 (profile audit of every saved login once per launch). usage.md:492-494 (fourth refused call gets a 429 with Retry-After 3600).",
+  "fix": "Add a unit block to 5.1 or 5.2: Restart=on-failure, RestartSec=120, StartLimitIntervalSec=3600, StartLimitBurst=4 (at most 4 starts an hour; after that systemd leaves it stopped and the log says why). Add the rule: 'An automatic restart is the only thing that limits how often the unpersisted guard state is lost, so no other path may restart the daemon in a loop.' Add a test that checks the unit file holds these lines."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P1",
+  "section": "5.2 (socket) and 5.3 (control.md section 5)",
+  "problem": "The only single-instance check is the Mac rule 'connect test, then unlink; refuse if something answers', and the socket path depends on XDG_RUNTIME_DIR, with a different fallback path when it is unset. A daemon started without that variable (env -i, cron, a sandbox, or a face that execs pixelswitchd directly) finds nothing on its path and runs beside the systemd one in the same HOME. That makes two pollers with separate guards and two writers of ~/.claude/.credentials.json and backups.json, against the spec's own 'one process must own the usage guard and all HTTP'. The connect test then unlink is also racy if two daemons start at once.",
+  "evidence": "spec.md:164-165 'One process must own the usage guard and all HTTP'. spec.md:182 'socket $XDG_RUNTIME_DIR/pixelswitch/control.sock (fallback ~/.local/state/pixelswitch/ ...)'. control.md:544 'stale-socket replace / refuse second instance: identical: connect test, then unlink; refuse if something answers'. control.md:545 (CLI start-on-demand left open). usage.md:499-500 'Two processes polling with separate guards would double the rate and not share cool-downs'.",
+  "fix": "Add to 5.2: pixelswitchd takes an exclusive fcntl.flock on ~/.local/state/pixelswitch/daemon.lock (0600 file, 0700 directory; the path comes from HOME only, never from XDG_RUNTIME_DIR). It does this before it reads any store or binds the socket and holds the lock for its whole life. If the lock is held, it exits 0 with 'already running' and touches nothing; only while holding the lock may it unlink a stale socket. The daemon writes the socket path it bound to ~/.local/state/pixelswitch/socket-path, and clients read that file before falling back to their own environment. No face ever execs pixelswitchd: the CLI, tray and settings window start it only with 'systemctl --user start pixelswitch.service'."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P1",
+  "section": "5.2 (file writes and permissions)",
+  "problem": "Only 'every file write that holds a login' must be 0600 and atomic. A switch also rewrites the whole of ~/.claude.json (73 KB, 58 keys, mode 0600 on the laptop). That file can hold an Anthropic API key (primaryApiKey) and MCP server settings, as well as the account's email, name and organisation. A Python port that writes it with open(tmp, 'w') and os.replace under the systemd user umask (0022 or Ubuntu's 0002) leaves it world-readable. The same applies to settings.json, accounts.json and the log, and nothing sets the service's umask. A directory fsync after the rename is also missing: on a laptop power loss, a just-rotated saved login can roll back to the dead refresh token.",
+  "evidence": "spec.md:186 'Every file write that holds a login is atomic (temp file in the same directory created 0600, fsync, rename)'. KeychainService.swift:188-201 (the switch re-encodes and rewrites the whole ~/.claude.json). laptop.md:233-236 (~/.claude.json mode 600; mcpServers present). Claude Code 2.1.307 bundle '({...r,primaryApiKey:void 0})' (the config file can carry primaryApiKey). laptop.md:351 'must be mode 0600 in a 0700 directory'.",
+  "fix": "Replace spec.md:186 with this. Every file PixelSwitch writes (.credentials.json, ~/.claude.json, backups.json, settings.json, accounts.json, the log) is written atomically: a temp file in the target's directory opened with O_CREAT and O_EXCL at mode 0600, written, fsync'd, os.replace'd, then the directory is fsync'd. A replaced file keeps its owner and never gets wider permissions than it had (0600 when new). A symlinked or hard-linked target is refused, as Claude Code refuses it. Directories PixelSwitch creates are 0700. The unit sets UMask=0077, and every PixelSwitch process calls os.umask(0o077) at start."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P1",
+  "section": "5.4 (updater install step)",
+  "problem": "Only the tarball bytes are signed. 'A newer build is downloaded' is decided from latest-linux.json, which is not signed, and the same key signs every older Linux tarball and every Mac DMG. Anyone who can change the feed (a compromised release, a re-uploaded old asset) can make clients install an older signed tarball (a downgrade), or a validly signed file that is not a Linux build. Feed values are also used unchecked: version and build name the install directory, and url decides what is downloaded. The release recon gave the rule and the spec dropped it.",
+  "evidence": "spec.md:212-215 ('version', 'build', 'url' ... 'A newer build is downloaded, checked for size, SHA-256 and signature ... unpacked beside the running version'). release.md:430-432 'refuse if build in the feed is not greater than the installed build; read the version again from inside the verified tarball and refuse a downgrade (Sparkle's appcast is unsigned, so feed fields alone are not trustworthy)'. release.md:401-403 (one key signs both platforms).",
+  "fix": "Add to 5.4. Nothing in latest-linux.json is trusted until checked: version must be two whole numbers joined by a dot, build a whole number greater than the running build, url must start with https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/download/v<version>/, and size at most 50 MB, with the download cut off at size. Check size, SHA-256 and the signature BEFORE extracting anything. Extract into a temp directory beside app/ with tarfile filter='data' (no absolute paths, no '..', no links pointing outside, no device files). The tarball carries a VERSION file (version and build), written by linux-package. Refuse unless it equals the feed's version and build and the build is greater than the running build. Only then rename the temp directory to <version>-<build>. Unit-test: older build, mismatched VERSION, wrong url prefix, oversize, path traversal."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P1",
+  "section": "5.4 (updater, flip and restart)",
+  "problem": "The updater lives inside the daemon, and the spec flips 'current' then restarts with no check that the new version can run. A Linux build that fails at start (a missing module, syntax the user's Python lacks, a bad settings migration) leaves the service in a restart loop with no running updater. The machine can never update itself out of it, and switching and usage stop until someone reinstalls by hand. That is broken updates for every existing Linux user from 2.1 onward.",
+  "evidence": "spec.md:169 (pixelswitchd owns 'the updater'). spec.md:214-216 ('unpacked beside the running version, the current link flipped atomically, and the service restarted'): no self-check, no keeping the previous version, no rollback.",
+  "fix": "Add to 5.4. Before flipping current, run the new version's self-check with the same interpreter: 'python3 -I <new>/bin/pixelswitchd --self-check'. It imports every module, reads settings, accounts and backups read-only, prints its version and build, and exits 0. Flip only on exit 0 with a matching version. Always keep the previous version's directory; delete only versions older than that. The new daemon writes ~/.local/state/pixelswitch/good-<build> after its first complete cycle. A small stdlib ExecStartPre script installed outside the versioned directories flips current back to the previous version when the current build has failed to start 3 times without writing its good marker. Test the rollback in the scratch HOME."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P1",
+  "section": "5.6 (CI signing)",
+  "problem": "The spec moves Linux signing into linux-package, which runs on every trigger (main pushes and pull requests). The recon's design kept the every-run job free of secrets and signed only in the tag-only publish job. SPARKLE_EDDSA_KEY is the one key behind every Mac and Linux update. If a builder gives it to linux-package at job level (the usual pattern, and the one release.md uses for its tag-only job), every same-repo branch PR and main push runs test and packaging code with the update-signing key in its environment.",
+  "evidence": "spec.md:232-233 '`linux-package` (tarball + install-linux.sh; signs only on a tag)'. release.md:285 'linux-build: runs on every trigger ... holds no secrets'. release.md:305-307 (SPARKLE_EDDSA_KEY only in linux-publish). release.md:331 'linux-build has no secrets, so PR and fork runs are safe'. release.md:401-403 (a leak of either signing path exposes both platforms).",
+  "fix": "Replace the 5.6 job list with this. linux-test and linux-package never receive SPARKLE_EDDSA_KEY. linux-package builds an unsigned, deterministic tarball ('tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@$SOURCE_DATE_EPOCH | gzip -n', with the VERSION file) and install-linux.sh as a workflow artifact. Signing and writing latest-linux.json happen only in linux-publish (tags only, needs: [build, linux-package]), with the secret given only as the environment of that one signing step, as in release.md section 5.2."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P1",
+  "section": "5.7 (laptop safety)",
+  "problem": "A scratch HOME does not isolate enough. (a) The socket comes from XDG_RUNTIME_DIR, so a scratch daemon binds the real /run/user/1000 path. Once the real 2.0 is installed, the scratch daemon finds it answering and refuses to start, and Tests/integration/remote-control.sh (settings round trips, a sign-in start and cancel) then runs against the REAL daemon. (b) The spec defines no way to point the daemon at the mock API: its only test hooks are for the release URL and the key. A forgotten override sends fabricated or copied tokens to real Anthropic hosts from the farm's IP. (c) Nothing forbids copying the laptop's own live .credentials.json into the scratch HOME. With (b), a scratch renewal would rotate the farm's live refresh token. (d) The real claude binary run with a scratch HOME calls Anthropic itself. (e) install.sh 'enables and starts the service' and 'starts the tray' through the shared systemd user manager and D-Bus. A test-mode variable left in the user manager's environment would make the real service trust a test key and release URL. (f) The settings-window PNG cannot be taken unattended; trying would open windows or consent dialogs on the founder's live desktop.",
+  "evidence": "spec.md:242-247 (isolation = 'a scratch HOME against a mock API'). spec.md:217-218 (only PIXELSWITCH_TEST_RELEASE_BASE and PIXELSWITCH_TEST_PUBLIC_KEY). spec.md:182 (socket from XDG_RUNTIME_DIR). spec.md:224-226 (installer enables the service and starts the tray). spec.md:268-270 (remote-control.sh and PNG acceptance). control.md:578-579 (the integration script does settings round trips and a sign-in start and cancel). laptop.md:26, 304 (farm uses the live file). laptop.md:28, 334-337 (no unattended screenshot route). usage.md:531-534 (one grant on two holders).",
+  "fix": "Add these binding rules to 5.7. (1) A scratch run sets HOME, XDG_RUNTIME_DIR, XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_STATE_HOME and XDG_CACHE_HOME under ~/.cache/pixelswitch-dev/<run>/, and unsets CLAUDE_CONFIG_DIR, CLAUDE_SECURESTORAGE_CONFIG_DIR and ANTHROPIC_*. It sets DBUS_SESSION_BUS_ADDRESS only for the one tray-registration check. (2) Add a hook PIXELSWITCH_TEST_API_BASE (usage, profile and token endpoints), honoured only with PIXELSWITCH_TEST_MODE=1. In test mode the daemon refuses to start unless HOME is under ~/.cache/pixelswitch-dev/, refuses any request to an anthropic.com or claude.com host, refuses test mode when run as the systemd service, and reports testMode: true in status.get. Every scratch test, remote-control.sh included, checks testMode: true before sending anything. (3) Scratch logins are fabricated random strings. The laptop's real ~/.claude/.credentials.json and ~/.claude.json are never read into, copied into or linked from a scratch HOME. (4) claude.binaryPath points at a stub claude (like the Mac's /bin/sh stand-in); the real claude binary is never run with a scratch HOME. (5) No step before release runs systemctl --user, writes ~/.config/systemd/user, ~/.config/autostart or ~/.local/bin in the real HOME, or puts any PIXELSWITCH_* variable in the user manager (set-environment or environment.d). install.sh gains --no-systemd and --no-autostart and is tested only with them, in a scratch HOME. (6) The settings-window PNG comes from a headless compositor (CI or a nested headless session), never from a window, portal or screenshot dialog on the live desktop. (7) Afterwards every test process (daemon, tray, settings, stub) is stopped and checked gone, RegisteredStatusNotifierItems lists no test item, and the scratch tree is removed with /bin/rm."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P2",
+  "section": "5.4 (current link flip)",
+  "problem": "'current' is flipped as soon as the download is verified, but the restart waits for any switch or sign-in (up to 15 minutes). The systemd ExecStart and the ~/.local/bin link go through the 'current' directory symlink, and Python does not resolve a symlink in the middle of a path for sys.path. Any module the running daemon imports later (a lazy import) would load from the new version, so one process runs code from two versions mid-switch.",
+  "evidence": "spec.md:183-184 (app/<version>-<build>/ with a current symlink; links into it). spec.md:214-216 (flip, then restart only when nothing is running).",
+  "fix": "Add to 5.4: flip current only immediately before the restart, not when the download finishes. Every PixelSwitch process puts os.path.realpath of its own package directory on sys.path at start, so a running process never loads code from another version."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P2",
+  "section": "5.5 (installer)",
+  "problem": "The installer cannot verify itself (it is fetched over HTTPS from the same release it checks), and the spec does not say what the trust root of a first install is. It names only openssl for verification, with no fail-closed rule or fallback when 'pkeyutl -rawin' is missing. On the founder's laptop a bash script's 'rm' hits the cabdesign rm wrapper. --uninstall does not stop the running daemon before removing its files, so a daemon running from deleted files could keep switching the live login.",
+  "evidence": "spec.md:222-227. laptop.md:314, 346 ('~/.cabdesign-safety/bin/rm shadows rm ... Avoid rm in install scripts'). release.md:430 'verify BEFORE extracting or executing'.",
+  "fix": "Add to 5.5. The README states that the first install trusts GitHub over HTTPS and gives a two-step form: download install-linux.sh from the tag URL, compare its SHA-256 with the one in the release notes, then run it. The script runs with set -euo pipefail and uses /bin/rm or python3, never PATH rm. It verifies with openssl when 'openssl pkeyutl -verify -rawin' works, otherwise with the embedded pure-Python verifier (release.md appendix A). If neither verifies, it exits non-zero with nothing changed. --uninstall first runs 'systemctl --user disable --now pixelswitch.service' and stops the tray, then removes only app/, the links, the unit, the desktop files and the icon."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P2",
+  "section": "5.3 (sign-in) and 5.1",
+  "problem": "'Nothing opens a browser unless the user presses Open' and 'same limits and outcomes' conflict: the Mac's 10-second fallback relaunches claude auth login without BROWSER, so Claude Code opens the default browser by itself. Separately, a daemon started at boot through lingering has no WAYLAND_DISPLAY, DISPLAY or session D-Bus in its environment, so a browser opened by the daemon (the control API's 'open' parameter, or the fallback) fails silently.",
+  "evidence": "spec.md:201-203. signin.md:201-203 (the fallback opens the default browser). signin.md:382 (the desktop environment is needed for that). laptop.md:152 (Linger=yes).",
+  "fix": "Pick one in 5.3. Either keep the Mac fallback and change the sentence to 'nothing opens a browser unless the user presses Open, except the Mac's 10-second fallback', or drop the fallback on Linux and show the manual link and code box instead. Add: links are opened by the visible face (settings window or tray) with Gio. When the daemon must open one (CLI --open), it reads WAYLAND_DISPLAY, DISPLAY and DBUS_SESSION_BUS_ADDRESS from 'systemctl --user show-environment' at that moment."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P2",
+  "section": "5.1 (tray and settings window)",
+  "problem": "Nothing stops the new faces from sending usage.refresh when they start, open, re-exec after an update or reconnect. Each full cycle costs the live token a usage request and a profile request, so the laptop would poll faster than the Mac, where only an explicit Refresh (or a switch or sign-in) starts an extra cycle.",
+  "evidence": "spec.md:171-172 (tray has 'Refresh', 'Live via events.subscribe'; the tray re-execs on update, spec.md:216). usage.md:176-185 (the Mac's complete list of cycle triggers; opening a window is not one).",
+  "fix": "Add to 5.1: the tray and settings window never send usage.refresh by themselves (not on start, open, re-exec or reconnect). They read usage.get and subscribe to events; only the user's Refresh click sends usage.refresh."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P2",
+  "section": "5.2 (CLAUDE_CONFIG_DIR)",
+  "problem": "PixelSwitch ignores CLAUDE_CONFIG_DIR, but the claude it spawns (auth status for verification, auth login for sign-in) inherits the daemon's whole environment and does honour CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR. If either is set in the user manager's environment, PixelSwitch writes ~/.claude while the CLI it checks with reads and writes another directory. Switches then fail verification after the write, and sign-ins land where PixelSwitch never captures them.",
+  "evidence": "spec.md:178 'CLAUDE_CONFIG_DIR is not honoured'. credentials.md:238-239 (Claude Code's storageDir and config come from those variables). signin.md:96, 107 (the whole inherited environment is passed, nothing removed).",
+  "fix": "Add to 5.2: pixelswitchd removes CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR from the environment of every claude it runs. When its own environment sets either, it logs a warning and shows one line in the settings window and in 'pixelswitch status'."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P2",
+  "section": "5.3 (switch behaviour) and 6",
+  "problem": "The recon confirmed defect (g): removing the active account marks the fallback active before the switch, then reports 'No switch needed' while the removed account's login stays live and its usage is shown under the fallback. It also confirmed 8.3: removing the last account re-creates it within one cycle. The spec does not say whether 2.0 fixes these or ports them, and 'must match the Mac exactly' plus the conformance vectors would carry a known wrong-switch defect into Linux without anyone deciding to.",
+  "evidence": "credentials.md:247-267 (trace at AppState.swift:751-757 and :808; options A and B in 8.2). spec.md:188-193 (switch steps must match the Mac exactly). spec.md:249-260 (the vectors do not list the case).",
+  "fix": "Add a decision row. Either '2.0 fixes credentials.md section 8 on both platforms: option A plus the failure path in 8.2 (if the switch fails, pick the next candidate or clear the active account); removing the last account clears the active account and does not re-create it', or 'ported knowingly, with a README line'. Add the case to Tests/conformance either way."
+ },
+ {
+  "lens": "linux-safety",
+  "severity": "P2",
+  "section": "7 (Linux acceptance)",
+  "problem": "On Linux the spec relies on the atomic rename's new mtime instead of the Mac's explicit mtime bump to make running Claude Code sessions re-read the switched login. The recon listed 'verify that a running claude re-reads after an external rewrite' as an open check, and the spec dropped it. If running sessions keep the old login, the farm keeps billing the account PixelSwitch just left.",
+  "evidence": "credentials.md:225 ('verify on the laptop that a running claude re-reads after an external rewrite ... I could not locate the staleness check'). ClaudeCredentialsFile.swift:3-14 (the Mac depends on this signal).",
+  "fix": "Add to 7, Linux: 'Confirmed read-only from the installed Claude Code source how a running session notices an external rewrite of .credentials.json (stat mtime, inode or watcher), and recorded the finding. If it watches the inode, the switch also does whatever that check needs.' Treat this as a gate for the first real switch on the laptop."
+ },
+ {
+  "lens": "scope",
+  "severity": "P1",
+  "section": "2.3 rules 1 and 3, D9, 2.4 help text",
+  "problem": "His own example, a 90 session default and a 50 weekly default, stops auto-switch for most of every week. Under rule 3 a candidate needs w <= ceiling(50, 1) = 49 in every case. Once every account is past 49% of its week, nothing is a target. Since 1.8 removed `exhausted`, the active account then stays put even at 100% of its session, while other accounts still have 30-50% of their week left. The spec silently picks the reading where 50% weekly is a ceiling on where you may go, not only the point where you leave. It never tells the founder that this is what he is agreeing to. The recon asked for exactly this to be called out.",
+  "evidence": "recon autoswitch.md:334-336: \"If all other accounts sit above 49% weekly the engine stays put ... That is correct but should be called out in the spec and in the Settings text.\" Beeco log in docs/decisions/2026-09-24-remote-control-answers.md (2026-09-29 section): \"Every other account was 92-99% of its week\". Spec 2.4 help-text example covers one account only and says nothing about every account being over the limit.",
+  "fix": "Add a decision card C4 to the founder page: \"When every other account is over its weekly limit, should the 5-hour limit still move you? (a) Yes: if no account is under its weekly limit, move to the account with the most weekly room that is under its session limit (recommended); (b) No: stay on the account until something resets.\" Add the matching rule to 2.3 as rule 3a, with the default he gets if he says nothing. Also add to 2.4: \"Settings \u2192 General states in one sentence that with a weekly default below the session default, auto-switch stops moving you once every account is past its weekly limit\" (or the C4 behaviour, if he picks (a)). Add a conformance vector for the case."
+ },
+ {
+  "lens": "scope",
+  "severity": "P1",
+  "section": "2.3 rule 5 (early drain), D9",
+  "problem": "A low weekly threshold quietly cancels the founder's 2026-09-25 use-it-before-it-resets feature, in the exact case he described. Drain targets must satisfy w <= ceiling(rule.weekly, 1). With weekly 50, an account that resets in 12 hours with 5% left (95% used) can never be a drain target. The recon flagged this and asked the spec to confirm it. The spec decided it without asking him.",
+  "evidence": "Founder, answers.md:30: \"an account that is resetting in 12 hours for the whole week and I have 5% usage available. I want to be able to have it automatically select that one so that it finishes the usage on it\". recon autoswitch.md:507: \"confirm in the spec that a split weekly threshold of 50% does not make 'use the quota that is about to reset' ... harder; with tw = 50 an account at 95% weekly is not a drain target.\" Spec 2.3 rule 5 applies the weekly ceiling to drains with no note.",
+  "fix": "Add a card C5: \"Should switching early to use quota about to reset ignore the weekly limit? (a) Yes: a drain target needs only to be under its session limit and below 100% of its week, because its weekly quota is lost at the reset anyway (recommended); (b) No: drains also respect the weekly limit.\" Change rule 5 so it reads per the default, and add a conformance vector built on his 12-hour, 5% example."
+ },
+ {
+  "lens": "scope",
+  "severity": "P1",
+  "section": "2.2 resolution, 2.4 Accounts menus, 4 accounts.setThresholds / CLI --session default",
+  "problem": "For any account that already has its own 1.x threshold, choosing Default in one window cannot reach the default, and the Default item shows a number that will not apply. Take an account with switchThreshold 70. Resolution is sessionThreshold ?? switchThreshold ?? defaults.session. So 'Default (90%)' in the Session menu, `--session default`, or `{session: null}` (\"null clears to follow\") lands on 70, not 90. Nothing says what the write is. Clearing switchThreshold instead would silently move the other window too. The only way to remove the legacy value from the GUI is a round trip through Manual only.",
+  "evidence": "Spec 2.2 line 64: `normalized1to100(account.sessionThreshold) ?? normalized1to100(account.switchThreshold) ?? defaults.session`. Spec 2.4: \"Each menu offers Default (with the default's number)\". Spec 4: \"null clears to follow\". D8 clears window values only on legacy writes.",
+  "fix": "Add to 2.2: \"Choosing Default for one window on an account whose switchThreshold is 1-100 writes the other window's current value into that window's own key, sets switchThreshold to nil, and leaves this window nil. The other window keeps its number and this window really follows the global default. The same applies to `accounts.setThresholds` with null and to CLI `--session/--weekly default`.\" Add a conformance vector (switchThreshold 70, session set to default, giving session 90 and weekly 70) and a GUI help-text check."
+ },
+ {
+  "lens": "scope",
+  "severity": "P1",
+  "section": "D9 and card C3",
+  "problem": "D9 gives the 50-100 floor for the global default as the founder's rule and quotes it as his words. Those words were written by a session in its 'What was built' notes. His own words that day were about going lower, \"all the way down to 0%\". He now says weekly \"only 50%\", which sits exactly on the floor. Card C3 will tell him he is confirming his own rule when he is being asked to accept a session's guard.",
+  "evidence": "docs/decisions/2026-09-24-remote-control-answers.md:123 (his verbatim words: \"go below 50% ... all the way down to 0%\") versus :138 \"- The global default stays 50\u2013100.\" under \"What was built (release 1.5)\", and :147, whose stated reason (\"A 0% default would make every account Manual only\") does not apply to a weekly default of 30-49. Spec D9: \"his 2026-09-26 rule: 'The global default stays 50-100' ... the rule is his.\"",
+  "fix": "Replace D9's reason with: \"The 50 floor was set by the 1.5 build (answers.md:138, :147) to stop a 0% default making every account Manual only; it is not the founder's wording. Card C3 asks him whether the weekly default may go to 1-49 (default if he says nothing: keep 50, so his example still works).\" Make the C3 card text say the same."
+ },
+ {
+  "lens": "scope",
+  "severity": "P1",
+  "section": "5.7, 5.5, 7 (Release, laptop), 1 (who 'downstream clients' are)",
+  "problem": "The release plan puts the real install on a machine whose Claude Code login the CabDesign farm also uses. Section 5.7 binds only agents during development. After release the founder is invited to test sign-in, switching and auto-switch in his live HOME. That rewrites the `~/.claude/.credentials.json` that farm workers read. It can point running farm jobs at a different account or log them out. Nobody has read what `~/cabdesign-farm-account.sh` does to that file, and a farm that swaps the login itself would look to the daemon like an unknown live account. Nothing tells the founder any of this.",
+  "evidence": "recon laptop.md:304: \"the CabDesign farm launches Claude Code workers on this laptop ... It likely reads ~/.claude/.credentials.json. Treat that file as live.\" laptop.md:224: \"do not ask the founder to log a second account into the live home without telling him.\" Spec 5.7: \"The real install happens only after release, from the real release.\" Spec 7: \"the laptop installs 2.0 from the real release\". No README, release-note or hand-check text covers shared logins.",
+  "fix": "Add to 5.7: \"Before the real install, an agent reads (structure only, no secrets) what ~/cabdesign-farm-account.sh does with ~/.claude/.credentials.json and records it. The real install leaves autoSwitch.enabled false. The README, the release notes and a Linux hand-check card on the founder page say, in one sentence, that switching on this laptop also changes the account the CabDesign farm's Claude Code workers use, and the card recommends testing switching only while the farm is idle.\""
+ },
+ {
+  "lens": "scope",
+  "severity": "P1",
+  "section": "5.1 Linux faces, D15, 5.3",
+  "problem": "The Linux faces have nowhere to show most of what the Mac shows about an account, and D15 does not list these as left out. On the Mac each usage card shows when each window resets, the Fable allowance, extra usage, 'Updated N ago', plain-words error and stuck-state messages (needs re-sign, no subscription, waiting for Claude Code, 429 rest, 5xx with Status), and a Retry button. The Linux tray shows only session and weekly %, and the settings window lists no usage at all. Section 5.3 requires the user-facing sentences to match the Mac's but gives them no surface. A GNOME user cannot see why an account is skipped or that it needs re-signing.",
+  "evidence": "PixelSwitch/Views/UsageDashboardView.swift:279, :416-444 (\"Updated ... ago\"), :488-508 (Fable, \"Extra usage\"); SettingsAccountsTab.swift:119-131 (weekly-reset line, recon autoswitch.md:267). Spec 5.1 tray: \"each account in priority order with #n, session and weekly %\". Spec 5.3: \"401/403/429/5xx/offline handling and the user-facing sentences.\" Spec D15 lists only the cost/activity dashboard, widget, menu-bar modules, languages, Gemini/Codex.",
+  "fix": "Add to 5.1, settings window: \"Accounts also shows, per account: session and weekly % with their reset times, Fable % when present, 'Updated N ago', the account's current message (the same sentences as the Mac card: needs re-sign, no subscription, waiting for Claude Code, rate-limited rest, service not responding) and Retry.\" Add to the tray menu: \"an account with a message shows a short form of it under its name.\" Anything left out instead must be named in D15."
+ },
+ {
+  "lens": "scope",
+  "severity": "P1",
+  "section": "5 (Linux), 5.5 install, 5.6 CI, D13",
+  "problem": "The founder asked for \"a version that works on Ubuntu\". The spec silently narrows that to Ubuntu 26.04 with Python 3.14 and libadwaita 1.9, the laptop and the only CI image, without saying so. The most widely installed Ubuntu is 24.04 LTS, with Python 3.12 and an older GTK 4 and libadwaita. A builder using 3.13+ syntax or newer Adw widgets produces an install that succeeds on 24.04 and then fails at runtime. No rule says the installer checks anything.",
+  "evidence": "recon laptop.md:20 (Ubuntu 26.04.1, Python 3.14.4, Adw 1.9); recon release.md:30-33 (CI pinned to ubuntu-26.04 only). Spec 5.5 install steps contain no preflight; the spec states no supported versions.",
+  "fix": "Add to 5.1: \"Supported: Ubuntu 24.04 LTS and 26.04 (Python >= 3.12, Gtk 4 >= 4.14, libadwaita >= 1.5; no newer API without a fallback).\" Add to 5.5: \"install.sh first checks python3 version, `gi.require_version('Gtk','4.0')`, `('Adw','1')`, `('Dbusmenu','0.4')` and the presence of org.kde.StatusNotifierWatcher, and refuses (or warns, for the watcher) with one plain sentence naming what is missing.\" Add `linux-test` on `ubuntu-24.04` beside 26.04 in 5.6. If he wants 26.04 only, say so in D15 and the README."
+ },
+ {
+  "lens": "scope",
+  "severity": "P2",
+  "section": "D5, D6, D9 (cards C1-C3), D1",
+  "problem": "The cards C1-C3 are referred to on \"the founder page\", which does not exist. No path is given, and nothing says whether the 2.0 release waits for his answers. He said \"Once done push to production\", so the defaults will ship. Any answer that changes behaviour then needs a later release, and the spec should say so.",
+  "evidence": "ls docs/decisions/ shows no 2026-10-24 page; spec D5 \"decision card C1 on the founder page\", D6 \"Card C2\", D9 \"Card C3\".",
+  "fix": "Add a decision D18: \"The founder page is docs/decisions/pixelswitch-2.0-2026-10-24.html, built from ~/.claude/templates/founder-questions-template.html with cards C1-C5 and the Linux hand-check card. 2.0 ships with the defaults and does not wait for answers. An answer that changes behaviour ships as 2.1, and his answers are recorded verbatim in docs/decisions/2026-09-24-remote-control-answers.md.\""
+ },
+ {
+  "lens": "scope",
+  "severity": "P2",
+  "section": "D6 / card C2, D2",
+  "problem": "On his own Mac the strategy is Most room left, so with C2's default his request (\"I want priority switching based on a number system\") does nothing after 2.0 until he presses Use priority. The card must say this plainly. His example also names \"ahmed@gmail.com\". His account on record is ahamade@gmail.com, so a test, a CLI example or a post-release step that uses the literal address will not resolve.",
+  "evidence": "answers.md (1.6 section): \"ranked by his strategy (most room left on his Mac)\"; answers.md 2026-09-29 Beeco list: \"ahamade@gmail 99\"; spec section 0: \"ahmed@gmail.com = 3\".",
+  "fix": "In D6 add: \"Card C2 states that his Mac and the Beeco Mac are on Most room left today, so priority numbers have no effect there until Use priority is pressed or he picks option 'switch to Priority when I set a number'.\" In section 0 add a note: \"'ahmed@gmail.com' is read as ahamade@gmail.com; nothing sets his example numbers on any Mac without his word.\""
+ },
+ {
+  "lens": "scope",
+  "severity": "P2",
+  "section": "D3 versus D2",
+  "problem": "D3 contradicts D2's own reason. D2 says \"A number he types must stay the number he typed\". D3 makes any drag, or any `accounts.setOrder`, renumber every account 1..N, so his 3 and 1 become 2 and 1 after an unrelated drag, and no account is left unnumbered. That is a defensible rule, but the founder is not told.",
+  "evidence": "Spec D2 reason vs D3: \"A whole-list reorder (accounts.setOrder, a drag in Settings) assigns 1..N in the new order\".",
+  "fix": "Add to D3: \"This replaces numbers he typed (e.g. 3 and 1 become 2 and 1); the sentence under the Accounts list says 'Dragging renumbers every account from 1.' and the CLI `accounts order` output says the same.\""
+ },
+ {
+  "lens": "scope",
+  "severity": "P2",
+  "section": "2.4 Settings, Accounts",
+  "problem": "The row layout may not fit the Settings window, and the spec does not say what to do. Each row now carries a priority control, the address, two threshold menus and their two custom steppers, plus the reset line and help text. The window is a fixed 520 x 440, and the recon called this a layout decision the spec must make.",
+  "evidence": "recon autoswitch.md:353 (D8 UI shape: \"The Settings window is fixed 520 x 440 ... each Accounts row is already full\"); spec 2.4 gives the order of controls only.",
+  "fix": "Add to 2.4: \"The Settings window grows to <W> x <H> (or the two threshold menus share one line under the address); the address keeps at least N characters; rendered at 1920x1080 in both themes as evidence.\""
+ },
+ {
+  "lens": "scope",
+  "severity": "P2",
+  "section": "D10, 2.4",
+  "problem": "Under D10 Fable now follows the weekly number, but nothing makes the Settings or help text say so. The 1.8 rule he approved says Fable uses \"that number\", and with split thresholds a user cannot tell which one.",
+  "evidence": "recon autoswitch.md:348: \"D3 Fable's threshold. Recommend the weekly threshold. Must be stated in the Settings sentence\". Spec D10 states the rule; 2.4 lists no sentence for it.",
+  "fix": "Add to 2.4: \"The Fable toggle's caption says 'Fable uses the weekly limit.' in all five tables, and the Linux settings window shows the same text.\""
+ },
+ {
+  "lens": "scope",
+  "severity": "P2",
+  "section": "5.2 socket, 5.1 CLI, D15",
+  "problem": "A Linux client is less reachable and less complete than the Mac's in ways D15 does not list. (a) The CLI and the daemon may resolve different socket paths when one has XDG_RUNTIME_DIR and the other does not, for example a non-login SSH command from his Mac. Nothing says whether the CLI starts the daemon when no socket answers; the Mac CLI launches the app. (b) There is no 'Open in <browser>' list in sign-in, which on the Mac is part of his multi-browser requirement. (c) There is no Remote control section with the MCP snippet. (d) Nothing is shown when no StatusNotifierWatcher exists.",
+  "evidence": "recon control.md:284 (Mac CLI launches the app when nothing answers), :539 (fallback path); PixelSwitch/Views/SignInView.swift:72 `Menu(\"Open in\")`; spec 5.3 sign-in lists only Open and Copy; spec D15.",
+  "fix": "Add to 5.2: \"The CLI tries $XDG_RUNTIME_DIR/pixelswitch/control.sock then /run/user/<uid>/pixelswitch/control.sock then the ~/.local/state fallback, and runs `systemctl --user start pixelswitch.service` once when none answers (unless PIXELSWITCH_NO_LAUNCH=1).\" Either add 'Open in' (the browsers in `xdg-settings`/.desktop files that handle https) and a Remote control section (SSH and MCP snippet) to the settings window, or list both in D15. Add: \"With no StatusNotifierWatcher, pixelswitch-tray logs one line and exits 0; the README says to open Settings from the app grid.\""
+ }
+]
