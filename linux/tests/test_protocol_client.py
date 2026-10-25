@@ -79,13 +79,13 @@ class FakeServer:
 
     def close(self):
         self.stop.set()
+        self.thread.join(timeout=2)   # no new connection after this
         for conn in self.connections:
             try:
                 conn.close()
             except OSError:
                 pass
         self.listener.close()
-        self.thread.join(timeout=2)
 
 
 class ClientTestCase(unittest.TestCase):
@@ -171,6 +171,26 @@ class CallTests(ClientTestCase):
         self.assertEqual(caught.exception.kind, "timedOut")
         self.assertEqual(str(caught.exception), "PixelSwitch did not answer status.get in time.")
         self.assertLess(time.monotonic() - started, 3)
+
+    def test_slow_calls_wait_at_least_120_seconds_and_others_do_not(self):
+        def slow(request, send):
+            time.sleep(0.6)
+            send(p.success_line(request.id, {"echo": request.method}))
+
+        self.serve(slow)
+        c = self.client()
+        c.connect(launch=False)
+        # an ordinary call gives up at its own (short) timeout...
+        with self.assertRaises(ClientError) as caught:
+            c.call("status.get", timeout=0.2)
+        self.assertEqual(caught.exception.kind, "timedOut")
+        time.sleep(0.8)  # let the late reply arrive; it belongs to a call nobody waits for any more
+        # ...a slow one is given the floor of 120 s, so a 0.2 s timeout still waits for the reply
+        self.assertEqual(c.call("usage.refresh", timeout=0.2), {"echo": "usage.refresh"})
+        self.assertEqual(c.call("accounts.switch", {"account": "1"}, timeout=0.2), {"echo": "accounts.switch"})
+        # with the floor off the timeout is exact
+        with self.assertRaises(ClientError):
+            c.call("usage.refresh", timeout=0.2, slow_floor=False)
 
     def test_a_server_that_goes_away_closes_the_connection(self):
         def handler(request, send):

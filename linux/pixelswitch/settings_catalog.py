@@ -15,6 +15,10 @@ but nothing acts on them. See :data:`NO_EFFECT_ON_LINUX`.
 
 Pure: no file is read or written here. The daemon loads ``settings.json`` into a dict,
 calls :func:`read_setting` / :func:`write_setting`, and saves the dict it gets back.
+
+``launchAtLogin`` (the tray autostart file) and ``updates.automatic`` (the Linux updater) are
+stored here too, but the daemon owns their side effects and must read ``launchAtLogin`` back
+from the autostart file, as the Mac reads the login item's real state.
 """
 from __future__ import annotations
 

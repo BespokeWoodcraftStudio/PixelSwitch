@@ -52,6 +52,7 @@ EXIT_UNREACHABLE = 5
 SLOW_METHODS = frozenset({"accounts.switch", "accounts.addCurrent", "usage.refresh"})
 SLOW_CALL_FLOOR_SECONDS = 120.0
 DEFAULT_TIMEOUT_SECONDS = 30.0
+CONNECT_TIMEOUT_SECONDS = 5.0
 
 #: What ``status.features`` must contain before the CLI sends a 2.0 method, and the words for the
 #: refusal against an older PixelSwitch ("This PixelSwitch (<version>) cannot <action>; update it.").
@@ -213,7 +214,9 @@ class ControlClient:
         except OSError:
             return False
         try:
+            sock.settimeout(CONNECT_TIMEOUT_SECONDS)  # a full backlog must not hang the caller
             sock.connect(path)
+            sock.settimeout(None)
         except (OSError, ValueError):
             sock.close()
             return False
@@ -268,11 +271,18 @@ class ControlClient:
 
     # --- calls -------------------------------------------------------------------------------
 
-    def call(self, method: str, params: Any = None, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> Any:
+    def call(
+        self, method: str, params: Any = None, timeout: float = DEFAULT_TIMEOUT_SECONDS, *, slow_floor: bool = True
+    ) -> Any:
         """Sends one request and waits for its reply. Returns the ``result`` (None for a null
         result). Raises ``ControlError`` for an error reply and ``ClientError`` for a transport
-        problem. Pushed events and replies to other ids are skipped. The slow-call floor is NOT
-        applied here: pass ``call_timeout(method, timeout)`` (the CLI does)."""
+        problem. Pushed events and replies to other ids are skipped.
+
+        The slow calls (``accounts.switch``, ``accounts.addCurrent``, ``usage.refresh``) wait at
+        least 120 s whatever ``timeout`` says (CLIRunner.swift:73-75); pass ``slow_floor=False``
+        for an exact timeout (tests)."""
+        if slow_floor:
+            timeout = call_timeout(method, timeout)
         request_id = self._next_id
         self._next_id += 1
         deadline = self._clock() + timeout
