@@ -18,10 +18,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
 import time
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINUX = os.path.dirname(HERE)
@@ -68,7 +70,8 @@ def registered_items(bus: str) -> str:
 def main() -> int:
     bus = os.environ.get("DESKTOP_BUS", f"unix:path=/run/user/{os.getuid()}/bus")
     before = real_home_signature(REAL_HOME)
-    work = os.path.join(SCRATCH_ROOT, "lc-run", "work")
+    # Unique per run: two runs at once (or a leftover from a crashed one) must never share a folder.
+    work = os.path.join(SCRATCH_ROOT, f"lc-run-{uuid.uuid4().hex[:8]}", "work")
     os.makedirs(work, exist_ok=True)
     rig = Rig(None, keep_log=False, root=os.path.join(work, "rig"))
     daemon = tray = None
@@ -192,6 +195,7 @@ def main() -> int:
                 process.kill()
                 process.wait()
         rig.close()
+        shutil.rmtree(os.path.dirname(work), ignore_errors=True)  # this run's own folder, and only that
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

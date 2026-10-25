@@ -38,6 +38,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINUX = os.path.dirname(HERE)
@@ -646,8 +647,8 @@ def main(argv=None) -> int:
             del os.environ[name]
     os.umask(0o077)
     run_root = os.path.dirname(here)
-    work = os.path.join(run_root, "work")
-    shutil.rmtree(work, ignore_errors=True)
+    # Unique per run: two runs at once (they once collided in the shared folder) never share a work tree.
+    work = os.path.join(run_root, f"work-{uuid.uuid4().hex[:8]}")
     os.makedirs(work, mode=0o700)
     signature = real_home_signature(real_home)
     print(f"scratch run under {work}")
