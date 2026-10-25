@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PixelSwitch
+Comment=PixelSwitch tray icon
+Exec=@HOME@/.local/bin/pixelswitch-tray
+Icon=pixelswitch
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

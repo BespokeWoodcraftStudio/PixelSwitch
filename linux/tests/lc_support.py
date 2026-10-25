@@ -54,6 +54,7 @@ class FakeDaemon:
         self.results = {"status.get": status_payload(), "events.subscribe": {"subscribed": True}}
         self.results.update(results or {})
         self.events = list(events or [])
+        self.event_delay = 0.6
         self.requests: list[p.Request] = []
         self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.listener.bind(path)
@@ -116,9 +117,15 @@ class FakeDaemon:
             send(p.failure_line(request.id, error))
             return
         send(p.success_line(request.id, result))
-        if request.method == "events.subscribe":
-            for event in self.events:
-                send(event)
+        if request.method == "events.subscribe" and self.events:
+            def push() -> None:
+                try:
+                    for event in self.events:
+                        send(event)
+                except OSError:
+                    pass
+
+            threading.Timer(self.event_delay, push).start()  # after the subscriber's first read, as a real daemon's would be
 
     def close(self) -> None:
         self.stop_flag.set()

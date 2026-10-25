@@ -572,7 +572,7 @@ class RunnerTests(RunnerTestCase):
         runner = Runner(client, out=captured.out.append, err=captured.err.append)
         import threading
 
-        threading.Timer(0.5, daemon.close).start()
+        threading.Timer(1.5, daemon.close).start()
         code = runner.run(parse(["watch"]))
         client.disconnect()
         self.assertEqual(code, 1)

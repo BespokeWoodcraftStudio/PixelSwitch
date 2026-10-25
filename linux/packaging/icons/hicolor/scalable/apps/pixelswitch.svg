@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>PixelSwitch</title>
+  <defs>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#171716"/>
+      <stop offset="1" stop-color="#0f0f0e"/>
+    </linearGradient>
+  </defs>
+  <rect x="49" y="49" width="414" height="414" rx="112" fill="url(#face)"/>
+  <rect x="117" y="192" width="278" height="128" fill="none" stroke="#f7f7f5" stroke-width="22"/>
+  <rect x="293" y="218" width="76" height="76" fill="#00ff66"/>
+</svg>

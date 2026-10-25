@@ -1,0 +1,27 @@
+# PixelSwitch background service (systemd user unit), installed to ~/.config/systemd/user/.
+#
+# An automatic restart is the only thing that limits how often the daemon's guard state (which is
+# not saved to disk) is lost, so nothing restarts it in a loop: at most 4 starts in an hour
+# (the boot start, the update restart, one automatic retry, and the start after a rollback),
+# and an automatic retry waits 2 minutes.
+#
+# ExecStartPre runs the rollback check from a stand-alone copy kept OUTSIDE the versioned
+# folders, so a broken new version can never stop it from running. It always exits 0.
+[Unit]
+Description=PixelSwitch: switches the Claude Code account on this computer
+Documentation=https://github.com/BespokeWoodcraftStudio/PixelSwitch
+StartLimitIntervalSec=3600
+StartLimitBurst=4
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/env python3 -I %h/.local/share/pixelswitch/rollback.py
+ExecStart=%h/.local/bin/pixelswitchd
+Restart=on-failure
+RestartSec=120
+KillMode=mixed
+TimeoutStopSec=90
+UMask=0077
+
+[Install]
+WantedBy=default.target
