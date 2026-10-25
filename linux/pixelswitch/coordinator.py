@@ -1524,6 +1524,7 @@ class Coordinator(UsageMixin):
         while True:
             attempt += 1
             reprove: str | None = None
+            retry = False
             written: tuple[str | None, str, AccountBackup] | None = None
             try:
                 with self.login.refresh_lock() as held:
@@ -1531,7 +1532,7 @@ class Coordinator(UsageMixin):
                     if attempt == 1:
                         first_seen = seen
                     if needs_api:
-                        reprove = seen  # the CLI renewed the login during the checks: prove the new one
+                        reprove, retry = seen, True  # the CLI renewed the login during the checks: prove the new one
                     else:
                         held.check()
                         try:
@@ -1548,12 +1549,12 @@ class Coordinator(UsageMixin):
                                     if first_pass.kind == "retry":
                                         self.log.warning("[switchAccount] Step 3: The live login changed since it was "
                                                          "backed up; backing it up again before writing")
-                                        reprove = live_now
+                                        reprove, retry = live_now, True
                                 else:
                                     abort = llb.after_retry(first_seen, seen, step_one, live_now, owner_known)
                                     if abort is not None:
                                         raise self._abort_error(abort, "retry")
-                                if reprove is None:
+                                if not retry:
                                     written = self._write_credential_locked(held, storage, live_now, target,
                                                                             target_backup)
                         except LoginWriteError as error:

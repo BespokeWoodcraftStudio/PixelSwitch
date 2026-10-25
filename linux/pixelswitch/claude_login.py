@@ -225,8 +225,11 @@ class ClaudeLogin:
         return LEFTOVER_MESSAGE_LEGACY.format(path=self._display(lock_path))
 
     def _display(self, path: str) -> str:
-        home = self.paths.home.rstrip("/")
-        return "~" + path[len(home):] if path.startswith(home + "/") else path
+        for home in (self.paths.home, os.path.realpath(self.paths.home)):
+            home = home.rstrip("/")
+            if path.startswith(home + "/"):
+                return "~" + path[len(home):]
+        return path
 
     def _owner_path(self) -> str:
         return os.path.join(self.paths.claude_dir, OWNER_NAME)
