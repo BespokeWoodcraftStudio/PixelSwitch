@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=PixelSwitch Settings
+GenericName=Claude Code account switcher
+Comment=Accounts, limits and auto-switch for Claude Code
+Exec=@HOME@/.local/bin/pixelswitch-settings
+Icon=pixelswitch
+Terminal=false
+Categories=Utility;GTK;
+Keywords=Claude;accounts;switch;usage;limits;
+StartupWMClass=ai.pixelventures.pixelswitch.settings
+StartupNotify=true

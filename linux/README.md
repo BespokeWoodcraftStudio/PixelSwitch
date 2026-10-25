@@ -1,11 +1,119 @@
 # PixelSwitch for Linux
 
-This folder is the Linux build of PixelSwitch 2.0. This file holds the daemon design and the two findings read
-from the installed Claude Code (lane LB). Lane LC adds install, use and MCP sections below.
+This folder is the Linux build of PixelSwitch 2.0: the install, use and MCP sections come first, then the daemon
+design and the two findings read from the installed Claude Code.
 
 **Read this before you switch accounts on a shared machine.** On the founder's laptop the CabDesign farm runs
 `claude` jobs as the same user, so switching accounts there (by hand or by auto-switch) also changes the account
 those jobs use from their next request on. Auto-switch is off after an install. Try switching while the farm is idle.
+
+## Install
+
+Supported: **Ubuntu 24.04 LTS and 26.04** (Python 3.12 or newer, GTK 4.14 or newer, libadwaita 1.5 or newer). It
+installs for your own user and never uses sudo. If something is missing it says which packages, and you install
+them yourself (the installer prints the exact `sudo apt install ...` line and stops):
+
+```
+python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-gtk-3.0 gir1.2-dbusmenu-glib-0.4
+```
+
+On a desktop that shows no tray icons (stock GNOME without the Ubuntu AppIndicator extension) the installer warns
+and goes on: the service, the command line and the settings window work without a tray.
+
+**One line.** The first install trusts GitHub over HTTPS:
+
+```
+curl -fsSL https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/latest/download/install-linux.sh | bash
+```
+
+**Two steps, checked.** Download the installer from the tag, compare its SHA-256 with the one in that release's
+notes, then run it (replace `v2.0` with the tag you want):
+
+```
+curl -fsSLO https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/download/v2.0/install-linux.sh
+sha256sum install-linux.sh
+bash install-linux.sh
+```
+
+Either way the installer then checks what it downloads before it unpacks anything: the size, the SHA-256 and the
+Ed25519 signature (with `openssl` 3, against the public key built into the installer; it stops if `openssl` cannot
+check Ed25519). It puts the program in `~/.local/share/pixelswitch/app/<version>-<build>/` (with a `current` link),
+links `pixelswitch`, `pixelswitchd`, `pixelswitch-tray` and `pixelswitch-settings` into `~/.local/bin`, installs and
+starts the systemd user service `pixelswitch.service`, adds the tray to your autostart and a PixelSwitch Settings
+entry to the applications menu. **Auto-switch stays off** until you turn it on.
+
+Other options: `--from <tarball> [--signature <file>]` installs a local build (labelled unverified without a
+signature), `--no-systemd` and `--no-autostart` leave those out, `--uninstall` removes the program and keeps your
+settings and saved logins, `--uninstall --purge` removes those too. The installer keeps a copy of itself at
+`~/.local/share/pixelswitch/install-linux.sh` for that.
+
+After an install, `pixelswitch accounts add-current` saves the account Claude Code is signed in as, or use Sign in
+another account from the tray menu.
+
+**Updates.** The service checks `latest-linux.json` two minutes after it starts and every 6 hours, verifies the
+download the same way, runs the new version's `--self-check`, and only then flips `current` and restarts itself.
+If a new version fails to start twice before it has completed one cycle, the rollback check that runs before every
+start flips `current` back. Turn it off with `pixelswitch settings set updates.automatic false`.
+
+## Use
+
+`pixelswitch` is the same command line as the Mac's: `pixelswitch help` lists every command, and the output, `--json`
+shapes and exit codes (0 ok, 1 failed, 2 usage, 3 busy, 4 no such account, 5 unreachable) are the Mac's. Differences,
+all on purpose: there is no "This Mac today" cost line in `usage`, `status` prints the daemon's warnings (one line
+each) and `pixelswitch --version` prints the app version.
+
+```
+pixelswitch accounts                                   every account, in priority order
+pixelswitch switch 2                                   switch to account number 2 (an email, label or # works too)
+pixelswitch accounts priority ahamade@gmail.com 1      lower numbers are tried first
+pixelswitch accounts threshold 2 --session 90 --weekly 50
+pixelswitch settings set autoSwitch.strategy priority
+pixelswitch settings set autoSwitch.enabled true
+```
+
+**The tray** (`pixelswitch-tray`) is a StatusNotifierItem: the active account's session percentage beside the icon,
+and a menu with every account in priority order (`P1 address · S 42% · W 61%`, the active one checked, a short form
+of its message under it), click to switch, Auto-switch on or off, Refresh, Settings, Sign in another account and Quit
+tray. It registers itself with the desktop over D-Bus and exports its menu with Dbusmenu, so it needs no AppIndicator
+package (it uses AyatanaAppIndicator3 only when that is installed). It follows the daemon live and restarts itself when
+the daemon reports a new version.
+
+**The settings window** (`pixelswitch-settings`, GTK 4 and libadwaita) has Accounts (priority, Session and Weekly
+limits, label, both usage windows with their reset times, Fable, "Updated N ago", the account's message, Retry,
+Re-sign, Remove), General (auto-switch, the two defaults from 50 to 100, the strategy, Fable, early switching, the
+refresh interval), Sign in (Start, both links each with Open and Copy, the code box, status) and About (version,
+Update automatically, Check now, the log path). Nothing opens a browser unless you press Open.
+
+The tray and the settings window never send a usage refresh by themselves (only Refresh and Retry do) and never run
+the daemon: when it is not running they start it with `systemctl --user start pixelswitch.service` and nothing else.
+
+## MCP
+
+`pixelswitch mcp` is the Mac's MCP server (20 tools, both MCP protocol eras), speaking on standard input and output.
+From another machine:
+
+```
+{"mcpServers": {"pixelswitch": {"command": "ssh", "args": ["<host>", "/home/<user>/.local/bin/pixelswitch", "mcp"]}}}
+```
+
+Use the absolute path: a non-interactive ssh shell may not have `~/.local/bin` on its `PATH`. The tool descriptions are
+the Mac's word for word, so they say "Mac" where this machine is meant. `add_current_account` waits up to 120 seconds
+(the Mac server gives it 30).
+
+## Not in the Linux version
+
+The cost and activity dashboard (so no "This Mac today" line), the widget, menu-bar module customisation (the
+`menuBar.*` settings are stored and do nothing), languages other than English, and Gemini and Codex accounts.
+
+## For maintainers: the release files
+
+`linux/build-release.sh` builds `pixelswitch-linux-<version>.tar.gz` (deterministic: the same commit gives the same
+bytes; it needs GNU tar) and `install-linux.sh`, and prints the installer's SHA-256, which goes into the release notes.
+With `--signing-key` it also writes `latest-linux.json`. CI builds the package unsigned on every run; only the tag-only
+`linux-publish` job signs (the signing secret is the environment of that one step) and uploads the tarball and the
+installer first and the feed last. `scripts/verify-release.sh <tag> [--linux-only]` checks the Linux assets of a tag.
+Tests: `python3 -m unittest discover -s linux/tests -t linux`; the settings window renders come from
+`xvfb-run -a python3 linux/tests/render_settings.py --out DIR`.
 
 ## What is in `pixelswitch/` (lane LB modules)
 
@@ -27,6 +135,7 @@ face (CLI, MCP, tray, settings window) is a client of its socket. Standard libra
 | `claude_cli.py` | Finding and running `claude` | `ClaudeCli`, `process_environment`, `parse_auth_status` |
 | `signin.py`, `signin_parse.py`, `browsers.py` | `claude auth login` on pipes | `SignInSession`, `Purpose`, `LinkCapture` |
 | `updater.py`, `rollback.py` | Updater I/O, rollback script | `Updater`, `prune_old_versions`, `rollback.run / main` |
+| `cli.py`, `mcp.py`, `gui/` | The faces (lane LC): the CLI, the MCP server, the tray and the settings window | `cli.main`, `mcp.run_stdio`, `gui.tray.main`, `gui.settings.main` |
 | `logfile.py`, `paths.py`, `testmode.py`, `credtools.py`, `autostart.py` | Log, paths, test mode, credential gates, `launchAtLogin` | see the module docstrings |
 
 Every path comes from `HOME` alone (`XDG_RUNTIME_DIR` is used for the socket only). `CLAUDE_CONFIG_DIR` and

@@ -379,3 +379,126 @@ jobs:
             build/Release/appcast.xml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # PixelSwitch for Linux (spec 5.6). The three jobs below never touch the macOS
+  # job above, appcast.xml or latest.json, and never create or flag a release.
+  # ---------------------------------------------------------------------------
+
+  linux-test:
+    name: Linux tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+    # No secrets are used here.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install GTK, libadwaita, the tray menu library, D-Bus tools and a virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-gi gir1.2-gtk-3.0 gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-dbusmenu-glib-0.4 \
+            dbus xvfb xauth openssl
+
+      - name: Unit tests (the whole suite, on a virtual display and a private session bus)
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 dbus-run-session -- \
+            xvfb-run -a -s "-screen 0 1920x1080x24" \
+            python3 -m unittest discover -s linux/tests -t linux -v
+
+      - name: Check the systemd unit
+        run: |
+          if ! command -v systemd-analyze >/dev/null 2>&1; then
+            echo "systemd-analyze is not available on this runner; skipped"
+            exit 0
+          fi
+          bash linux/build-release.sh --out "$RUNNER_TEMP/dist"
+          bash linux/install.sh --from "$RUNNER_TEMP"/dist/pixelswitch-linux-*.tar.gz --no-systemd --no-autostart
+          mkdir -p "$HOME/.config/systemd/user"
+          cp linux/packaging/pixelswitch.service "$HOME/.config/systemd/user/pixelswitch.service"
+          systemd-analyze --user verify "$HOME/.config/systemd/user/pixelswitch.service"
+
+      - name: Render the settings window (every page, light and dark)
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 dbus-run-session -- \
+            xvfb-run -a -s "-screen 0 1920x2800x24" \
+            python3 linux/tests/render_settings.py --out renders
+
+      - name: Upload the settings renders (Ubuntu 24.04, libadwaita 1.5, the oldest supported)
+        if: ${{ always() && matrix.os == 'ubuntu-24.04' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-settings-renders
+          path: renders/*.png
+          if-no-files-found: warn
+
+      - name: Upload the settings renders (Ubuntu 26.04)
+        if: ${{ always() && matrix.os == 'ubuntu-26.04' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-settings-renders-ubuntu-26.04
+          path: renders/*.png
+          if-no-files-found: warn
+
+  linux-package:
+    name: Linux package (unsigned)
+    runs-on: ubuntu-24.04
+    # This job never receives the signing secret: the package is unsigned and the same bytes are signed later.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build the deterministic tarball and install-linux.sh
+        run: bash linux/build-release.sh --out dist-linux
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-package
+          path: |
+            dist-linux/pixelswitch-linux-*.tar.gz
+            dist-linux/install-linux.sh
+          if-no-files-found: error
+
+  linux-publish:
+    name: Linux publish (tags only)
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: [build, linux-package]
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: linux-assets-${{ github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download the unsigned package
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-package
+          path: dist-linux
+
+      - name: Sign the tarball and write latest-linux.json
+        # The signing secret is the environment of this one step and nothing else.
+        env:
+          SPARKLE_EDDSA_KEY: ${{ secrets.SPARKLE_EDDSA_KEY }}
+        run: bash linux/build-release.sh --sign-only --out dist-linux --signing-key env:SPARKLE_EDDSA_KEY
+
+      - name: Check the release notes carry the installer's SHA-256
+        run: |
+          SHA=$(sha256sum dist-linux/install-linux.sh | awk '{print $1}')
+          echo "install-linux.sh sha256 $SHA"
+          if ! grep -q "$SHA" RELEASE_NOTES.md; then
+            echo "::warning::RELEASE_NOTES.md does not carry the SHA-256 of install-linux.sh ($SHA); add it to the release notes by hand."
+          fi
+
+      - name: Upload the tarball and the installer first, the feed last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" dist-linux/pixelswitch-linux-*.tar.gz dist-linux/install-linux.sh --clobber
+          gh release upload "$GITHUB_REF_NAME" dist-linux/latest-linux.json --clobber
