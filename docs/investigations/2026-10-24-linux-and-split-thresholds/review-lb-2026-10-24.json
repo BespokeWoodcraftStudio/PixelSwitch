@@ -1,0 +1,353 @@
+[
+ {
+  "lens": "login-safety",
+  "severity": "P0",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1273,
+  "problem": "On the first pass the switch writes even when the proven owner's current login could not be saved. When the owner is proven and the in-lock read is the same grant, but _save_leaving_login returns False because the store refused the write, step_ok is False. The abort condition only applies when attempt > 1, so attempt 1 goes on to _write_target. The Mac (LiveLoginBackup.afterFirstPass) aborts here with .notSaved(.storeRefused). It also aborts with .unreadable when an owner is proven and the in-lock read returns nothing, and afterRetry aborts when liveNow is nil but the first pass saw a login. Linux has none of these aborts: live_login_changed(None, None) is 'no change', so it writes.",
+  "failure_scenario": "Reproduced in a scratch HOME. A is active and Claude Code has renewed A's login (new access token AT2 and refresh token RT2, not yet captured by reconcile). backups.json cannot be written: hard-linked by a backup tool, disk full, or owned by root after a sudo run. Reads still work. A switch to B reports success. The live file now holds B, RT2 is kept nowhere, and A's backup holds RT1, which the server has rotated away. A's next use fails with invalid_grant, A must sign in again, and nothing told the user. With a store that keeps failing, every switch away from a renewed account loses it this way.",
+  "fix": "Port LiveLoginBackup exactly. Make _save_leaving_login return a result: saved, nothingWorthSaving, or notSaved with a reason (unreadable, noOwner, unproven, identityMismatch, storeRefused). On the first pass, with live_owner known: if seen is None, abort with nothing written and 'PixelSwitch could not read Claude Code's login just before switching. Nothing was changed. Try again in a moment.'. If the login is unchanged and the result is notSaved(unproven or storeRefused), abort with 'Claude Code renewed its login and PixelSwitch could not save the new one. Nothing was changed. Try again in a moment.'. After the retry, also abort as unreadable when live_now is None but the first pass saw a login. Add tests for: the store refusing the step-4 save with a proven owner (nothing written); the in-lock reads returning None with a proven owner (nothing written)."
+ },
+ {
+  "lens": "login-safety",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1036,
+  "problem": "D20 revision 4 is not implemented. perform_switch refuses whenever no account is active ('No account is active yet, so there is nothing to switch from. Add the current account first.'), which is the old step-0 rule. Revision 4 allows the switch and refuses only when the account list is empty. It may overwrite the unproven live login only when that login is provably disposable: the API names no remaining account, or it is the same grant as a removed account's login and as no remaining account's. If it is the same grant as exactly one remaining account's saved login, that account is treated as the active one. Otherwise the switch is refused with 'PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again.'. Linux also does not record removed-login fingerprints, and proven_owner throws away the API identity when it names no account. test_switch.py:102 pins the old rule, and none of the spec's disposal cases has a test.",
+  "failure_scenario": "Reproduced. The user removes the active account X, and the only other account F has no usable saved login, so the fallback fails and no account is active (this also persists across a restart). The user re-authenticates F, or F's saved login comes back. Every switch from the CLI, tray or MCP now answers 'No account is active yet...'. Auto-switch never runs (active is None), and add-current says 'Account already exists' for any listed account. The app stays stuck until a sign-in happens to mark an account active.",
+  "fix": "Port the revision-4 block of the Mac's AppState.performSwitch, and LiveLoginDisposal plus RemovedLogins from AccountRemoval.swift. Refuse only when self.accounts is empty. Replace proven_owner here with a lookup that returns (identity, owner), so 'API names no remaining account' is known. In remove_account, record fingerprints (never tokens) of the refresh tokens of the removed account's saved login and, when it was active, of the live login, in a 0600 state file (at most 16), and clear it on the next successful switch or add. Decide with LiveLoginDisposal.decide (the same order as the Mac), adopt the treatAsActive account through the 'already live' shortcut, and refuse with the Mac's sentence. Replace test_no_active_account_is_a_quiet_failure with the Mac's disposal cases."
+ },
+ {
+  "lens": "login-safety",
+  "severity": "P1",
+  "file": "linux/pixelswitch/claude_service.py",
+  "line": 113,
+  "problem": "A 429 from /api/oauth/profile is recorded only when account is not None, and UsageRequestGuard (usage_guard.py:221) has no park for a token with no account. Revision 4 of D20 records every 429 against the token whether or not an account is known: the Mac's UsageRequestGuard.recordRateLimited(account: UUID?) keeps rateLimitedWithoutAccount, which mayUse and decision consult. test_claude_service.py:204 ('a 429 without an account is not recorded') pins the old rule.",
+  "failure_scenario": "There is no active account: after the last account is removed, after a failed removal fallback, or on a fresh install before add-current. Every cycle, reconcile_live_login calls proven_owner(credential, None), which sends the live token to /api/oauth/profile. Anthropic answers 429 with Retry-After 3600. Nothing is recorded, so may_use stays True and the same token is sent again every 300 s cycle, the 429 loop that Mac lane FC closed.",
+  "fix": "Remove 'and account is not None'. Let record_rate_limited take account None. Keep _rate_limited_without_account: {fingerprint: (park_until, cooldown_until)}, at most 64 entries, expired ones pruned, the oldest dropped, as in UsageRequestGuard.swift:102-103 and 203-216. Check it in may_use and in decision (after the account's own park and cool-down, before refreshFirst), as in :135-138 and :153. Change the test to assert the token is parked for every caller after a 429 with no account."
+ },
+ {
+  "lens": "login-safety",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 950,
+  "problem": "_switch_after_removal never checks again that the removed account is still the active one. D20 says 'the next candidate is tried (re-checking before each that the removed account is still the active one)', and the Mac's RemovalFallback.run checks stillNeeded before every candidate and after every wait. Linux also gives a busy gate only 5 one-second waits per candidate (the Mac allows 150 in all, because a sign-in can take minutes). When no candidate works it does not show the last failure (the Mac sets errorMessage = lastFailure; D20 says 'the last failure is shown').",
+  "failure_scenario": "Reproduced. The user removes the active account X and at once clicks Switch to G. G's switch holds the gate when the fallback first tries F, so the fallback sleeps. G's switch finishes (active is G, Claude Code is on G). The fallback's retry then runs perform_switch(F), which proves G as the live owner and switches Claude Code from G to F, undoing what the user chose. The same happens when a sign-in finishes during the waits: the newly signed-in account is switched away.",
+  "fix": "Before every perform_switch attempt and after every wait: cur = self.active_account(); if cur is None or cur.id != removed_id: log that it is standing down and return. Count busy waits across the whole loop, up to 150. When they run out, clear the active account only if it is still the removed one, and call set_error with the busy message. When no candidate worked, call set_error with the last failure's message. Add the Mac's RemovalFallback cases as tests (stand down after another switch, stand down after a sign-in, give up when busy, none worked shows the reason)."
+ },
+ {
+  "lens": "login-safety",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1267,
+  "problem": "The re-read before the write (live_now) and the merge (credential_for_switch) happen BEFORE Claude Code's .storage-write lock is taken. write_credential then waits up to 10 s for that lock and writes the merge built from the copy read before the wait. Claude Code saves .credentials.json as a read-modify-write under .storage-write (linux/README.md), so a save Claude Code finishes during that wait is overwritten. Spec 5.3 says to re-read immediately before writing S1, and the README's claim that Claude Code's save cannot overwrite a switch does not cover the reverse direction.",
+  "failure_scenario": "Reproduced. Claude Code holds ~/.claude/.storage-write while it saves a renewed MCP server login (the mcpOAuth refresh token rotated). The switch's write waits for the lock, Claude Code finishes and lets go, and the switch writes mcpOAuth from its earlier read. The rotated MCP refresh token is gone, and that MCP server must sign in again on the whole machine (the CabDesign farm included). A claudeAiOauth that Claude Code writes under .storage-write alone, such as 'claude auth login' in another terminal, is lost the same way.",
+  "fix": "In _switch_account, take .storage-write (a new ClaudeLogin.storage_write_lock() context manager, 10 s wait, never broken) before the step-5 re-read. Hold it through live_login_changed, credential_for_switch, the atomic write, _make_mtime_differ and the read-back (split write_credential into a part that assumes the lock is held). Release it before taking ~/.claude.json.lock, so the order stays: refresh lock, .storage-write, release, config lock. Do the same compare-and-write under the lock in _roll_back_credential. Test: a .storage-write held by 'Claude Code' that rewrites mcpOAuth before letting go leaves the newer mcpOAuth in the switched file."
+ },
+ {
+  "lens": "login-safety",
+  "severity": "P2",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1305,
+  "problem": "The 10 s hold limit on the refresh lock (spec 5.3: 'Hold it at most 10 s') is checked only before the credential write. Three waits then run while the refresh lock is still held: the .storage-write wait (up to 10 s), the ~/.claude.json.lock wait in write_oauth_account (up to 10 s), and the rollback's .storage-write wait (up to 10 s). The hold can reach about 40 s, while Claude Code waits only about 5 attempts 1-2 s apart before OAuthRefreshLockContendedError.",
+  "failure_scenario": "During a switch, a CabDesign farm worker is saving ~/.claude.json, which Claude Code does often, so it holds ~/.claude.json.lock. PixelSwitch keeps the refresh lock 10 to 20 s past its limit. Any worker whose access token needs renewing in that time gets a contended-lock error and its request fails.",
+  "fix": "Add HeldRefresh.remaining() (max_hold minus the time held so far) and pass min(WRITE_LOCK_WAIT_SECONDS, remaining) as the wait for the .storage-write, config-lock and rollback acquisitions. When the budget is spent, fail through the existing rollback path with nothing further written."
+ },
+ {
+  "lens": "login-safety",
+  "severity": "P2",
+  "file": "linux/pixelswitch/claude_login.py",
+  "line": 195,
+  "problem": "When the legacy lock ~/.claude.lock is the one that stays busy and is older than 60 s, _busy_message returns LEFTOVER_MESSAGE. That message tells the user to remove ~/.claude/.oauth_refresh.lock: the lock PixelSwitch has just released, which does not exist. The stuck lock is ~/.claude.lock.",
+  "failure_scenario": "An older Claude Code crashed while holding ~/.claude.lock. Every switch waits 35 s and then gives advice that changes nothing.",
+  "fix": "Pass the stale lock's path to _busy_message (candidate.path here, busy.path at line 177). Name the file that is actually stuck: '~/.claude.lock' for the legacy lock, '~/.claude/.oauth_refresh.lock' for the new one."
+ },
+ {
+  "lens": "login-safety",
+  "severity": "P2",
+  "file": "linux/pixelswitch/dirlock.py",
+  "line": 314,
+  "problem": "DirLock.release(), check() and the touch loop treat a lock as ours by inode number alone. ext4 reuses a freed inode at once, so a lock directory Claude Code recreated after taking over a stale one can carry the same inode and be removed by PixelSwitch's finally, which breaks a lock it did not create. LockLedger.reap (line 160) likewise counts an unknown birth time as a match.",
+  "failure_scenario": "The laptop suspends in the middle of a switch for more than 60 s. On resume, a Claude Code process finds the refresh lock stale, removes it and makes it again, possibly on the same inode, and starts renewing. PixelSwitch's check() raises LockLost on its 10 s limit, and release() removes Claude Code's live lock. A second Claude Code can then renew the same refresh token at the same time.",
+  "fix": "Record the birth time (statx btime) with the inode, and require both to match in check(), _touch_loop and release(). Where no birth time is available, remove the directory only if its st_mtime equals the last time this object set with utime. In reap(), remove a ledger entry's lock only when both the recorded and the current birth times are known and equal; otherwise leave it to Claude Code's 60 s staleness rule."
+ },
+ {
+  "lens": "login-safety",
+  "severity": "P2",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1035,
+  "problem": "perform_switch reads current_active before it takes the gate. Another thread's switch can finish in between (the Mac reads it on the main actor, where nothing can run between the two lines), so _perform_switch_locked runs with a stale current_active, and the 'already live' shortcut compares that stale account with the target.",
+  "failure_scenario": "A is active. A CLI 'switch B' and a tray 'switch A' arrive together. B's switch wins and completes. A's request then cannot prove the live owner (offline, or B's token cooling down), finds the stale current_active A equal to the target A, and returns 'No switch needed' as a success while Claude Code is on B.",
+  "fix": "Move 'current_active = self.active_account()' and its None check to just after self.gate.try_begin('switch'), inside the try/finally."
+ },
+ {
+  "lens": "login-safety",
+  "severity": "P2",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1076,
+  "problem": "Spec 5.2 says the log has no emails, but this line logs SwitchFailure.message, which carries target.email (line 1231) and the CLI's status.email (line 1344).",
+  "failure_scenario": "A switch fails because the CLI names another account or the target's saved login is unusable. Both email addresses are written to ~/.local/state/pixelswitch/pixelswitch.log.",
+  "fix": "Log a fixed phrase with ids only, for example f\"[switchTo] Switch to {account.id} failed\" (the step already logged the reason by id). Keep the sentence with emails only in the ActionError returned to the user."
+ },
+ {
+  "lens": "login-safety",
+  "severity": "P2",
+  "file": "linux/pixelswitch/usagecycle.py",
+  "line": 259,
+  "problem": "A saved-login renewal can run on the target account while a manual switch to it sits between validation and the write. _refresh_data stands down only for a sign-in, retry_usage calls read_usage directly, and _renew_backup_in_place's same-grant check still sees the old live login. The switch then writes target_backup, captured before the renewal, with the refresh token the renewal has just spent. The Mac has the same gap (refreshData guards only isLoggingIn). It is unlikely, but it hands Claude Code a refresh token that is already spent.",
+  "failure_scenario": "The switch to B validates B's access token when it is 61 s from expiry (decision: request), then waits for Claude Code's refresh lock. Meanwhile the cycle finds B within 60 s of expiry and renews it (RT1 to RT2), saving RT2. The switch then writes RT1 as the live login. Claude Code's first renewal of it fails with invalid_grant, Claude Code blanks the login, and B is signed out on the machine. If the server treats the reuse as a stolen token, it may also revoke RT2.",
+  "fix": "In _write_target, under the refresh lock and before the write, look up the target's backup again. If its claudeAiOauth accessToken or refreshToken differs from target_backup's, use the stored backup after the same D12 gate (a renewal saves only after its ownership check), or abort with nothing written. Also record switching_to under the gate and have refresh_backup_in_place refuse to start for that account unless the switch itself called it."
+ },
+ {
+  "lens": "parity",
+  "severity": "P1",
+  "file": "linux/pixelswitch/usagecycle.py",
+  "line": 616,
+  "problem": "The staying-put log follows the older rule 10. `_note_staying_put` picks the overflow sentence whenever `engine.overflow_holds(...)` is true, meaning any time the active account has reached a strict window limit. Revision 4 rule 10 adds a second condition: the active account must also still be under its RELAXED limits. Otherwise the 1.9 sentence is used, which is always the case when the windows are equal. The Mac does this with `AutoSwitchEngine.stayingPutKind` (AutoSwitchEngine.swift:396-409, used at AppState.swift:1667-1674). linux/pixelswitch/engine.py has no equivalent, and linux/tests/test_cycle.py:577-585 pins the old wording with equal 90/90 defaults.",
+  "failure_scenario": "Both defaults are 98, as on the Beeco Mac. The active account is at 98% of its session and every other account is at 98% or more. The Mac logs \"...but no other account has room under its own limits; staying put\". Linux logs \"...but no account under its weekly limit can take you; staying until the session limit (98%)\", which is false because the account is already at 98%. The same happens with split limits of 90 / 50 and the active account at 95% session and 60% week: Linux says it stays until 90% when it is already past it.",
+  "fix": "Port stayingPutKind into engine.py as `staying_put_kind(active_usage, active_rule, defaults, active_sampled_this_cycle, watch_fable, now)`. Return `notAtLimit` when neither `fired_window(leave_at(rule, defaults))` nor a Fable reading at or above the strict weekly limit holds. Return `noRoom` when only Fable fired. Otherwise return `noRoom` if the relaxed pair (`leave_at(relaxed_rule(rule), relaxed_defaults(defaults))`) fires on a window or on Fable, else `waitingForSessionLimit`. In `_note_staying_put`, replace the `overflow_holds` call with `kind == 'waitingForSessionLimit'`. Change test_cycle.py:577-585 to expect the 1.9 sentence for equal windows, and port the cases in Tests/UnitTests/RemovalAndBackupTests.swift:381-404."
+ },
+ {
+  "lens": "parity",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1036,
+  "problem": "`perform_switch` refuses every switch when no account is active (\"No account is active yet, so there is nothing to switch from...\"). That is the rule from before revision 4. Under D20 revision 4, as the Mac does it (AppState.performSwitch :1039-1101, unownedLiveLoginDecision :1235-1253, LiveLoginDisposal in AccountRemoval.swift:146), only an empty account list refuses. With accounts but none active, the switch goes ahead when the live login is provably disposable: it is absent or blank, the API names no remaining account, or it is the same grant as a removed account's login. If it is the same grant as exactly one remaining account's saved login, that account is treated as the active one. Otherwise the switch is refused with \"PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again.\" Linux also never records the removed accounts' login fingerprints, and linux/tests/test_switch.py:102-109 pins the old refusal.",
+  "failure_scenario": "The user removes the active account A, and every fallback fails because B and C need signing in again, so `_mark_active(None)` runs. From then on every `accounts.switch` from the CLI, tray or settings window fails with \"No account is active yet...\", even after the user re-signs B. Reconcile cannot adopt anyone because the live login belongs to the removed account A. The only way out is `accounts add-current`, which re-adds the account the user just removed. The Mac switches.",
+  "fix": "Port LiveLoginDisposal and RemovedLogins. In `remove_account`, record the fingerprints of the removed account's saved login and, if it was active, of the live login, persisted in the state folder the way needs-reauth is. Raise the 'nothing to switch from' error only when `not self.accounts`. When `current_active is None` and the live owner is not proven, decide as unownedLiveLoginDecision does: proceed and save nothing for the replaced login, adopt the single same-grant account as `current_active`, or raise ActionError('failed', 'PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again.'). Let `_perform_switch_locked` accept a `current_active` of None. Clear the fingerprints after a successful switch or add-current, as forgetRemovedLogins does. Replace test_switch.py:102-109 with the Mac's disposal cases."
+ },
+ {
+  "lens": "parity",
+  "severity": "P1",
+  "file": "linux/pixelswitch/claude_service.py",
+  "line": 113,
+  "problem": "`elif status == 429 and account is not None:` drops a 429 from /api/oauth/profile when no account is known. The Linux guard has nowhere to keep such a park: usage_guard.py:221-233 `record_rate_limited` needs an account, and neither `may_use` (:167-185) nor `decision` (:131-165) looks for a token-only park. D20 revision 4 says every 429 is recorded. The Mac keeps it against the token's fingerprint (ClaudeService.swift:313-318; UsageRequestGuard.swift:203-216, and checks it in decision :135-138 and mayUse :153).",
+  "failure_scenario": "This happens with zero accounts after an install (the laptop before `pixelswitch accounts add-current`), or with no active account after a failed removal fallback. Each cycle, `reconcile_live_login` calls `proven_owner(credential, None)` (coordinator.py:1388), which sends the live token to /api/oauth/profile. If that answers 429, nothing is recorded, and the same token is sent again next cycle: every 15 s at the shortest refreshInterval, every 300 s by default, with no park and no 20-minute cool-down. That is the 1.9 429 loop the Mac's fix lane closed, on the same token the CabDesign farm uses.",
+  "fix": "Add `_rate_limited_without_account: dict[fingerprint, (park_until, cooldown_until)]` to UsageRequestGuard (cap 64, prune entries that have ended, evict the earliest cool-down when full). Let `record_rate_limited(None, ...)` store park = min(max(retry_after or DEFAULT_PARK, SHORTEST_PARK), LONGEST_PARK) and cooldown = now + COOLDOWN, and return the park's end. Make `may_use` return False while either holds. In `decision`, after the account's own park and cool-down checks and before REFRESH_FIRST, return `parked(...)` or `cooling_down(...)` for it. Remove `and account is not None` at claude_service.py:113. Port the Mac guard's tests for a 429 with no account, and add a test that a reconcile with no active account sends one profile request, not two, across two cycles after a 429."
+ },
+ {
+  "lens": "parity",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 941,
+  "problem": "`_switch_after_removal` does not follow D20 revision 4 or the Mac's switchAfterRemoval / RemovalFallback.run (AppState.swift:961-1009) in three ways. (a) It never checks, before each candidate and after each wait, that the removed account is still the active one. (b) After 5 busy retries it moves on to the next candidate; the Mac gives up instead (busyGaveUp), clears the removed account if it is still current, and shows the message. (c) When no candidate works, the last failure is never shown: there is no `set_error`, so no `error` event is sent. The Mac sets errorMessage = lastFailure.",
+  "failure_scenario": "The user removes the active account A. The fallback's first try at B gets busy because the cycle's reconcile or something else holds the gate, so it sleeps 1 s. Meanwhile the user switches to C from another connection. If C's switch finishes within the 5 retries, the fallback's next `perform_switch(B)` starts from C and moves Claude Code to B, undoing the user's own choice; the Mac stands down. Separately, when B and C both need signing in again, the user ends up with no active account and the CLI and tray get no `error` event explaining why. The Mac shows, for example, \"The saved login for b@... has expired and could not be renewed. Re-authenticate b@... to fix it.\"",
+  "fix": "Port RemovalFallback.run. Before every candidate and after every 1 s wait, run `cur = self.active_account(); if cur is None or cur.id != removed_id: return` (stood down). When the busy retry limit is reached, stop the whole loop; if the removed account is still current, call `_mark_active(None)` and `set_error(<the busy message>)`. Keep the message of each failed ActionError, and when none worked call `_mark_active(None)` then `self.set_error(last_failure)`. Add tests that a switch the user finished during the wait is not undone, and that when none works the `error` event carries the last failure."
+ },
+ {
+  "lens": "parity",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 205,
+  "problem": "`emit_auto_switched` adds `relaxed` only when it is True. The merged Mac always sends it: ControlSnapshots.autoSwitchedData (ControlAPI.swift:392-401, \"relaxed is always sent\"), pinned by Tests/UnitTests/ControlSplitTests.swift:298-303. linux/tests/test_cycle.py:469 pins the key's absence, and linux/README.md:140-142 lists this as an intended difference, but the merged Mac sends `relaxed: false`. Spec section 4 says the remote control is identical on Mac and Linux.",
+  "failure_scenario": "After an ordinary switch at the session limit, the Mac's autoSwitched event is {from, to, limit:\"windows\", trigger:\"threshold\", window:\"session\", relaxed:false}. Linux sends no `relaxed` key. A script or MCP consumer written against the Mac shape that reads data[\"relaxed\"] fails or misreports on Linux.",
+  "fix": "Always set `data[\"relaxed\"] = bool(record.relaxed)`, or give protocol.auto_switched_data a `relaxed` parameter that mirrors autoSwitchedData. Change test_cycle.py:469 to `self.assertIs(event[\"relaxed\"], False)` and remove the README bullet."
+ },
+ {
+  "lens": "parity",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 978,
+  "problem": "Every change to the accounts list builds the new list under `_state_lock`, releases the lock, and only then calls `_install_accounts`. This covers `_replace_account` (:979-987), `_mark_active` (:287-292), `set_priority` (:1004-1010), `set_account_order` (:1017-1024), `add_current_account` (:614-615) and the sign-in finishes (:804-805, :847-850). Each control connection has its own thread, and label, threshold, priority and order changes take no gate. So two writers can interleave, and the second install overwrites the first with a stale list. The Mac does all of these on the main actor, where they cannot interleave.",
+  "failure_scenario": "A sign-in of a new account D completes on the sign-in thread while the settings window sends accounts.setLabel for B. The label thread builds its list before D exists, the sign-in installs [A,B,C,D] with D active, and the label thread then installs [A,B',C]. D disappears from accounts.json while its saved login stays in backups.json, `_active` still points at D, and status.get reports the old account as active. I reproduced the switch-and-label variant in-process by running `_mark_active(b)` inside `set_label`: afterwards `_active` is b, but the list flags and status.get activeAccountEmail both say a.",
+  "fix": "Make each change one critical section: hold `self._state_lock` (an RLock) from the read of `self._accounts` through `_install_accounts(...)`. One way is `_install_accounts(change=lambda current: ...)`, applying the change to `self._accounts` inside its own lock. Send events after the lock is released. Add a threaded test that runs set_label and _mark_active against each other 1000 times and checks that no update is lost and that the list's active flag always matches `_active`."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 341,
+  "problem": "`set_setting` is a read-modify-write that is not atomic: `catalog.write_setting(self.settings.snapshot(), key, value)` and then `self.settings.replace(stored)`. snapshot and replace each take SettingsFile's lock, but not together, and connections run on separate threads.",
+  "failure_scenario": "The tray turns autoSwitch.enabled on while the settings window sets autoSwitch.weeklyThreshold to 50. Both read the same snapshot, the second replace overwrites the first, and one of the two changes is silently lost from settings.json even though both requests answered ok.",
+  "fix": "Add `SettingsFile.update(fn)`, which takes `self._lock`, copies `_data`, applies `fn`, does the atomic write and stores the result. Call `self.settings.update(lambda s: catalog.write_setting(s, key, value))`, and apply the side effects after it returns."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1394,
+  "problem": "Reconcile (:1394) and the launch audit (:1454) take the MutationGate for their synchronous part. A sign-in start (:637), switch (:1044), add-current (:586) or removal (:905) that arrives in that window answers `busy` \"A switch or sign-in is in progress. Try again in a moment.\" even though neither is running. On the Mac, reconcile never sets isSwitching or isLoggingIn.",
+  "failure_scenario": "Evidence from this review: in the full unit run on this Mac, tests.test_daemon.ShutdownWorkTests.test_sigterm_cancels_a_running_sign_in_and_stops_the_cli failed because `accounts.signIn.start` got exactly that busy error while the first cycle was reconciling. The test passed when run alone and with its class. A user who presses Sign in or Switch at that moment is told something false, and CI's linux-test job (spec 7) will flake.",
+  "fix": "Do not let background holders refuse user actions. Give MutationGate a Condition, and have user actions wait for the 'reconcile' and 'audit' kinds (for example `gate.begin(kind, wait_for=('reconcile','audit'), timeout=2.0)`), returning busy only for switch, signin, capture or remove. Keep `try_begin` (no waiting) for reconcile and audit."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "linux/pixelswitch/control_api.py",
+  "line": 152,
+  "problem": "`events.subscribe` marks the connection as subscribed inside the handler, before the reply is written (server.py:298-304 writes the reply afterwards). The event dispatcher thread can therefore write an event line before `{\"subscribed\":true}`. The Linux client's `call()` throws away every line that is not its reply (client.py:291-293), so that event is lost. On the Mac the reply always comes first, because the handler and every emit run on the main actor.",
+  "failure_scenario": "The tray reconnects and subscribes at the moment a cycle ends. A usageUpdated or accountsChanged event goes out before the subscribe reply, `call()` drops it, and the tray shows stale data until the next event.",
+  "fix": "Hold the connection's `_write_lock` across both steps: set `subscribed = True` and write the subscribe reply under the lock, then release it. A concurrent `send_line` from the dispatcher then waits until the reply is on the wire. For example, `on_subscribe` sets a pending flag, and `_process` calls a new `Connection.send_reply_and_subscribe(line)`."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "linux/pixelswitch/usagecycle.py",
+  "line": 419,
+  "problem": "`retry_usage`, the card's Retry that sends one request for that one account, is never reached: no control method calls it. Spec 5.1 puts a Retry on every account card in the Linux settings window, but the only thing a face can send is `usage.refresh`, which reads the active account plus whichever account is next in the round-robin. Unlike the Mac's retryUsage, the dead method also has no guard against running twice at once (the Mac's `retryingUsage`).",
+  "failure_scenario": "Account C's card says \"Can't reach Anthropic right now; PixelSwitch keeps trying.\" The user presses Retry, the daemon reads the active account and B, and C's card keeps its error for up to N-1 more cycles, so Retry appears to do nothing.",
+  "fix": "Report it to the orchestrator and pick one: (a) an additive method `usage.retry {account}` behind a new `status.features` entry that calls `retry_usage`, with a per-account guard against running twice like the Mac's `retryingUsage`; or (b) delete `retry_usage` and record in linux/README.md that Retry on Linux means usage.refresh."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "linux/pixelswitch/control_api.py",
+  "line": 119,
+  "problem": "When the account disappears between being resolved and being written, `accounts.setThresholds` ignores `_replace_account`'s False and answers success with `{\"account\": null}`. `accounts.setPriority` maps the same case to invalidValue with the priority-range sentence. The Mac answers notFound \"That account no longer exists.\" for both (ControlAPI.swift:183-185, 207-209).",
+  "failure_scenario": "One client removes an account while another sets its thresholds or priority. On Linux the first call reports success with a null account, and the second reports \"A priority must be a whole number from 1 to 99, or null for none.\" for a valid number.",
+  "fix": "Have `Coordinator.set_thresholds` return the bool from `_replace_account`, and have `set_priority` tell an unknown id apart from an out-of-range value (the range is already checked by normalize_priority). In control_api, raise ControlError('notFound', 'That account no longer exists.') when either returns False for a missing account."
+ },
+ {
+  "lens": "process-updater",
+  "severity": "P1",
+  "file": "linux/pixelswitch/api.py",
+  "line": 82,
+  "problem": "The updater shares the token transport, and that transport never follows a redirect (`_NoRedirect` returns None, so urllib raises HTTPError 302 and `request`/`download` hand back status 302). The feed URL `https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/latest/download/latest-linux.json` always answers 302 to `/releases/download/vX.Y/...`, which answers 302 again to `release-assets.githubusercontent.com` (checked read-only with curl -I just now). So `Updater._check` (updater.py:251-260) logs 'The update feed answered HTTP 302' and returns `none`. The tarball download (updater.py:282) would fail the same way. daemon.py:218/265-268 passes this same Transport to the Updater.",
+  "failure_scenario": "Any installed 2.0 daemon on Linux. Every scheduled check (2 min, then every 6 h) and every 'Check now' ends with outcome none / 'HTTP 302', so no Linux user ever receives an update, including security fixes. Reproduced: a local feed behind one 302 gives `none HTTP 302`. Every updater test serves the feed and tarball directly with 200, so the suite passes.",
+  "fix": "Keep `_NoRedirect` for the three token-carrying requests and give the updater its own transport. Add `Transport(..., follow_redirects=False)`. When True, install a redirect handler that allows at most 5 hops. Outside test mode it refuses any hop that is not https; in test mode it runs `testmode.check_url` on every hop. It sends no Authorization header (none is set for update requests). Use it for `request` and `download`. In daemon.build, construct `update_transport = Transport(user_agent=..., test_mode=test_mode, follow_redirects=True)` and pass it to `Updater`. Integrity still rests on the Ed25519 signature. Add a test where ReleaseServer answers `/releases/latest/download/latest-linux.json` and the tarball path with a two-hop 302 chain, and the update installs."
+ },
+ {
+  "lens": "process-updater",
+  "severity": "P1",
+  "file": "linux/pixelswitch/updater.py",
+  "line": 270,
+  "problem": "After `rollback.py` flips `current` back, nothing remembers that the new build failed. The rolled-back daemon's updater checks about 120 s after start. The feed build is still greater than the running build, and `app/<version>-<build>` still exists (prune keeps anything newer than previous). So `_check` skips the download and goes straight to `_finish`: the self-check passes (the failure was at run time), it flips `current` back to the bad build and restarts. rollback.py:107-111 records only `{build, attempts: 0}` for the old build.",
+  "failure_scenario": "A release whose daemon crashes before its first complete cycle. The sequence is: boot start (1), update restart (2), attempt 2 (3), rollback to the old build (4). Two minutes later the old build reinstalls the bad one and restarts it: that is the 5th start within StartLimitIntervalSec=3600, so systemd refuses it (start-limit-hit). The service is left stopped, with `current` pointing at the bad build, and no switching or auto-switch happens. Every later start (a reboot, or a face's `systemctl --user start` after the hour) repeats the four-start cycle forever, losing the unpersisted guard state each time and re-sending the first cycle's usage requests with 429 parks forgotten. This is exactly the restart loop spec 5.1 forbids. Reproduced: install, three ExecStartPre runs that roll back, then `check_and_install()` on the rolled-back build returns `installed` with current -> 2.1-32 and a second restart.",
+  "fix": "In rollback.py, when it rolls back, also write `~/.local/state/pixelswitch/bad-<build>` (atomic, 0600). In `Updater._check`, right after `validate_feed`: if `bad-<feed.build>` exists and `good-<feed.build>` does not, log once '[update] Build N was rolled back; waiting for a newer build' and return `UpdateOutcome('none', 'rolled back')`. Do the same in `_finish` for an existing target. Optionally also remove that version folder. Add a unit test: install, three `rollback.run`, then `check_and_install()`; `current` must stay 2.0-31 and only one restart may be recorded."
+ },
+ {
+  "lens": "process-updater",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1036,
+  "problem": "This is the pre-revision-4 D20 rule. `perform_switch` refuses every switch when there is no active account ('No account is active yet, so there is nothing to switch from.'). Revision 4 says only an empty account list refuses. With accounts but none active, the switch goes ahead when the live login is provably disposable: the API names no remaining account, or it is the same grant as the removed account's logins. If it is the same grant as exactly one remaining account's saved login, that account is treated as the active one; otherwise the switch is refused with 'PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again.' The Mac does this (AppState.swift:1030-1095 with `LiveLoginDisposal`, AccountRemoval.swift:146, and removed-login fingerprints at AppState.swift:884-903). Linux keeps no removed-login fingerprints at all.",
+  "failure_scenario": "Remove the active account when no fallback works (or SIGTERM arrives mid-chain, coordinator.py:950/970), leaving accounts but none active and persisted that way in accounts.json. From then on every `pixelswitch switch`, tray click and MCP switch is refused. The user is stuck until a full sign-in, and if the profile lookup is failing or rate-limited, reconcile never adopts an owner either. Reproduced: two saved accounts, none active, live login = A's saved grant; `perform_switch(B)` gives REFUSED with the old sentence.",
+  "fix": "Port the FC logic. Refuse only `if not self.accounts`. In `remove_account`, record refresh-token fingerprints (never tokens) of the removed account's saved login and, if it was active, of the live login, in a state file such as `~/.local/state/pixelswitch/removed-logins.json` (0600). Clear it on a successful switch or add. In `_perform_switch_locked`, when there is no active account and no proven owner, compute the disposal decision with the Mac's inputs (API names a remaining account or not, remaining same-grant ids, same grant as a removed login). Proceed without backing up the live login, treat the single same-grant account as `current_active`, or refuse with the Mac sentence above. Port the `LiveLoginDisposal` and removal unit tests."
+ },
+ {
+  "lens": "process-updater",
+  "severity": "P1",
+  "file": "linux/pixelswitch/claude_service.py",
+  "line": 113,
+  "problem": "This is the pre-revision-4 D20 rule. A 429 from `/api/oauth/profile` is recorded only `if account is not None`. Revision 4: 'A 429 on any profile or usage request is recorded against the token whether or not an account is known.' The guard (usage_guard.py:221 `record_rate_limited(account, ...)`, and `may_use` at :167-185) has no account-less park list. The Mac has `rateLimitedWithoutAccount` (UsageRequestGuard.swift:203-216), and ClaudeService.swift:313-317 records it unconditionally.",
+  "failure_scenario": "There are no accounts (before add-current, or after removing the last one) or no active account, and the live login exists. Every cycle, `reconcile_live_login` calls `proven_owner(credential, None)`, so a profile request goes out with the live token. The server answers 429 with Retry-After 3600, nothing is recorded, `may_use` stays True, and the same token is sent again every refresh interval: a 429 loop against the account Claude Code and the CabDesign farm are using. Reproduced: 3 cycles 300 s apart sent 3 profile requests for the same 429'd token (the Mac sends 1).",
+  "fix": "In usage_guard.py, accept `account: Hashable | None` in `record_rate_limited`. For None, keep a bounded dict `fingerprint -> (park_until, cooldown_until)` with the Mac's limit and eviction, clamped like the account path, and have `may_use` return False while either stamp is in the future. In claude_service.py:113 drop `and account is not None`. Port the Mac guard tests for the account-less 429."
+ },
+ {
+  "lens": "process-updater",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 946,
+  "problem": "`_switch_after_removal` never re-checks, before each candidate or after a busy wait, that the removed account is still the active one. It checks only once, at the end (:969-970). Spec D20 says '(re-checking before each that the removed account is still the active one)', and the Mac's `RemovalFallback.run` calls `stillNeeded` before every candidate and after every wait (AppState.swift:965-980). Because `_active` stays the removed account only until something else changes it, a later attempt switches away from whatever the person chose meanwhile.",
+  "failure_scenario": "The person removes the active account A while the cycle's reconcile or audit holds the gate, so the chain's first `perform_switch(B)` gets busy and sleeps 1 s. In that second the person picks C in the tray and that switch completes. The chain retries `perform_switch(B)` with `current_active` = C and moves Claude Code from C to B: a wrong switch, which also changes the farm's account. Reproduced with a forced busy on the first attempt: 'user switched to C' followed by 'after the fallback chain, active: b@example.invalid | live login is B's: True'.",
+  "fix": "Inside the loop, before each `perform_switch(target)` and after each `self.sleep(1.0)`, add `current = self.active_account(); if current is None or current.id != removed_id: self.log.info('[removeAccount] ... no longer needed'); return`. Add a unit test that interleaves a manual switch during the busy wait and asserts the person's choice stays live."
+ },
+ {
+  "lens": "process-updater",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1472,
+  "problem": "`refresh_backup_in_place` / `_renew_backup_in_place` never check `shutting_down`. Neither do `retry_usage` (usagecycle.py:418-424) and `read_usage`/`_request_usage` (usagecycle.py:200-256). Control connections keep being served for the whole shutdown, and the cycle thread can still be inside a usage GET. So new usage requests and new renewals start after SIGTERM, against spec 5.1 ('starts no new cycle, switch, renewal or sign-in'). `finish_shutdown` (coordinator.py:1607-1623) stops waiting on renewals as soon as the count first reaches 0, and every worker is a daemon thread, so a renewal started later is frozen at interpreter exit.",
+  "failure_scenario": "SIGTERM (an update restart, logout or reboot) arrives while the cycle's usage GET for a saved account is slow (60 s timeout) and returns 401. Or a Retry press on a card arrives during the shutdown window. Either path starts a refresh-token POST (60 s) plus a profile lookup (15 s) after SIGTERM, which overruns the 80 s budget. The process exits after the server has rotated the refresh token but before `backups.save`, so the saved login is dead and the account must sign in again. Reproduced: after `begin_shutdown()`, `retry_usage(B)` on an expired saved login sent 1 token POST and 1 usage GET.",
+  "fix": "Begin `refresh_backup_in_place` with `if self.shutting_down: return UNREACHABLE` (nothing spent, so the refresh token stays valid). In `read_usage` (and `retry_usage`), return None without a request when `self._stop.is_set()`. In `_renew_then_request`, re-check before the POST. In `finish_shutdown`, keep waiting until both the renewal count and the gate stay idle and the cycle thread has exited. Add a daemon test: SIGTERM during a slow usage GET that then 401s must send no token request."
+ },
+ {
+  "lens": "process-updater",
+  "severity": "P2",
+  "file": "linux/pixelswitch/server.py",
+  "line": 230,
+  "problem": "`ControlServer.stop()` unlinks the socket path even when this server never bound it. On the `StartError(already_running)` path, `run_daemon` calls `daemon.stop()` (daemon.py:330-334), which deletes the socket of the daemon that is answering. Test mode also does not require `XDG_RUNTIME_DIR` (the socket's home) to be under the scratch root (testmode.py:59-67), so a scratch daemon can reach the real runtime directory.",
+  "failure_scenario": "After the real install, a scratch run on the laptop that forgets to set XDG_RUNTIME_DIR. The test daemon takes its scratch lock, probes `/run/user/1000/pixelswitch/control.sock`, finds the real daemon answering, and on its way out deletes the real socket. The real daemon keeps running but the CLI, tray and MCP can no longer reach it: `systemctl --user start` is a no-op on an active unit, so remote control stays dead until a restart. Reproduced: a second ControlServer on the same path, refused as already running, then `stop()`; the live server's socket is gone.",
+  "fix": "In `ControlServer.start()`, after a successful bind, record `self._bound_ino = os.lstat(self.path).st_ino`. In `stop()`, unlink only when `self._bound_ino` is set and `os.lstat(self.path).st_ino == self._bound_ino`. In `testmode.validate_start`, refuse test mode when `Paths.socket` is not under the scratch root (rule 1 already requires the run to set XDG_RUNTIME_DIR there)."
+ },
+ {
+  "lens": "process-updater",
+  "severity": "P2",
+  "file": "linux/pixelswitch/updater.py",
+  "line": 242,
+  "problem": "The staging folder `~/.local/share/pixelswitch/.update-<pid>-<time>` is removed only in the `finally` of a check that completes. The updater is a daemon thread and `Updater.stop()` waits only 5 s, so a daemon that exits or is killed mid-download, mid-extract or mid-self-check leaves the folder behind. Nothing ever removes old `.update-*` folders.",
+  "failure_scenario": "A logout, reboot or update restart lands during a download or extraction. Each such stop leaves up to 50 MB of tarball plus up to 400 MB of extracted files (the extraction limit) in `~/.local/share/pixelswitch/`, and these pile up indefinitely.",
+  "fix": "In `Updater.start()` (before the first check), remove every `data_dir/.update-*` directory whose pid is not this process: `shutil.rmtree(path, ignore_errors=True)` for names matching `^\\.update-(\\d+)-\\d+$` where the pid is not `os.getpid()`. This is safe because only one daemon runs per HOME (flock). Add a unit test that plants a stale staging folder and expects it gone after `start()`."
+ },
+ {
+  "lens": "tests",
+  "severity": "P0",
+  "file": "linux/pixelswitch/claude_service.py",
+  "line": 113,
+  "problem": "The profile lookup records a 429 only when an account is known (`elif status == 429 and account is not None`). The guard also has no store for a 429 earned with no account (usage_guard.py:221 keys every park by account). This is the older rule. Spec D20 revision 4 says a 429 on any profile or usage request is recorded against the token whether or not an account is known; the Mac does this with `rateLimitedWithoutAccount` (UsageRequestGuard.swift:94-102, 134-137, 203-215). test_claude_service.py:204 `test_a_429_without_an_account_is_not_recorded` pins the bug by asserting that `may_use` stays True after the 429.",
+  "failure_scenario": "Reproduced in a scratch copy with the network blocked. One active account is removed (D20 leaves the list empty and the live login in place), and the profile is scripted to answer 429 with Retry-After 3600 for the live token. Over 4 cycles 300 s apart there are 4 profile requests, each answered 429, and the Retry-After is ignored. The cause: `reconcile_live_login` (coordinator.py:1388) calls `proven_owner(credential, None)` every cycle, and `may_use` keeps saying yes. This is 1.9's 429 loop, run on the live login that the CabDesign farm also uses. The same happens with accounts present whenever the live login is no saved account's login, for example the removed account's login after every fallback failed.",
+  "fix": "1. In `usage_guard.record_rate_limited`, accept `account=None`. Keep a map from token fingerprint to (park end, cool-down end): park clamped as for an account, 20-minute cool-down, at most 64 entries, expired ones pruned, oldest dropped. Consult it in `may_use` and in `decision` before the request path, as UsageRequestGuard.swift:134-137 and 203-215 do.\n2. Drop `and account is not None` at claude_service.py:113.\n3. Replace test_claude_service.py:204 with `test_a_429_without_an_account_parks_that_token`: `may_use` is False until Retry-After, then through the 20-minute cool-down, then True.\n4. Add a coordinator test: no accounts, live token answers 429, 4 cycles at 300 s, and exactly 1 profile request."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1036,
+  "problem": "`perform_switch` still refuses every switch while no account is active. This is the older D20 rule. Revision 4 refuses only an empty account list, and otherwise decides whether the live login is provably disposable; the Mac does this with `LiveLoginDisposal` and `RemovedLogins` (AppState.swift:1028-1041 and 1236-1251, AccountRemoval.swift:145-230). test_switch.py:102 `test_no_active_account_is_a_quiet_failure` pins the old behaviour, and no test covers any branch of the disposal decision.",
+  "failure_scenario": "Remove the active account while every fallback fails, for example because the remaining saved logins are dead. `_switch_after_removal` then leaves no account active (coordinator.py:971). From then on every `accounts.switch`, tray click and auto-switch is refused with \"No account is active yet, so there is nothing to switch from. Add the current account first.\" (confirmed with a probe). The daemon is wedged until a full sign-in, which is the defect revision 4 fixed on the Mac.",
+  "fix": "1. Port `RemovedLogins`: at removal, record refresh-token fingerprints of the removed account's saved and live logins (at most 16), cleared on the next successful switch or add.\n2. Port `LiveLoginDisposal.decide`.\n3. In `perform_switch`, refuse only when `self.accounts` is empty. With no active account and no proven owner:\n   - proceed if the live login is not usable;\n   - proceed if the API names no remaining account;\n   - proceed if it is the same grant as a removed login and as no remaining account's login;\n   - treat the account as active if exactly one remaining saved login is the same grant;\n   - otherwise refuse with \"PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again.\"\n4. Replace test_switch.py:102 with one test per branch, and keep the empty-list refusal with the old sentence."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "linux/tests/test_switch.py",
+  "line": 353,
+  "problem": "`test_a_change_between_the_snapshot_and_the_write_is_caught_by_the_reread` rotates the live login on the 2nd `read_credential` call. That call is step 4's read under the lock (`seen`, coordinator.py:1247), not the re-read immediately before the write (`live_now`, coordinator.py:1267, the 3rd call). So the switch-level re-read-before-write of spec 5.3 is untested. Mutation check: with coordinator.py:1268 changed to `changed = False`, test_switch, test_credtools_dirlock and the full suite (1136 tests) all stay green.",
+  "failure_scenario": "Suppose a refactor drops the step-5 compare. Claude Code renews A's login between the snapshot save and the write. A's backup then holds a refresh token the server has already rotated, and B's login overwrites the live one. A's newest login is lost and A must sign in again, and no test goes red.",
+  "fix": "1. Stop counting reads. Wrap `app.backups.save` so that, right after the first call saves A's snapshot, it writes a rotated A login live that the API can prove.\n2. Assert: the switch still ends on B; A's backup holds the rotated access token; the profile was asked about it exactly once; `refresh_lock` was entered twice.\n3. Add the negative case: rotate after every snapshot save with a token the API cannot prove. Expect `LIVE_CHANGED_MESSAGE`, and the live credential and ~/.claude.json unchanged.\n4. Correct the comment at line 353: the 2nd read is step 4's read under the lock."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "linux/tests/test_daemon.py",
+  "line": 195,
+  "problem": "`test_the_test_api_base_is_ignored_outside_test_mode` starts the real daemon outside test mode with a seeded account and live login. Its first cycle therefore sends the fabricated tokens to the production hosts. The assertion `rig.api.calls == []` passes precisely because the requests went to api.anthropic.com instead of the mock. Proven under a sandbox that blocks outbound network: within its first second the daemon logged 2 `[accountIdentity] Profile lookup failed: URLError` lines and 1 `[getUsageLimits] No reply: URLError`. Every unsandboxed run of the suite (CI, the founder's laptop per spec 7, any Mac) contacts Anthropic, which goes against the review rules and the intent of spec 5.7. My own two authorized suite runs did so before I found it.",
+  "failure_scenario": "On the laptop, `python3 -m unittest discover -s linux/tests` (spec 7 acceptance) sends 2 profile requests and 1 usage request per run, from the CabDesign farm's IP, with dead bearer tokens. That is the pattern the usage-429 investigation tied to 429s.",
+  "fix": "Give that daemon nothing to send: build the Rig with no `seed_account` and no live ~/.claude/.credentials.json or backups. Keep the assertion that `testMode` is absent, and replace `rig.api.calls == []` with an assertion that the daemon log has no getUsageLimits or accountIdentity line. The contract that the base is ignored outside test mode is already pinned purely by test_claude_service.py:49 (`ApiBases.from_env`). Or delete the subprocess test."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 945,
+  "problem": "`_switch_after_removal` differs from D20 revision 4 and from the Mac's `RemovalFallback.run` (AccountRemoval.swift:83-124) in three ways:\n1. It never re-checks, before each candidate or after a busy wait, that the removed account is still the active one.\n2. It counts 5 busy seconds as a failure and moves on to the next candidate. The Mac waits up to 150 s, then gives up without trying others.\n3. When no candidate works it never shows the last failure, although the spec says \"the last failure is shown\".\nThe tests at test_accounts_ops.py:377-396 cover none of these.",
+  "failure_scenario": "The user removes active account A, and their tray click to D takes the gate before the fallback's attempt at B. The fallback sees busy, sleeps 1 s and retries. D's switch completes and D is active. The retry then runs `perform_switch(B)` from D and moves Claude Code off the account the user just chose, which is a wrong switch. Separately, when B and C both fail, the user sees no message at all, only no active account.",
+  "fix": "1. Before each `perform_switch` and after each busy sleep, stop if `self.active_account()` is no longer the removed account, or if the list is empty.\n2. Keep waiting on the same candidate while busy, up to 150 tries. Then stop without trying the others, and clear the active account only if it is still the removed one.\n3. Remember the last `ActionError` message, and call `set_error` with it when no candidate worked.\n4. Add tests: (a) a switch to D that completes during the first busy wait leaves D active and B untried; (b) when every candidate fails, the last failure sentence is shown; (c) a gate busy past the limit tries no other candidate."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/integration_scratch.py",
+  "line": 410,
+  "problem": "Two runner checks cannot fail, or do not check what their names say. Line 410, `check(\"remote-control.sh 3: a menu bar setting round-trips\", True)`, is a tautology: the set and the restore are never read back. Line 276, \"SIGTERM: the lock is released and nothing is left running\", only checks `process.poll() is not None` and never tries the flock.",
+  "failure_scenario": "Suppose `settings.set` of `menuBar.lowRemainingWarningThreshold` silently drops the value, or the daemon exits while still holding daemon.lock. Both checks still print PASS.",
+  "fix": "At line 410, call `settings.get` after each set and require 35, then the original value. At line 276, open `paths.daemon_lock` and take `fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)`, as test_daemon.py's SIGTERM test does."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/integration_scratch.py",
+  "line": 141,
+  "problem": "`Daemon.start` returns False when the daemon exits early but throws away its stderr. Every phase then prints \"FAIL the daemon starts\" with no reason.",
+  "failure_scenario": "Hit during this review. Run from a deep scratch path, every phase failed with no explanation. Only a hand-run showed the cause: \"pixelswitchd: The control socket path is longer than 107 bytes.\"",
+  "fix": "When `self.process.poll() is not None` after the wait, run `_, err = self.process.communicate(timeout=10)`, keep the last lines, and pass them as the detail of `check(\"the daemon starts\", ...)`."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/test_daemon.py",
+  "line": 32,
+  "problem": "The daemon tests write into the REAL home's ~/.cache/pixelswitch-dev/ (`testmode.scratch_root()` reads the password database) whatever $HOME is set to. `os.makedirs` creates the parent pixelswitch-dev folder 0755 rather than 0700. The integration runner refuses to run from anywhere else (exit 2). So a brief that says HOME and every XDG_* go in a scratch folder and never the real home cannot be met on any machine other than the laptop, and nothing says so.",
+  "failure_scenario": "This review's suite runs created and removed ut-* folders under /Users/ahamade/.cache/pixelswitch-dev/ while HOME pointed at /private/tmp/claude-501/. A first run on a new machine leaves a 0755 ~/.cache/pixelswitch-dev behind.",
+  "fix": "In `scratch_root(case)`, call `os.makedirs(testmode.scratch_root(), mode=0o700, exist_ok=True)` and chmod it to 0700 when this run created it. Add one line to linux/README.md: \"The test-mode daemon tests and integration_scratch.py write under the real ~/.cache/pixelswitch-dev/ (spec 5.7), even with HOME overridden.\" Keep the real-home anchor as it is."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/pixelswitch/coordinator.py",
+  "line": 1040,
+  "problem": "Spec 5.1's rule that after SIGTERM nothing new starts (no switch, sign-in, add-current or removal) is tested only for auto-switch (test_cycle.py:663). The refusals in `perform_switch` (line 1040), `add_current_account` (line 584), `start_sign_in` (line 629) and `remove_account` (line 900) have no test.",
+  "failure_scenario": "If a refactor drops the `shutting_down` guard from `perform_switch`, a tray click arriving during the 80-second shutdown window starts a switch the daemon may exit in the middle of. No test goes red.",
+  "fix": "Add one test per entry point: call `app.begin_shutdown()`, make the call, and assert `ActionError` with `SHUTTING_DOWN_MESSAGE`, with ~/.claude/.credentials.json, ~/.claude.json and backups.json unchanged."
+ }
+]
