@@ -24,3 +24,7 @@ PixelSwitch/Info.plist
 # XcodeGen generated project
 PixelSwitch.xcodeproj/
 graphify-out/
+
+# Python
+__pycache__/
+*.pyc
