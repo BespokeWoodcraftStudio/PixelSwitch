@@ -791,7 +791,12 @@ final class AppState: ObservableObject {
     @discardableResult
     func setDefaultWindowThreshold(_ window: AutoSwitchEngine.Window, to value: Double?) -> Bool {
         let written = AutoSwitchSettings.setDefaultThreshold(window, to: value)
-        if written { log.info("[thresholds] Default \(window.rawValue) threshold: \(value.map { String(format: "%.0f%%", $0) } ?? "follows the base")") }
+        if written {
+            // What was stored: the value rounded to a whole number (it is refused, not clamped, outside 50–100).
+            log.info("[thresholds] Default \(window.rawValue) threshold: \(value.map { String(format: "%.0f%%", $0.rounded()) } ?? "follows the base")")
+        } else {
+            log.warning("[thresholds] Refused a default \(window.rawValue) threshold of \(value.map { String(format: "%g", $0) } ?? "nil"): it must be a whole number from 50 to 100")
+        }
         return written
     }
 
@@ -801,7 +806,11 @@ final class AppState: ObservableObject {
     @discardableResult
     func setBaseThreshold(_ value: Double) -> Bool {
         let written = AutoSwitchSettings.setBaseThreshold(value)
-        if written { log.info("[thresholds] Base default threshold: \(String(format: "%.0f%%", value)); window defaults cleared") }
+        if written {
+            log.info("[thresholds] Base default threshold: \(String(format: "%.0f%%", value.rounded())); window defaults cleared")
+        } else {
+            log.warning("[thresholds] Refused a base default threshold of \(String(format: "%g", value)): it must be a whole number from 50 to 100")
+        }
         return written
     }
 
@@ -874,9 +883,9 @@ final class AppState: ObservableObject {
     /// is using also moves Claude Code to another one (spec D20, credentials
     /// recon section 8, option A): nothing is marked active until its switch
     /// has succeeded; if a switch fails the next account in `AccountOrder.fallbackOrder`
-    /// is tried; if none works, no account is active and the next refresh finds
-    /// out which one is live. Removing the last account leaves no active
-    /// account and does not recreate it from the live login.
+    /// is tried; if none works, no account is active and the user is told why.
+    /// Removing the last account (active or not) leaves no active account and
+    /// does not recreate it from the live login (`AccountRemoval.plan`).
     func removeAccount(_ account: Account) {
         log.info("[removeAccount] Removing account \(account.id)")
         let wasActive = account.isActive || activeAccount?.id == account.id
@@ -890,55 +899,73 @@ final class AppState: ObservableObject {
         requestGuard.forget(account: account.id)
         readSoon.remove(account.id)
         persistNeedsReauth()
-        if wasActive {
+        let plan = AccountRemoval.plan(removedWasActive: wasActive, remaining: accounts)
+        if plan.clearActive {
+            // The last account, active or not: nothing is active, and the flag
+            // keeps the next refresh from making it again from the live login.
+            activeAccount = nil
+            UserDefaults.standard.set(true, forKey: removedLastAccountKey)
+            log.info("[removeAccount] Removed the last account; no account is active")
+        } else if !plan.fallbackIds.isEmpty {
             // No remaining account is marked active until its switch succeeds
             // (`performSwitch` marks it). `activeAccount` stays on the removed
             // account for now: `performSwitch` needs a current account to leave,
             // and the "already live" shortcut must not see the target as current.
             for i in accounts.indices { accounts[i].isActive = false }
-            let fallbacks = AccountOrder.fallbackOrder(from: accounts)
-            if fallbacks.isEmpty {
-                activeAccount = nil
-                UserDefaults.standard.set(true, forKey: removedLastAccountKey)
-                log.info("[removeAccount] Removed the last account; no account is active")
-            } else {
-                log.info("[removeAccount] Removed active account; switching to the first of \(fallbacks.count) remaining")
-                Task { await switchAfterRemoval(of: account, candidates: fallbacks.map(\.id)) }
-            }
+            log.info("[removeAccount] Removed active account; switching to the first of \(plan.fallbackIds.count) remaining")
+            Task { await switchAfterRemoval(of: account, candidates: plan.fallbackIds) }
         }
         saveAccounts(refreshWidget: true)
         log.info("[removeAccount] Done. Remaining accounts: \(self.accounts.count)")
     }
 
-    /// Switches Claude Code to the first of `candidates` that works. A busy
-    /// switch or sign-in is waited out (a few seconds); any other failure moves
-    /// on to the next candidate. When none works, no account is active.
+    /// Switches Claude Code to the first of `candidates` that works (the loop is
+    /// `RemovalFallback.run`). It stops as soon as the situation it was started
+    /// for no longer holds: before every candidate and after every wait it
+    /// checks that the removed account is still the one "active", so a sign-in
+    /// or a switch that finished meanwhile is never undone. A busy switch or
+    /// sign-in is waited out and, if it never ends, nothing is cleared. Every
+    /// failure is logged with its reason. When no candidate could take over, no
+    /// account is active and the last failure's sentence is shown (the same
+    /// sentence the 1.9 path showed, so no new string).
     private func switchAfterRemoval(of removed: Account, candidates: [UUID]) async {
-        for id in candidates {
-            guard let target = accounts.first(where: { $0.id == id }) else { continue }
-            var attempts = 0
-            while true {
+        let result = await RemovalFallback.run(
+            candidates: candidates,
+            stillNeeded: { [unowned self] in self.activeAccount?.id == removed.id },
+            attempt: { [unowned self] id in
+                guard let target = self.accounts.first(where: { $0.id == id }) else { return .gone }
                 do {
-                    try await performSwitch(to: target)
+                    try await self.performSwitch(to: target)
                     // Success, or "already live" (which adopts the account).
-                    if activeAccount?.id == target.id { return }
-                    break
-                } catch let error as ActionError where error.kind == .busy && attempts < 5 {
-                    attempts += 1
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    continue
+                    return self.activeAccount?.id == target.id ? .switched : .failed(message: nil)
+                } catch let error as ActionError where error.kind == .busy {
+                    return .busy(message: error.message)
+                } catch let error as ActionError {
+                    return .failed(message: error.message)
                 } catch {
-                    log.warning("[removeAccount] Switch to \(id) after removing \(removed.id) failed; trying the next account")
-                    break
+                    return .failed(message: error.localizedDescription)
                 }
-            }
-        }
-        // Only if nothing else made another account active meanwhile.
-        if activeAccount?.id == removed.id {
+            },
+            pause: { try? await Task.sleep(nanoseconds: 1_000_000_000) },
+            note: { log.info("[removeAccount] (after removing \(removed.id)) \($0)") })
+
+        switch result {
+        case .switched, .stoodDown:
+            break
+        case .busyGaveUp(let message):
+            // Nothing was tried, so nothing is cleared: Claude Code is still on the
+            // removed account's login and a switch the user starts still works.
+            errorMessage = message
+            log.warning("[removeAccount] Gave up waiting for a switch or sign-in to finish; no fallback was tried")
+        case .noneWorked(let lastFailure):
+            // Only if nothing else made another account active meanwhile
+            // (`stillNeeded` was true when the loop ended).
             activeAccount = nil
             for i in accounts.indices { accounts[i].isActive = false }
+            if accounts.isEmpty { UserDefaults.standard.set(true, forKey: removedLastAccountKey) }
             saveAccounts()
-            log.warning("[removeAccount] No remaining account could be switched to; no account is active")
+            errorMessage = lastFailure
+            log.warning("[removeAccount] No remaining account could be switched to; no account is active (\(lastFailure ?? "no reason given")). A switch the user starts still works.")
         }
     }
 
@@ -960,10 +987,17 @@ final class AppState: ObservableObject {
     /// not needed). Throws `ActionError`; the messages are the ones the popover
     /// has always shown.
     func performSwitch(to account: Account) async throws {
-        guard let currentActive = activeAccount else {
-            log.info("[switchTo] No switch needed (no active account)")
+        // With no accounts at all there is nothing to switch to or from. With
+        // accounts but none active (the state a removal leaves when no fallback
+        // worked, kept across launches) a switch is still allowed: otherwise
+        // nothing could ever set an active account again and the user would be
+        // stuck until a full sign-in. The live login's owner is still proven by
+        // the API below, and nothing is backed up under an unproven owner.
+        guard !accounts.isEmpty else {
+            log.info("[switchTo] No switch needed (no accounts)")
             throw ActionError(kind: .noActiveAccount, message: String(localized: "No account is active yet, so there is nothing to switch from. Add the current account first.", bundle: L10n.bundle))
         }
+        let currentActive = activeAccount
 
         // One credential mutation at a time: a switch already in flight (its
         // awaits leave the main actor free) or a running login must finish
@@ -985,16 +1019,19 @@ final class AppState: ObservableObject {
         let liveCredential = keychain.readClaudeToken()
         var live: (account: Account, identity: ClaudeService.AccountIdentity)?
         if let liveCredential {
-            live = await provenOwner(ofCredential: liveCredential, believedAccount: currentActive.id)
+            live = await provenOwner(ofCredential: liveCredential, believedAccount: currentActive?.id)
         }
         let liveOwner = live?.account
-        if liveOwner?.id == account.id || (liveOwner == nil && currentActive.id == account.id) {
+        if SwitchShortcut.alreadyLive(liveOwnerId: liveOwner?.id, believedActiveId: currentActive?.id, targetId: account.id) {
             log.info("[switchTo] No switch needed: \(account.email)'s login is already live")
-            if liveOwner?.id == account.id, currentActive.id != account.id { adoptActive(account) }
+            if liveOwner?.id == account.id, currentActive?.id != account.id { adoptActive(account) }
             return
         }
 
-        log.info("[switchTo] ===== Switching from \((liveOwner ?? currentActive).email) to \(account.email) =====")
+        if currentActive == nil, liveOwner == nil {
+            log.warning("[switchTo] No account is active and the live login's owner is not proven; switching anyway, and saving nothing for the login being replaced")
+        }
+        log.info("[switchTo] ===== Switching from \((liveOwner ?? currentActive)?.email ?? "an unproven login") to \(account.email) =====")
 
         // Resolve the target's backup ONCE, check that its login really is the
         // target's (renewing it first if it has expired), and hand it down.
@@ -1514,10 +1551,13 @@ final class AppState: ObservableObject {
             lastStayingPutNote = nil
             return
         }
-        let overflow = AutoSwitchEngine.overflowHolds(activeUnusable: false, activeUsage: usage, activeRule: rule, defaults: defaults,
-                                                      activeSampledThisCycle: sampledThisCycle)
+        // The overflow sentence only while the account is still under its relaxed
+        // limits (rule 10); at or past them, equal windows included, 1.9's
+        // sentence is the true one.
+        let kind = AutoSwitchEngine.stayingPutKind(activeUsage: usage, activeRule: rule, defaults: defaults,
+                                                   activeSampledThisCycle: sampledThisCycle, watchFable: watchFable)
         let note: String
-        if overflow {
+        if kind == .waitingForSessionLimit {
             note = "[autoSwitch] Active \(active.id) at \(reached.joined(separator: ", ")) (\(Self.limitsText(leave))), but no account under its weekly limit can take you; staying until the session limit (\(String(format: "%.0f", leave.session))%)"
         } else {
             note = "[autoSwitch] Active \(active.id) at \(reached.joined(separator: ", ")) (\(Self.limitsText(leave))), but no other account has room under its own limits; staying put"
@@ -2121,7 +2161,8 @@ final class AppState: ObservableObject {
             activeAccount = accounts[index]
             saveAccounts()
             log.info("[updateActiveAccount] Matched existing account at index \(index)")
-        } else if accounts.isEmpty, !UserDefaults.standard.bool(forKey: removedLastAccountKey) {
+        } else if AccountRemoval.mayCreateFromLiveLogin(accountsAreEmpty: accounts.isEmpty,
+                                                        removedLastAccount: UserDefaults.standard.bool(forKey: removedLastAccountKey)) {
             let account = Account(
                 email: email,
                 displayName: status.orgName ?? email,

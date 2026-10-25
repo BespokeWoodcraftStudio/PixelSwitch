@@ -11,6 +11,8 @@ swiftc -swift-version 6 \
   PixelSwitch/Services/ClaudeCredentialsFile.swift \
   PixelSwitch/Services/ClaudeCredentialMerge.swift \
   PixelSwitch/Services/CredentialOwnership.swift \
+  PixelSwitch/Services/LiveLoginBackup.swift \
+  PixelSwitch/Services/AccountRemoval.swift \
   PixelSwitch/Models/UsageData.swift \
   PixelSwitch/Models/CostHistoryWindow.swift \
   PixelSwitch/Models/BrandColor.swift \
@@ -24,6 +26,9 @@ swiftc -swift-version 6 \
   Tests/UnitTests/ConformanceTests.swift \
   Tests/UnitTests/TwoWindowTests.swift \
   Tests/UnitTests/LoginSafetyTests.swift \
+  Tests/UnitTests/RemovalAndBackupTests.swift \
+  Tests/UnitTests/Engine19Oracle.swift \
+  Tests/UnitTests/Engine19OracleTests.swift \
   PixelSwitch/Services/SignInOutputParser.swift \
   PixelSwitch/Services/L10n.swift \
   PixelSwitch/Services/SignInProcess.swift \

@@ -475,12 +475,12 @@ final class ClaudeService: @unchecked Sendable {
         log.info("[switchAccount] Switching to \(targetAccount.id); live login belongs to \(liveOwner?.id.uuidString ?? "an unproven account")")
 
         // 1. Back up the live login under the account it belongs to. Returns the
-        // live credential this step looked at and whether it was saved for its
-        // owner. Run again if Claude Code renews the login before the write
-        // (the re-read below), this time with the API's proof of the new login.
-        func backUpLiveLogin() async -> (seen: String?, saved: Bool) {
-            // `saved` is also true when there was nothing worth saving: a live
-            // login that is not a usable login is never saved (spec D12).
+        // live credential this step looked at and what came of saving it
+        // (`LiveLoginBackup.Result`): a read that returned nothing, or nothing
+        // usable, is never "saved". Run again if Claude Code renews the login
+        // before the write (the re-read below), this time with the API's proof of
+        // the new login.
+        func backUpLiveLogin() async -> (seen: String?, result: LiveLoginBackup.Result) {
             log.info("[switchAccount] Step 1: Backing up the live login...")
             let freshCredential = keychain.readClaudeToken()
             var provenFresh = false
@@ -497,8 +497,11 @@ final class ClaudeService: @unchecked Sendable {
                     provenFresh = true
                 }
             }
-            var saved = false
-            if let owner = liveOwner, let liveToken = freshCredential, provenFresh {
+            var identityMatches = false
+            var storeAccepted = false
+            // A live login that is not a usable login is never saved (spec D12).
+            if let owner = liveOwner, let liveToken = freshCredential, provenFresh,
+               CredentialOwnership.isUsableLogin(credential: liveToken) {
                 // Save identity details only if they describe the owner: running
                 // sessions can leave another account's in ~/.claude.json.
                 func belongs(_ details: [String: AnyCodable]?) -> Bool {
@@ -509,15 +512,19 @@ final class ClaudeService: @unchecked Sendable {
                 let fileIdentity = keychain.readOAuthAccount()
                 let backupIdentity = keychain.getAccountBackup(forAccountId: owner.id.uuidString)?.oauthAccount
                 if let identity = belongs(fileIdentity) ? fileIdentity : (belongs(backupIdentity) ? backupIdentity : nil) {
-                    saved = keychain.saveAccountBackup(token: liveToken, oauthAccount: identity, forAccountId: owner.id.uuidString)
-                    log.info("[switchAccount] Step 1: Backup saved for its owner: \(saved)")
+                    identityMatches = true
+                    storeAccepted = keychain.saveAccountBackup(token: liveToken, oauthAccount: identity, forAccountId: owner.id.uuidString)
+                    log.info("[switchAccount] Step 1: Backup saved for its owner: \(storeAccepted)")
                 } else {
                     log.warning("[switchAccount] Step 1: No identity details on record that match the owner; skipping backup")
                 }
             } else {
                 log.warning("[switchAccount] Step 1: The live login's owner is not proven (or it changed since it was checked); skipping the backup so no account's backup is overwritten with another's login")
             }
-            return (freshCredential, saved || !CredentialOwnership.isUsableLogin(credential: freshCredential))
+            let result = LiveLoginBackup.result(fresh: freshCredential, ownerKnown: liveOwner != nil, proven: provenFresh,
+                                                identityMatches: identityMatches, storeAccepted: storeAccepted)
+            log.info("[switchAccount] Step 1: \(result)")
+            return (freshCredential, result)
         }
         var step1 = await backUpLiveLogin()
 
@@ -531,15 +538,24 @@ final class ClaudeService: @unchecked Sendable {
         // Re-read the live login immediately before writing (spec 5.3). If Claude
         // Code renewed it since step 1 looked, the copy saved for its owner holds
         // a refresh token the server has rotated: write nothing, look again with
-        // proof once, and give up with nothing written if it is still moving.
+        // proof once, and give up with nothing written if it is still moving, if
+        // it cannot be read, or if the renewed login cannot be saved for its owner.
+        // A read that returns nothing never passes this check silently
+        // (`LiveLoginBackup`).
         var liveNow = keychain.readClaudeToken()
-        if CredentialOwnership.liveLoginChanged(savedAtStep4: step1.seen, now: liveNow) {
+        switch LiveLoginBackup.afterFirstPass(seen: step1.seen, liveNow: liveNow, ownerKnown: liveOwner != nil) {
+        case .proceed:
+            break
+        case .abort(let abort):
+            throw abortError(abort, stage: "first pass")
+        case .retry:
             log.warning("[switchAccount] Step 3: The live login changed since it was backed up; backing it up again before writing")
+            let firstSeen = step1.seen
             step1 = await backUpLiveLogin()
             liveNow = keychain.readClaudeToken()
-            if CredentialOwnership.liveLoginChanged(savedAtStep4: step1.seen, now: liveNow) || (liveOwner != nil && !step1.saved) {
-                log.error("[switchAccount] Step 3: ABORT: the live login is still changing or could not be saved; nothing was written")
-                throw ClaudeServiceError.liveLoginChanged
+            if let abort = LiveLoginBackup.afterRetry(firstSeen: firstSeen, seen: step1.seen, result: step1.result,
+                                                      liveNow: liveNow, ownerKnown: liveOwner != nil) {
+                throw abortError(abort, stage: "retry")
             }
         }
         let credential: String
@@ -606,6 +622,24 @@ final class ClaudeService: @unchecked Sendable {
         }
         log.info("[switchAccount] Step 4: Switch verified against the credential store (CLI identity hidden by \(shadowedBy))")
         return SwitchOutcome(shadowedBy: shadowedBy)
+    }
+
+    /// Logs why a switch stopped before writing and returns the error to throw.
+    /// The two causes the old combined check hid (the login is still changing;
+    /// the renewed login could not be saved) are different errors, and the log
+    /// names the reason of a save that failed.
+    private func abortError(_ abort: LiveLoginBackup.Abort, stage: String) -> ClaudeServiceError {
+        switch abort {
+        case .stillChanging:
+            log.error("[switchAccount] Step 3 (\(stage)): ABORT: the live login is still changing; nothing was written")
+            return .liveLoginChanged
+        case .unreadable:
+            log.error("[switchAccount] Step 3 (\(stage)): ABORT: the live login was readable a moment ago and cannot be read now; nothing was written")
+            return .liveLoginUnreadable
+        case .notSaved(let reason):
+            log.error("[switchAccount] Step 3 (\(stage)): ABORT: the renewed live login could not be saved for its owner (\(reason.rawValue)); nothing was written")
+            return .liveLoginNotSaved
+        }
     }
 
     /// Ground-truth check that does not depend on `claude auth status`: both
@@ -897,6 +931,10 @@ enum ClaudeServiceError: LocalizedError {
     case timedOut(String)
     case targetLoginBelongsElsewhere(target: String, owner: String)
     case liveLoginChanged
+    /// The live login was readable a moment ago and could not be read before the write.
+    case liveLoginUnreadable
+    /// Claude Code renewed the live login and PixelSwitch could not save the new one for its owner.
+    case liveLoginNotSaved
     case targetLoginUnusable(target: String)
 
     var errorDescription: String? {
@@ -925,6 +963,10 @@ enum ClaudeServiceError: LocalizedError {
             return "The saved login for \(target) can't be used. Re-authenticate \(target) to fix it."
         case .liveLoginChanged:
             return "Claude Code renewed its login while PixelSwitch was switching. Nothing was changed. Try again in a moment."
+        case .liveLoginUnreadable:
+            return "PixelSwitch could not read Claude Code's login just before switching. Nothing was changed. Try again in a moment."
+        case .liveLoginNotSaved:
+            return "Claude Code renewed its login and PixelSwitch could not save the new one. Nothing was changed. Try again in a moment."
         }
     }
 }
