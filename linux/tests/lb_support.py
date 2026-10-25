@@ -34,6 +34,16 @@ from . import stub_claude
 from .mock_api import MockApi, fabricated, usage_body
 
 
+def read_file(path: str, mode: str = "r"):
+    with open(path, mode) as handle:
+        return handle.read()
+
+
+def read_json(path: str):
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 class FakeClock:
     """Starts at the real time and moves only when told (or when the code under test sleeps)."""
 
@@ -134,9 +144,8 @@ class Rig:
     def write_live(self, seed: Seed, credential: str | None = None) -> None:
         """Makes ``seed`` the login Claude Code holds: ``.credentials.json`` and ``~/.claude.json``."""
         fsio.atomic_write(self.paths.credentials, credential if credential is not None else seed.credential)
-        config = {}
         try:
-            config = json.loads(open(self.paths.claude_json, encoding="utf-8").read())
+            config = read_json(self.paths.claude_json)
         except (OSError, ValueError):
             config = {"numStartups": 3, "projects": {"/x": {}}, "theme": "dark"}
         config["oauthAccount"] = seed.oauth_account
@@ -176,12 +185,10 @@ class Rig:
     # -- reading back ---------------------------------------------------------------------------------------------
 
     def live_credential(self) -> dict:
-        with open(self.paths.credentials, encoding="utf-8") as handle:
-            return json.load(handle)
+        return read_json(self.paths.credentials)
 
     def live_config(self) -> dict:
-        with open(self.paths.claude_json, encoding="utf-8") as handle:
-            return json.load(handle)
+        return read_json(self.paths.claude_json)
 
     def backup_of(self, seed: Seed):
         return BackupStore(self.paths.backups, self.log.category("check")).get(seed.id)
@@ -191,8 +198,7 @@ class Rig:
 
     def log_text(self) -> str:
         try:
-            with open(self.paths.log, encoding="utf-8") as handle:
-                return handle.read()
+            return read_file(self.paths.log)
         except OSError:
             return ""
 
@@ -200,16 +206,6 @@ class Rig:
         self.api.stop()
         self.log.close()
         shutil.rmtree(self.tmp, ignore_errors=True)
-
-
-def read_file(path: str, mode: str = "r"):
-    with open(path, mode) as handle:
-        return handle.read()
-
-
-def read_json(path: str):
-    with open(path, encoding="utf-8") as handle:
-        return json.load(handle)
 
 
 def tmpdir(case: unittest.TestCase) -> str:

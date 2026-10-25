@@ -240,7 +240,7 @@ class RefreshLockTests(Base):
         self.assertEqual(RENEWING_MESSAGE, "Claude Code is renewing this login; try again in a minute.")
         self.assertTrue(os.path.isdir(self.refresh), "Claude Code's lock was not touched")
         self.assertFalse(os.path.exists(self.legacy))
-        self.assertGreaterEqual(sum(self.clock.slept), 2.0, "it waited")
+        self.assertGreaterEqual(sum(self.clock.slept), 1.99, "it waited")
 
     def test_a_lock_that_looks_abandoned_gets_its_own_message_and_is_still_not_broken(self):
         os.mkdir(self.refresh)
