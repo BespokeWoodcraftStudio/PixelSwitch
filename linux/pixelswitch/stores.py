@@ -78,6 +78,17 @@ class SettingsFile:
             fsio.atomic_write(self.path, fsio.dumps_pretty(data))
             self._data = copy.deepcopy(data)
 
+    def update(self, change: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
+        """One read-modify-write under the file's lock: ``change`` gets a copy of the stored object and
+        returns the whole object to store. Two writers (the tray and the settings window, each on its
+        own connection) can no longer both read the same snapshot and lose one change. On a write
+        failure the in-memory copy is left as it was and the error propagates."""
+        with self._lock:
+            data = change(copy.deepcopy(self._data))
+            fsio.atomic_write(self.path, fsio.dumps_pretty(data))
+            self._data = copy.deepcopy(data)
+            return copy.deepcopy(data)
+
 
 # --- accounts.json ----------------------------------------------------------------------------------
 
@@ -146,6 +157,53 @@ class NeedsReauthFile:
             return
         fsio.atomic_write(self.path, fsio.dumps_pretty(sorted(ids)))
         self._last = set(ids)
+
+
+# --- removed-logins.json ------------------------------------------------------------------------------
+
+
+class RemovedLoginsFile:
+    """Fingerprints (never tokens) of the refresh tokens of the logins of accounts the user removed
+    that are PROVABLY the removed account's (``removal.fingerprints_to_record``), so a switch made with
+    no active account can recognise the live login as a removed account's and so disposable (spec D20
+    revision 4). The Mac keeps them in ``UserDefaults``; here they are a 0600 file in the state folder,
+    at most 16, forgotten when an account is added, signed in, adopted as the active one, or switched to."""
+
+    def __init__(self, path: str, log: CategoryLog) -> None:
+        self.path = path
+        self._log = log
+        self._lock = threading.Lock()
+
+    def load(self) -> list[str]:
+        with self._lock:
+            return self._load()
+
+    def _load(self) -> list[str]:
+        try:
+            text = fsio.read_text(self.path, limit=1 << 20)
+            value = fsio.loads_strict(text) if text is not None else []
+        except (OSError, UnicodeDecodeError, ValueError, RecursionError):
+            self._log.warning("[removedLogins] Could not read the removed-logins file; assuming none")
+            return []
+        return [item for item in value if isinstance(item, str)][-16:] if isinstance(value, list) else []
+
+    def save(self, fingerprints: Iterable[str]) -> None:
+        with self._lock:
+            items = list(fingerprints)[-16:]
+            if items:
+                fsio.atomic_write(self.path, fsio.dumps_pretty(items))
+            elif os.path.lexists(self.path):
+                os.unlink(self.path)
+
+    def forget(self) -> None:
+        """Removes the record, if there is one."""
+        with self._lock:
+            try:
+                os.unlink(self.path)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                self._log.warning(f"[removedLogins] Could not clear the removed-logins file ({type(error).__name__})")
 
 
 # --- backups.json -----------------------------------------------------------------------------------------

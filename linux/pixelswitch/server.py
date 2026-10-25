@@ -50,7 +50,8 @@ def peer_uid(sock: socket.socket) -> int | None:
     option = getattr(socket, "SO_PEERCRED", None)
     try:
         if option is not None:
-            _pid, uid, _gid = struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, option, struct.calcsize("3i")))
+            # struct ucred: pid_t (signed), uid_t and gid_t (unsigned: a uid of 2**31 or more is not negative)
+            _pid, uid, _gid = struct.unpack("iII", sock.getsockopt(socket.SOL_SOCKET, option, struct.calcsize("iII")))
             return uid
         if sys.platform == "darwin":  # LOCAL_PEERCRED, struct xucred: version, uid, ngroups, groups[16]
             data = sock.getsockopt(0, 0x001, 76)
@@ -67,6 +68,7 @@ class Connection:
         self.sock = sock
         self.server = server
         self.subscribed = False
+        self.subscribe_requested = False
         self._write_lock = threading.Lock()
         self._closed = False
 
@@ -75,13 +77,21 @@ class Connection:
         return self._closed
 
     def mark_subscribed(self) -> None:
-        self.subscribed = True
+        """Called by ``events.subscribe``'s handler BEFORE its reply is written. The connection becomes a
+        subscriber only together with that reply (:meth:`send_line` with ``subscribe=True``), so the
+        dispatcher thread cannot put an event on the wire ahead of ``{"subscribed":true}`` (the client's
+        ``call()`` drops every line that is not its reply)."""
+        self.subscribe_requested = True
 
-    def send_line(self, text: str) -> bool:
+    def send_line(self, text: str, subscribe: bool = False) -> bool:
         """Writes ``text`` and a newline, within 2 s. False (and the connection closed) if it could not.
-        The socket is non-blocking, so a client that stops reading costs at most the 2 s once."""
+        The socket is non-blocking, so a client that stops reading costs at most the 2 s once. With
+        ``subscribe`` the connection is marked subscribed under the same write lock, before the line goes
+        out: an event the dispatcher sends from then on waits until this line is on the wire."""
         data = text.encode("utf-8") + b"\n"
         with self._write_lock:
+            if subscribe:
+                self.subscribed = True
             if self._closed:
                 return False
             deadline = time.monotonic() + WRITE_TIMEOUT
@@ -160,6 +170,8 @@ class ControlServer:
         self._stopping = threading.Event()
         self._events: "queue.Queue[tuple[str, dict, float] | None]" = queue.Queue()
         self._dispatcher: threading.Thread | None = None
+        #: The inode of the socket THIS server bound: ``stop`` removes only that one.
+        self._bound_ino: int | None = None
 
     # -- starting and stopping -----------------------------------------------------------------------
 
@@ -200,6 +212,10 @@ class ControlServer:
         finally:
             os.umask(previous)
         os.chmod(self.path, 0o600)
+        try:
+            self._bound_ino = os.lstat(self.path).st_ino
+        except OSError:
+            self._bound_ino = None
         listener.listen(BACKLOG)
         listener.settimeout(0.1)
         self._listener = listener
@@ -227,11 +243,16 @@ class ControlServer:
         for thread in (self._accept_thread, self._dispatcher):
             if thread is not None and thread is not threading.current_thread():
                 thread.join(timeout=3.0)
+        # Only a socket this server bound. A copy refused as "already running" never bound one, and the
+        # path then belongs to the daemon that is answering on it: deleting it would leave that daemon
+        # running with remote control gone.
         try:
-            if os.path.lexists(self.path) and not os.path.isdir(self.path):
+            bound = self._bound_ino
+            if bound is not None and os.lstat(self.path).st_ino == bound and not os.path.isdir(self.path):
                 os.unlink(self.path)
         except OSError:
             pass
+        self._bound_ino = None
 
     # -- accepting --------------------------------------------------------------------------------------------
 
@@ -299,9 +320,12 @@ class ControlServer:
         except Exception:
             self._log("[control] A handler failed unexpectedly")
             return True
+        subscribe, connection.subscribe_requested = connection.subscribe_requested, False
         if response is None:
+            if subscribe:  # a notification that subscribes: no reply to order events after
+                connection.subscribed = True
             return True
-        return connection.send_line(response)
+        return connection.send_line(response, subscribe=subscribe)
 
     # -- events -----------------------------------------------------------------------------------------------------------
 

@@ -202,6 +202,8 @@ class UsageMixin:
         """One usage reading for ``account``. Asks the guard first; on "send nothing" the card is
         told why and None comes back. Every 401 is remembered by token, so the same token is never
         sent twice."""
+        if self._stop.is_set():  # after SIGTERM nothing new is sent (spec 5.1)
+            return None
         login = self._usage_login(account)
         if login is None:
             self.log.warning(f"[fetchUsage] No token for {account.id}, skipping")
@@ -220,6 +222,8 @@ class UsageMixin:
 
     def _request_usage(self, account: Account, login: Login, after_renewal: bool) -> UsageResponse | None:
         """The one place a usage request is made."""
+        if self._stop.is_set():
+            return None
         try:
             return self.service.get_usage_limits(login.access_token)
         except UsageRequestError as error:
@@ -257,6 +261,8 @@ class UsageMixin:
         """Renews a saved login in place, then asks once with the new token. Every outcome is
         handled: collapsing a dead grant (or a lost rotation) to a plain None would leave the
         account looking healthy."""
+        if self._stop.is_set():  # a renewal started now could be frozen by the exit after the server rotated the token
+            return None
         outcome = self.refresh_backup_in_place(account)
         kind = outcome.kind
         if kind == "refreshed":
@@ -414,23 +420,6 @@ class UsageMixin:
 
     def request_refresh(self) -> None:
         self._wake.set()
-
-    # -- the card's Retry --------------------------------------------------------------------------------------------
-
-    def retry_usage(self, account: Account) -> None:
-        """The card's Retry: one fresh reading for this account now. The active account takes a
-        full refresh; any other takes one request, which a rate-limit park still holds back."""
-        if self._is_active_now(account):
-            self.refresh(wait_if_busy=True)
-            return
-        usage = self.read_usage(account)
-        if usage is None:
-            return
-        self.usage[account.id] = usage
-        self.usage_sampled_at[account.id] = self.clock()
-        self.card_errors.pop(account.id, None)
-        if not self._refresh_lock.locked():
-            self.evaluate_auto_switch()
 
     # -- auto-switch -----------------------------------------------------------------------------------------------------
 

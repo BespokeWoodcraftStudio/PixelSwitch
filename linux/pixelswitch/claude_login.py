@@ -45,6 +45,8 @@ REFRESH_HOLD_SECONDS = 10.0
 WRITE_LOCK_WAIT_SECONDS = 10.0
 
 RENEWING_MESSAGE = "Claude Code is renewing this login; try again in a minute."
+LEFTOVER_MESSAGE_LEGACY = ("A lock left by a Claude Code process that is gone is blocking this. It clears the next time "
+                           "Claude Code renews its login; you can also remove {path}.")
 LEFTOVER_MESSAGE = ("A lock left in ~/.claude by a Claude Code process that is gone is blocking this. It clears "
                     "the next time Claude Code renews its login; you can also remove ~/.claude/.oauth_refresh.lock.")
 
@@ -73,6 +75,15 @@ class HeldRefresh:
         self.new.check()
         if self.legacy is not None:
             self.legacy.check()
+
+    def remaining(self) -> float:
+        """Seconds of the hold limit left (spec 5.3: hold it at most 10 s). Every wait taken while
+        this lock is held (the ``.storage-write`` lock, ``~/.claude.json.lock``, the rollback) is
+        capped by it, so the hold cannot run to the sum of those waits: Claude Code gives up on a
+        lock held longer than a few seconds."""
+        left = [lock.remaining() for lock in (self.new, self.legacy) if lock is not None]
+        known = [value for value in left if value is not None]
+        return min(known) if known else REFRESH_HOLD_SECONDS
 
 
 class ClaudeLogin:
@@ -174,7 +185,7 @@ class ClaudeLogin:
                 try:
                     new.acquire(max(0.0, deadline - self._clock()), poll=(0.5, 1.0))
                 except LockBusy as busy:
-                    raise LiveLoginBusy(self._busy_message(busy.age)) from None
+                    raise LiveLoginBusy(self._busy_message(busy.age, self.refresh_lock_path)) from None
                 except OSError as error:
                     raise LiveLoginBusy(f"PixelSwitch could not take Claude Code's refresh lock in ~/.claude "
                                         f"({error.strerror or type(error).__name__}). Nothing was changed.") from None
@@ -192,7 +203,7 @@ class ClaudeLogin:
                     break
                 new.release()  # the legacy lock is busy: let go of the new one and try both again
                 if self._clock() >= deadline:
-                    raise LiveLoginBusy(self._busy_message(candidate.age()))
+                    raise LiveLoginBusy(self._busy_message(candidate.age(), candidate.path))
                 self._sleep(0.5)
             self._write_owner(new, legacy)
             try:
@@ -204,8 +215,18 @@ class ClaudeLogin:
                 legacy.release()
             new.release()
 
-    def _busy_message(self, age: float | None) -> str:
-        return LEFTOVER_MESSAGE if age is not None and age > 60.0 else RENEWING_MESSAGE
+    def _busy_message(self, age: float | None, lock_path: str | None = None) -> str:
+        """The leftover message names the lock that is actually stuck: ``~/.claude/.oauth_refresh.lock``
+        for the new lock, ``~/.claude.lock`` for the legacy one."""
+        if age is None or age <= 60.0:
+            return RENEWING_MESSAGE
+        if lock_path is None or lock_path == self.refresh_lock_path:
+            return LEFTOVER_MESSAGE
+        return LEFTOVER_MESSAGE_LEGACY.format(path=self._display(lock_path))
+
+    def _display(self, path: str) -> str:
+        home = self.paths.home.rstrip("/")
+        return "~" + path[len(home):] if path.startswith(home + "/") else path
 
     def _owner_path(self) -> str:
         return os.path.join(self.paths.claude_dir, OWNER_NAME)
@@ -240,39 +261,57 @@ class ClaudeLogin:
 
     # -- writing -------------------------------------------------------------------------------------
 
-    def write_credential(self, text: str) -> None:
-        """Replaces ``~/.claude/.credentials.json`` with ``text`` (the whole credential JSON).
-        Takes Claude Code's ``.storage-write`` lock, writes atomically, makes sure the file's
-        mtime differs from the old one, and reads the file back. Raises :class:`LoginWriteError`."""
-        if not isinstance(text, str) or not text:
-            raise LoginWriteError("There is no credential to write.")
+    @contextlib.contextmanager
+    def storage_write_lock(self, budget: float | None = None) -> Iterator[DirLock]:
+        """Claude Code's ``.storage-write`` lock (stale 15 s), the one it takes around its own
+        read-modify-write of ``.credentials.json``. A switch holds it from the re-read of the live
+        login through the write and the read-back, so a save Claude Code finishes while the switch
+        waits is read, not overwritten (spec 5.3). The wait is ``WRITE_LOCK_WAIT_SECONDS`` at most and
+        never longer than ``budget`` (what is left of the refresh lock's hold limit). A busy lock is
+        waited for and never broken: :class:`LoginWriteError` when it stays busy."""
         try:
             fsio.ensure_private_dir(self.paths.claude_dir)
         except OSError as error:
             raise LoginWriteError("PixelSwitch could not prepare ~/.claude.") from error
+        wait = WRITE_LOCK_WAIT_SECONDS if budget is None else max(0.0, min(WRITE_LOCK_WAIT_SECONDS, budget))
         lock = self._lock(self.storage_lock_path, 15.0, 7.5)
         try:
-            lock.acquire(WRITE_LOCK_WAIT_SECONDS)
+            lock.acquire(wait)
         except LockBusy:
             raise LoginWriteError("Claude Code is saving its login; try again in a moment.") from None
         except OSError as error:
             raise LoginWriteError(f"Could not take the credentials lock ({type(error).__name__}).") from error
         try:
-            try:
-                before = fsio.atomic_write(self.paths.credentials, text)
-            except fsio.FileSafetyError as error:
-                raise LoginWriteError(f"PixelSwitch will not replace this file: {error.strerror}.") from None
-            except OSError as error:
-                raise LoginWriteError(f"Failed to write the credentials file ({type(error).__name__}).") from error
-            self._make_mtime_differ(before.mtime_ns)
-            try:
-                back = fsio.read_bytes(self.paths.credentials, limit=4 * 1024 * 1024)
-            except (OSError, ValueError):
-                back = None
-            if back != text.encode("utf-8"):
-                raise LoginWriteError("The credentials file did not read back as written.")
+            yield lock
         finally:
             lock.release()
+
+    def write_credential(self, text: str, held: DirLock | None = None) -> None:
+        """Replaces ``~/.claude/.credentials.json`` with ``text`` (the whole credential JSON).
+        Takes Claude Code's ``.storage-write`` lock (unless the caller already holds it and passes
+        it as ``held``), writes atomically, makes sure the file's mtime differs from the old one,
+        and reads the file back. Raises :class:`LoginWriteError`."""
+        if not isinstance(text, str) or not text:
+            raise LoginWriteError("There is no credential to write.")
+        if held is None:
+            with self.storage_write_lock() as lock:
+                self.write_credential(text, lock)
+            return
+        if not held.held:
+            raise LoginWriteError("The credentials lock is not held.")
+        try:
+            before = fsio.atomic_write(self.paths.credentials, text)
+        except fsio.FileSafetyError as error:
+            raise LoginWriteError(f"PixelSwitch will not replace this file: {error.strerror}.") from None
+        except OSError as error:
+            raise LoginWriteError(f"Failed to write the credentials file ({type(error).__name__}).") from error
+        self._make_mtime_differ(before.mtime_ns)
+        try:
+            back = fsio.read_bytes(self.paths.credentials, limit=4 * 1024 * 1024)
+        except (OSError, ValueError):
+            back = None
+        if back != text.encode("utf-8"):
+            raise LoginWriteError("The credentials file did not read back as written.")
 
     def _make_mtime_differ(self, previous_ns: int | None) -> None:
         """A running Claude Code compares the file's mtime with the one it saw last: the new file's
@@ -287,15 +326,17 @@ class ClaudeLogin:
         except OSError:
             pass
 
-    def write_oauth_account(self, oauth_account: dict) -> bool:
+    def write_oauth_account(self, oauth_account: dict, budget: float | None = None) -> bool:
         """Replaces ``oauthAccount`` in ``~/.claude.json``: the whole file is rewritten atomically
         with every other key (and its permissions) preserved, under Claude Code's own config lock.
-        False when the file cannot be read as a JSON object, the lock stays busy or the write fails."""
+        False when the file cannot be read as a JSON object, the lock stays busy or the write fails.
+        The wait for the lock is ``WRITE_LOCK_WAIT_SECONDS`` at most and never longer than ``budget``
+        (what is left of the refresh lock's hold limit, when the caller holds it)."""
         if not isinstance(oauth_account, dict):
             return False
         lock = self._lock(self.config_lock_path, 10.0, 5.0)
         try:
-            lock.acquire(WRITE_LOCK_WAIT_SECONDS)
+            lock.acquire(WRITE_LOCK_WAIT_SECONDS if budget is None else max(0.0, min(WRITE_LOCK_WAIT_SECONDS, budget)))
         except LockBusy:
             self._log.error("[writeOAuthAccount] ~/.claude.json is locked by Claude Code; not written")
             return False

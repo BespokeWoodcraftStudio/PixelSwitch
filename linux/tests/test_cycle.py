@@ -289,11 +289,13 @@ class GuardInTheCycleTests(unittest.TestCase):
         self.assertEqual(app.card_errors[a.id].message, "Unexpected reply from Anthropic (HTTP 418).")
         self.assertNotIn(a.id, app.usage, "an unexpected reply clears the reading")
 
-    def test_the_card_retry_reads_one_account_through_the_guard(self):
+    def test_one_account_is_read_through_the_guard(self):
+        """The card's Retry on Linux is `usage.refresh` (the Mac has no per-account method on the wire, so
+        the dead `retry_usage` was removed, LB review usagecycle.py:419); the read it rests on is this one."""
         rig, app, a, b, c = trio(self)
-        app.retry_usage(app.account_by_id(b.id))
+        usage = app.read_usage(app.account_by_id(b.id))
+        self.assertIsNotNone(usage)
         self.assertEqual(len(rig.api.calls_to("usage", b.access)), 1)
-        self.assertIn(b.id, app.usage)
 
     def test_the_log_names_ids_never_emails_or_tokens(self):
         rig, app, a, b, c = trio(self)
