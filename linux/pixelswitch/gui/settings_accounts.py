@@ -12,7 +12,6 @@ so nothing under the pointer is replaced while it is being used.
 """
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING
 
 import gi

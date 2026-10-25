@@ -12,7 +12,7 @@ from pixelswitch.client import ControlClient
 from pixelswitch.gui.link import DaemonLink
 from pixelswitch.protocol import ControlError
 
-from .lc_support import DaemonTestCase, FakeDaemon, account_payload, status_payload
+from .lc_support import DaemonTestCase, account_payload, status_payload
 
 
 def wait_for(predicate, timeout=8.0):
