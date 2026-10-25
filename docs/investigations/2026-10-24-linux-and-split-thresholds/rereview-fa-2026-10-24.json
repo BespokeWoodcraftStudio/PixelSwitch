@@ -1,0 +1,140 @@
+[
+ {
+  "lens": "login-safety",
+  "review": {
+   "priorFindings": [
+    {
+     "finding": "P1 login-safety, ClaudeService.swift:520: backUpLiveLogin counted a nil read as saved, so the retry could write after reading nothing twice",
+     "closed": true,
+     "note": "LiveLoginBackup.result now returns .notSaved(.unreadable) for a nil read or text that is not a JSON object. afterRetry returns .unreadable when liveNow is nil and the first pass saw a login. afterFirstPass aborts when an owner was proven and step 1 read nothing. I traced the review's scenario (A1 saved, then a nil retry read, then a nil re-read): it now throws liveLoginUnreadable with nothing written. Pinned by RemovalAndBackupTests:194-207 and the 5.3 source pin. Residual risk, unchanged since 1.9: with no proven owner and three nil reads in a row (performSwitch, step 1, re-read), the target is still written verbatim, because readClaudeToken cannot tell a missing item from a failed read."
+    },
+    {
+     "finding": "P1 login-safety, AppState.swift:963: performSwitch refused any switch with no active account, so the app was stuck after a removal whose fallbacks all failed",
+     "closed": true,
+     "note": "The guard now refuses only when accounts is empty. After noneWorked, a switch goes ahead: the removed account's live login is unproven, so nothing is saved and the target is written. Pinned by the 'performSwitch no longer refuses' source check. The trade-off this creates is finding 1."
+    },
+    {
+     "finding": "P1 login-safety, AppState.swift:917: the fallback loop kept switching during busy waits without re-checking that the removed account was still current",
+     "closed": true,
+     "note": "RemovalFallback.run checks stillNeeded (activeAccount == removed) before every attempt, after every busy pause, and once more before it reports noneWorked. A sign-in or switch that finishes in the meantime is never undone. Tests: RemovalAndBackupTests:114-135."
+    },
+    {
+     "finding": "P1 login-safety, AppState.swift:900, and P1 silent-failure, AppState.swift:893 (same defect): the removed-last-account flag was set only when the removed account was active",
+     "closed": true,
+     "note": "AccountRemoval.plan sets clearActive and the flag whenever the remaining list is empty, whether the removed account was active or not. noneWorked also sets the flag if the list emptied, and updateActiveAccount now goes through mayCreateFromLiveLogin. I traced both paths in the review: no account is recreated. Residual race, older than this lane and unrelated to the flag: if the last account is removed while the fallback's switch to it is mid-flight, that switch still completes and leaves activeAccount pointing at a removed account."
+    },
+    {
+     "finding": "P1 silent-failure, AppState.swift:930: switchAfterRemoval swallowed every failure, with no reason logged and nothing shown",
+     "closed": true,
+     "note": "Every failure is now logged with its message, and noneWorked shows the last failure's existing sentence in errorMessage. As in 1.9, the next refresh clears errorMessage."
+    },
+    {
+     "finding": "P2 login-safety, ClaudeService.swift:518 (listed because it is login safety): the first pass goes ahead over a login renewed since the proof that could not be re-proven",
+     "closed": false,
+     "note": "Unchanged. afterFirstPass ignores step1.result, so the case (seen L1, liveNow L1, result .notSaved(.unproven), owner known) proceeds, and the owner's backup keeps the refresh token the server has rotated away. The fix is now one line: in afterFirstPass, when ownerKnown and the result is .notSaved(.unproven) or .notSaved(.storeRefused), return .abort(.notSaved(reason)). With a known owner, .unproven only arises when the fresh login differs from the proven one, so this cannot refuse every switch."
+    },
+    {
+     "finding": "P2 silent-failure, AppState.swift:926: running out of busy retries counted as a candidate failure",
+     "closed": true,
+     "note": "busyGaveUp now clears nothing (150 one-second waits across the whole run). A side effect is finding 2."
+    },
+    {
+     "finding": "P2 silent-failure, ClaudeService.swift:540: one abort error covered both 'still changing' and 'could not be saved'",
+     "closed": true,
+     "note": "stillChanging, unreadable and notSaved(reason) are now separate errors, each with its own log line, and the log names the save failure's reason."
+    }
+   ],
+   "findings": [
+    {
+     "severity": "P2",
+     "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/AppState.swift",
+     "line": 1032,
+     "problem": "With no active account and an unproven live owner, performSwitch now writes over the live login without saving it anywhere. The 'already live' shortcut can never fire in this state (SwitchShortcut.alreadyLive(nil, nil, _) is false), so even a click on the account whose login is live goes ahead. The comment at lines 990-995 presents this as safe because 'nothing is backed up under an unproven owner', but the real effect is that an unproven live login is thrown away. In the D20 state that is usually the removed account's login, which is intended. Nothing checks it, though: the live login can also be a remaining account's (a fallback attempt that wrote S1 and then failed at the oauthAccount write or at verification) or a login made by hand with claude auth login. This is the same class as the accepted risk R2 (1.9 already discards an unproven live login when an account is active), so it is not P0/P1. The extra exposure is the time before the first refresh's claude auth status names the account. It lasts indefinitely when the CLI cannot name it (no email under an apiKeyHelper or env token, or a CLI timeout) and the API cannot prove it.",
+     "failure_scenario": "Accounts A, B, K. Removing the active A ends in noneWorked, which is saved: nothing is active. The founder quits PixelSwitch and signs K in by hand with claude auth login, because K's saved login was flagged for re-sign. He works all day (Claude Code renews K and rotates its refresh token), then leaves it idle overnight, so the access token expires. Next morning PixelSwitch launches with no active account. Before the first refresh's claude auth status matches K, he clicks Switch on B, or a login script runs 'pixelswitch switch B'. provenOwner never sends the expired token, so liveOwner and currentActive are both nil. Step 1 is .notSaved(.noOwner), afterFirstPass proceeds, and B is written. K's only good login is gone and K must sign in again; 1.9 refused here. In the same state, a click on K itself does not take the shortcut. Validation either says 'The saved login for K has expired and could not be renewed. Re-authenticate K' (same grant as the live login, guard G8), or spends a saved refresh token Claude Code may already have rotated.",
+     "fix": "Keep the switch possible, so the stuck state stays fixed, but discard only a login that is provably disposable. In performSwitch, when currentActive == nil, liveOwner == nil and the live credential is a usable login: (1) Proceed if the API answered for the live token with an identity that names no remaining account (have provenOwner also return the raw identity). Also proceed if the live login is the same grant as a fingerprint of the removed account's logins recorded at removal: TokenFingerprint of its saved and live refresh tokens, kept until the next successful switch or add. Together these cover the D20 case whether Claude Code was busy (fresh token, the API names the removed account) or idle (unchanged tokens, lineage matches). (2) If the live login is the same grant as exactly one remaining account's saved login, treat that account as the believed active one, so the shortcut, adopt and 1.9's rules apply. (3) Otherwise refuse with kind .failed and a sentence such as 'PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again.' Alternatively, save the live credential to a quarantine slot before writing: LoginGate-checked, never a switch source, logged by fingerprint only. Correct the comment at lines 990-995, and unit-test the decision as a pure function next to SwitchShortcut."
+    },
+    {
+     "severity": "P2",
+     "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/AppState.swift",
+     "line": 955,
+     "problem": "On .busyGaveUp, the removed account stays in activeAccount for the rest of the launch, although it is no longer in accounts. backUpBeforeSignIn then treats it as the current account. A 'Sign in new account' calls captureCurrentCredentials(for: removed); the API names the removed account and its email matches, so its live login is saved again under the removed id. That recreates the backup removeAccount deleted, as an orphan secret that nothing ever cleans up. Status, the control API and the CLI also report a removed account as active. In lane MA this ghost lasted only the seconds between attempts; this lane makes it up to 150 s and then open-ended.",
+     "failure_scenario": "The founder removes the active A while another account's sign-in sits in the browser for more than 150 s, then cancels it. Result: busyGaveUp, activeAccount is A, no account is marked active, and Claude Code is still on A. He then clicks 'Sign in new account'. Step 1 logs 'Backing up current account (A)' and saves A's live login under A's id. A's credential is back in the PixelSwitch store although he removed A, and 'pixelswitch status' shows A as active.",
+     "fix": "In the .busyGaveUp branch, set activeAccount = nil and keep errorMessage. No account is marked active already, and performSwitch now works without one, so nothing is lost. Independently, make backUpBeforeSignIn skip a current account that is not in accounts."
+    },
+    {
+     "severity": "P2",
+     "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/AppState.swift",
+     "line": 1022,
+     "problem": "With no active account, both performSwitch (new in this lane) and reconcileLiveLogin ask /api/oauth/profile about the live token with believedAccount nil. accountIdentity records a 429 only when it has an account (ClaudeService.swift:315), so a 429 and its Retry-After are ignored, and every later switch attempt and every refresh cycle asks again with the same token. Spec 5.3 keeps every UsageRequestGuard rule, and the no-active state now persists across launches.",
+     "failure_scenario": "After a removal ends with nothing active, the founder clicks Switch several times while the profile endpoint answers 429 for the removed account's token. Each click sends another lookup, and neither the park nor the 20-minute cool-down ever starts. A 401 is still remembered (refusedWithoutAccount), but a 429 is not.",
+     "fix": "Record a 429 without an account the way recordRejected already does: a park list keyed by token fingerprint, so mayUse refuses the token until the park ends."
+    },
+    {
+     "severity": "P2",
+     "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/docs/superpowers/specs/2026-10-24-2.0-spec.md",
+     "line": 293,
+     "problem": "Spec 5.3 binds the Linux switch to credentials.md section 3, steps 0-10. Step 0 there still says 'an activeAccount must exist (else ActionError.noActiveAccount)'. The Mac no longer does this: performSwitch refuses only when there are no accounts. A Linux lane that builds D20 from the spec will copy step 0 and bring back the stuck state this lane just fixed, or the two platforms will diverge.",
+     "failure_scenario": "Lane LB or LC implements removal per D20 and the switch per recon step 0. On the laptop, removing the active account when every fallback fails clears the active account. Every later switch is then refused with 'No account is active yet... Add the current account first', and following that advice would re-add the account the user just removed.",
+     "fix": "Report to the orchestrator: amend spec 5.3 (or D20) with the Mac's new step 0, plus the safer rule from finding 1 if it is adopted, and update credentials.md section 3 row 0, so both platforms carry the same rule."
+    }
+   ],
+   "verdict": "Login-safety re-review of lane FA: the lane's own commits are 076ed17..1e3622c, merged as 1d7c5fc. The requested range 61c1a24..1e3622c also contains unrelated review-file churn from the branch point. All five distinct P1s from review MA are closed. I ran bash Tests/run-unit-tests.sh: 1246 passed, 0 failed, and the working tree is untouched. The fix introduced no new P0 or P1; it has four new P2s. The old first-pass P2 (ClaudeService.swift:518) is still open and is now a one-line fix.\n\nThe trade-off (a switch is allowed with no active account, and an unproven live login is overwritten without being saved) is acceptable for 2.0, but it is not provably lossless:\n\n(a) After a removal whose fallbacks all failed, the live login is normally the removed account's, which D20 means to discard, but nothing proves it. A failed attempt can leave a remaining account's login live; that is a fresh copy of its backup, so in practice nothing is lost. A hand claude auth login can also replace it.\n\n(b) Yes. A K signed in by hand whose access token expired is overwritten unsaved where 1.9 refused. That lasts only until the first refresh's claude auth status names K (seconds after launch), or for as long as the CLI cannot name K and the API cannot prove it. Once K is active, 1.9 and 2.0 lose it in the same way (recon R2). So the change widens R2 slightly; it does not create a new class of loss.\n\n(c) The state 'accounts exist but none is active' arises only from D20 paths: noneWorked; a quit, crash or update relaunch while the fallback is pending (removeAccount saves every account as inactive before any switch succeeds, and nothing resumes the fallback); and busyGaveUp followed by a relaunch. A fresh install, removing the last account and a failed load all leave the list empty, and a switch is still refused then.\n\nSafest rule, detailed in finding 1: with no active account, proceed only when the live owner is proven, the API proves the live login belongs to no remaining account, or the live login matches a fingerprint of the removed account's logins recorded at removal. Otherwise refuse with a clear sentence, or quarantine the live login before writing.\n\nOther changes checked, with no new way found to lose a token or leave the app unable to switch: LiveLoginBackup, the re-read compare, RemovalFallback, AccountRemoval, mayCreateFromLiveLogin and the busy wait. The exceptions are the orphan backup in finding 2 and the 429 gap in finding 3. Background work: none."
+  }
+ },
+ {
+  "lens": "engine-tests",
+  "review": {
+   "priorFindings": [
+    {
+     "finding": "login-safety P1, ClaudeService.swift:520: backUpLiveLogin counted a nil Keychain read as 'saved', so a retry that read nothing twice wrote the target over a renewed login that was never saved",
+     "closed": true,
+     "note": "Closed. LiveLoginBackup.result (PixelSwitch/Services/LiveLoginBackup.swift:55-62) now returns .notSaved(.unreadable) for a nil read or text that is not a JSON object. Only a credential that is present but blanked counts as .nothingWorthSaving. afterFirstPass (:91-94) stops with .unreadable when the owner was proven but step 1 read nothing. afterRetry (:103-110) stops with .unreadable when the last read is nil after the first pass saw a login. That is the review's exact scenario, and RemovalAndBackupTests pins it ('a retry that reads nothing twice ... stops with nothing written'). The switch throws liveLoginUnreadable before writeClaudeToken, and the source pin checks that afterRetry runs before the write."
+    },
+    {
+     "finding": "login-safety P1, AppState.swift:963: after D20 left activeAccount nil, performSwitch refused every switch with .noActiveAccount, so the app was stuck until a full sign-in",
+     "closed": true,
+     "note": "Closed. performSwitch now refuses only when the account list is empty (PixelSwitch/AppState.swift:995-999). currentActive is optional, and SwitchShortcut.alreadyLive (PixelSwitch/Services/AccountRemoval.swift:131-136) returns false when there is neither an active account nor a proven owner, so the switch goes ahead. The backup is still skipped when the owner is unproven. A source pin checks that the old 'guard let currentActive = activeAccount' is gone."
+    },
+    {
+     "finding": "login-safety P1, AppState.swift:917: switchAfterRemoval did not re-check that the removed account was still active, so it could switch away from an account that a sign-in or another switch had just made active",
+     "closed": true,
+     "note": "Closed. RemovalFallback.run (PixelSwitch/Services/AccountRemoval.swift:93-122) checks stillNeeded at the top of every try, which also covers the moment after every busy pause, and once more after the loop. AppState passes `self.activeAccount?.id == removed.id`. Unit cases cover 'changed after an attempt' and 'a sign-in finishes during a busy wait'."
+    },
+    {
+     "finding": "login-safety P1, AppState.swift:900: the removedLastAccount flag was set only inside `if wasActive`, so removing a last account that was not active let the next refresh recreate it from the live login",
+     "closed": true,
+     "note": "Closed. AccountRemoval.plan (PixelSwitch/Services/AccountRemoval.swift:25-31) sets clearActive and markRemovedLast whenever no accounts remain, whatever wasActive is. removeAccount applies it (PixelSwitch/AppState.swift:902-908). The .noneWorked branch also sets the flag when the list is empty, and updateActiveAccount decides through AccountRemoval.mayCreateFromLiveLogin. Covered by both a unit test and a source pin."
+    },
+    {
+     "finding": "silent-failure P1, AppState.swift:893: the same removed-last-account flag defect (D20), reported from the silent-failure lens",
+     "closed": true,
+     "note": "Closed by the same change as the login-safety finding at :900 (AccountRemoval.plan and the flag set in .noneWorked)."
+    },
+    {
+     "finding": "silent-failure P1, AppState.swift:930: switchAfterRemoval swallowed every switch failure; no reason in the log, no errorMessage, auto-switch silently dead",
+     "closed": true,
+     "note": "Closed. Each failure is logged with its message (PixelSwitch/Services/AccountRemoval.swift:104-107), and lastFailure is kept. In .noneWorked, AppState sets errorMessage = lastFailure, the existing localized sentence, and logs it. Busy exhaustion is now .busyGaveUp: nothing is cleared and the busy sentence is shown. One small leftover: a .failed(message: nil) would leave errorMessage nil, but performSwitch cannot return normally without making the target active while currentActive is the removed account, so that path is not reachable today."
+    }
+   ],
+   "findings": [
+    {
+     "severity": "P2",
+     "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/Tests/UnitTests/Engine19OracleTests.swift",
+     "line": 32,
+     "problem": "The oracle's usage grid `[nil, 0, 10, 49, 50, 89, 90, 97, 98, 99, 100]` has no value between 0 and 10. The review asked for thresholds 1 and 3 so the grid would test the small-threshold ceiling: `ceiling(1) = 0.5`, `ceiling(3) = 2` (AutoSwitchEngine.swift:66-69). With these values the two thresholds behave the same, because 0 is under both ceilings and 10 is over both. So the oracle cannot see an equal-window change to the half-threshold ceiling. The grid has no fractional values near the 97/98/99 edges either.",
+     "failure_scenario": "I proved it by mutation on a copy of 1e3622c in the scratchpad (the repo was not touched). Changing AutoSwitchEngine.swift:68 from `return threshold - min(room, threshold / 2)` to `return threshold - room` changes 1.9 behaviour for any account at threshold 1 (it must now be at exactly 0 to be a target, where 1.9 allowed up to 0.5). Both oracle checks stayed green (0 oracle failures); only 5 AutoSwitchRulesTests checks and 2 conformance vectors went red. Five other equal-window mutants turned the oracle red: weekly ceiling `>` to `>=`, both windows required, Fable `<=` to `<`, candidate expiry strict, and room `min` to `max`. The candidate-expiry mutant was caught by the oracle alone. So the oracle works, but it has this one blind spot.",
+     "fix": "Extend the grid: `private let utilizations: [Double?] = [nil, 0, 0.4, 0.5, 0.6, 1, 1.5, 2, 2.5, 3, 10, 49, 49.5, 50, 89, 89.5, 90, 96.5, 97, 97.5, 98, 98.5, 99, 99.5, 100]`. Then add a non-vacuity check, in the style of `triggersSeen`, that at least one threshold-1 or threshold-3 candidate with utilization > 0 is eligible in 1.9. That way the check itself proves the small-ceiling path was exercised. Re-run the half-ceiling mutant and confirm it goes red."
+    },
+    {
+     "severity": "P2",
+     "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/docs/superpowers/specs/2026-10-24-2.0-spec.md",
+     "line": 149,
+     "problem": "The fix changed the rule 10 contract on the Mac but not in the spec. AutoSwitchEngine.stayingPutKind (PixelSwitch/Services/AutoSwitchEngine.swift:396-409) picks the overflow sentence only when overflow holds AND the active account is still under its relaxed limits. That is correct, and it is what the review asked for. But spec revision 3 still says 'When overflow holds and the relaxed plan is nil, noteStayingPut logs ... staying until the session limit'. The review said to report this wording change to the orchestrator, and the FA commit message does not record that it was. Rule 10 binds 'AppState (and the Linux coordinator)'. Lane LB built the Linux side from the unchanged text, so the two platforms now disagree.",
+     "failure_scenario": "In worktree .claude/worktrees/lb-linux-daemon (0f03f86), linux/pixelswitch/usagecycle.py:616-623 chooses the overflow sentence whenever engine.overflow_holds is true. linux/tests/test_cycle.py:578-587 pins the false sentence on equal windows: active at session 95 / weekly 20 with the default 90, every other account at 96-97, and it expects 'staying until the session limit (90%)'. The account is already past 90%. This is the exact log line FA removed from the Mac (the Beeco 98/98 case in the review). A founder reading the Linux log is told it will move at 90% when nothing has room. It is log text only; no switch decision is affected.",
+     "fix": "Amend spec 2.3 rule 10 (revision 4) to: 'When overflow holds, the relaxed plan is nil, and the active account is still under its relaxed limits (rule 1 at the relaxed pair, plus Fable at the relaxed weekly limit when Fable is watched), noteStayingPut logs ...; otherwise it logs the strict message.' Hand lane LB a port of stayingPutKind (same three outcomes). Change test_staying_put_is_logged_once_per_change to expect 'no other account has room under its own limits; staying put'. Add the review's 90/50 case (session 95, weekly 60, candidates past 89% weekly) on both platforms. Best of all, add it as a shared conformance field so the two engines cannot drift apart again."
+    }
+   ],
+   "verdict": "STAFF REVIEW: PASS (2 findings: P0 \u00d70 \u00b7 P1 \u00d70 \u00b7 P2 \u00d72). All 6 P1s from review-ma are closed, and the fix adds no P0 or P1.\n\n**Suite:** I ran `bash Tests/run-unit-tests.sh` once at HEAD 1d7c5fc (release-2.0). It exited 0 with 1246 passed and 0 failed. That includes conformance 150/150, plus the oracle: 39,600 eligibility comparisons and 9,000 plan scenarios, every trigger and every strategy reached. The pixelventures gate (`node tests/gate.mjs`) does not apply to this repo, so the PixelSwitch suite was the gate, as the brief says.\n\n**Engine and tests lens:**\n- **stayingPutKind** does what the reviewer asked. 98/98 always gives `.noRoom`, the plain sentence with 1.9's meaning. A Fable-only trigger never takes the overflow branch. The relaxed pair it checks is the same one windowPass uses (`rule.relaxed` with `defaults.relaxed`, Fable at the relaxed weekly limit).\n  - Small note, not filed as a finding: the text is not 1.9's word for word. The window is named, which spec rule 10 requires, and it ends \"under its own limits\" where 1.9 said \"under its own threshold\". The tests named \"1.9's sentence is used\" check only the enum.\n- **validWindowWrite and validDefaultWrite** refuse rather than clamp. In normal use nothing passes them a value they refuse:\n  - ControlAPI.windowEdit (ControlAPI.swift:280) already requires `(1...100).contains(number.rounded())`.\n  - SettingsCatalog rounds with step 1 and then requires 50-100.\n  - The default sliders are 50...100 with step 1 (SettingsThresholdDefaults.swift:41).\n  - The account stepper stops at 1 and 100 (SettingsAccountRow.swift:176-177), and the menu offers 10-40 and 50-100.\n  - FB's in-flight control changes touch only the read paths.\n- **The strict conformance loader** refuses an unknown or alias strategy, missing watchFable, drainEarly, drainWithinHours or activeSampledThisCycle, missing switchable or unusable, unknown fields, and a missing plan. All 150 vectors still pass.\n- **The oracle is byte-faithful.** Engine19Oracle.swift lines 12-444 match `git show cf41ad5:PixelSwitch/Services/AutoSwitchEngine.swift` lines 16-448 exactly after the two renames (empty diff). That file is unchanged from tag v1.9. AutoSwitchSettings19 is a smaller copy with the same behaviour.\n- **The grid** covers everything the review listed, and it does go red on an equal-window drift: 5 of 6 mutants failed it, and one of those was caught by the oracle alone. The one blind spot is the small-threshold ceiling (P2 #1).\n\n**The two findings:**\n- P2 #1: the oracle's usage grid cannot see a change to the small-threshold ceiling.\n- P2 #2: rule 10's new condition is not in the spec, so the Linux lane is copying the false sentence and has a test pinning it.\n\n**Prior P2s:** fixed except the first-pass asymmetry (review-ma P2 at ClaudeService.swift:518), which is still open. It is in the login-safety lens, and the spec allows skipping the snapshot.\n\n**Merge artifact, no loss:** `git diff 61c1a24 1e3622c` shows RELEASE_NOTES.md and two review JSONs reverted only because FA was cut from 076ed17. The merge 1d7c5fc keeps the 2.0 versions.\n\n**Nothing changed:** the repo tree is clean. The mutation runs used a copy in the scratchpad, which has been removed.\n\nBACKGROUND WORK: NONE."
+  }
+ }
+]
