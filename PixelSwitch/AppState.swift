@@ -512,6 +512,7 @@ final class AppState: ObservableObject {
             }
             accounts[existing].lastUsed = Date()
             activeAccount = accounts[existing]
+            forgetRemovedLogins()
             // A login is a deliberate account choice; grant it the same
             // auto-switch grace period a manual switch gets.
             lastAutoSwitchAt = Date()
@@ -882,11 +883,13 @@ final class AppState: ObservableObject {
     private let removedLastAccountKey = "ai.pixelventures.pixelswitch.removedLastAccount"
 
     /// Fingerprints (never tokens) of the refresh tokens of the logins of accounts
-    /// the user removed: the removed account's saved login and, when it was the
-    /// active one, the login Claude Code held at that moment. Lets a switch made
-    /// with no active account recognise the live login as the removed account's
-    /// and so disposable (spec D20 revision 4). Kept across launches; forgotten
-    /// by the next successful switch or add (`forgetRemovedLogins`).
+    /// the user removed that are PROVABLY the removed account's: its saved login
+    /// and the login Claude Code held at that moment only if it was the same grant
+    /// or the API had proved it the removed account's (`RemovedLogins.fingerprintsToRecord`).
+    /// Lets a switch made with no active account recognise the live login as the
+    /// removed account's and so disposable (spec D20 revision 4). Kept across
+    /// launches; forgotten when an account is added, signed in, adopted as the
+    /// active one, or switched to (`forgetRemovedLogins`).
     private let removedLoginsKey = "ai.pixelventures.pixelswitch.removedAccountLoginFingerprints"
 
     private var removedLoginFingerprints: [String] {
@@ -901,6 +904,12 @@ final class AppState: ObservableObject {
         if !removedLoginFingerprints.isEmpty { removedLoginFingerprints = [] }
     }
 
+    /// The live login the API last proved to belong to an account (kept in memory,
+    /// by refresh-token fingerprint), set by `reconcileLiveLogin`. Lets a removal
+    /// tell a live login that really was the removed account's from one that was
+    /// only believed to be.
+    private var provenLiveLogin: RemovedLogins.ProvenLiveLogin?
+
     /// Removes `account` and its saved login. Removing the account Claude Code
     /// is using also moves Claude Code to another one (spec D20, credentials
     /// recon section 8, option A): nothing is marked active until its switch
@@ -911,13 +920,16 @@ final class AppState: ObservableObject {
     func removeAccount(_ account: Account) {
         log.info("[removeAccount] Removing account \(account.id)")
         let wasActive = account.isActive || activeAccount?.id == account.id
-        // Remember which grants were this account's before its backup goes (spec D20
-        // revision 4): its saved login, and the live login when it was the active one.
+        // Remember which grants were provably this account's before its backup goes
+        // (spec D20 revision 4): its saved login, and the live login only when it is
+        // the same grant or the API proved it the account's. Being believed active
+        // is not proof: the live login may be another account's.
         removedLoginFingerprints = RemovedLogins.remembering(
-            RemovedLogins.fingerprints(ofCredentials: [
-                keychain.getAccountBackup(forAccountId: account.id.uuidString)?.token,
-                wasActive ? keychain.readClaudeToken() : nil,
-            ]),
+            RemovedLogins.fingerprintsToRecord(
+                removedAccount: account.id,
+                savedCredential: keychain.getAccountBackup(forAccountId: account.id.uuidString)?.token,
+                liveCredential: keychain.readClaudeToken(),
+                proof: provenLiveLogin),
             existing: removedLoginFingerprints)
         keychain.removeAccountBackup(forAccountId: account.id.uuidString)
         accounts.removeAll { $0.id == account.id }
@@ -1072,6 +1084,9 @@ final class AppState: ObservableObject {
         // No active account and no proven owner (spec D20 revision 4): the login
         // being replaced is not saved anywhere, so decide whether that is safe.
         var adoptsBelievedActive = false
+        // Set when the switch goes ahead on LiveLoginDisposal's word: the login it
+        // judged, so the switch writes nothing if the live login is another one.
+        var judgedLiveLogin: LiveLoginBackup.JudgedLogin?
         if currentActive == nil, liveOwner == nil {
             var decision = unownedLiveLoginDecision(credential: liveCredential, identity: liveIdentity)
             if case .treatAsActive(let believedId) = decision {
@@ -1086,6 +1101,7 @@ final class AppState: ObservableObject {
             switch decision {
             case .proceed(let basis):
                 log.warning("[switchTo] No account is active and the live login's owner is not proven; switching anyway (\(basis)), and saving nothing for the login being replaced")
+                judgedLiveLogin = LiveLoginBackup.JudgedLogin(credential: liveCredential)
             case .treatAsActive:
                 break
             case .refuse:
@@ -1123,6 +1139,7 @@ final class AppState: ObservableObject {
         do {
             let outcome = try await claudeService.switchAccount(
                 liveOwner: liveOwner, liveOwnerIdentity: live?.identity, verifiedLiveCredential: liveCredential,
+                judgedLiveLogin: judgedLiveLogin,
                 to: account, targetBackup: targetBackup)
 
             for i in accounts.indices {
@@ -1361,6 +1378,7 @@ final class AppState: ObservableObject {
     private func adoptActive(_ account: Account) {
         for i in accounts.indices { accounts[i].isActive = (accounts[i].id == account.id) }
         activeAccount = accounts.first { $0.id == account.id } ?? account
+        forgetRemovedLogins()
         saveAccounts()
         // It now reads its live login, which is not the saved one the guard
         // may have flagged; forget whatever was earned on the old token.
@@ -1382,6 +1400,10 @@ final class AppState: ObservableObject {
             log.info("[reconcile] The login changed while its owner was being checked; skipping this cycle")
             return
         }
+
+        // Remember who the API proved this login belongs to (by fingerprint), for a
+        // removal to tell it from a login that was only believed to be someone's.
+        provenLiveLogin = RemovedLogins.proof(owner: owner.id, credential: credential)
 
         if activeAccount?.id != owner.id {
             log.warning("[reconcile] The live login belongs to \(owner.email), not \(activeAccount?.email ?? "none"); following the login")
@@ -2269,6 +2291,7 @@ final class AppState: ObservableObject {
             accounts[index].orgName = status.orgName
             accounts[index].subscriptionType = status.subscriptionType
             activeAccount = accounts[index]
+            forgetRemovedLogins()
             saveAccounts()
             log.info("[updateActiveAccount] Matched existing account at index \(index)")
         } else if AccountRemoval.mayCreateFromLiveLogin(accountsAreEmpty: accounts.isEmpty,

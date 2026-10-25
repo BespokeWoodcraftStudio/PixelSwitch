@@ -69,7 +69,7 @@ enum WindowColumnMetrics {
 /// (`Tools/screenshots/run_settings_renders.sh`, in English, German, French,
 /// Japanese and Chinese) and nothing can drift. The only things it reads
 /// besides its inputs are the language choice (`L10n`) and its own pending
-/// priority step.
+/// priority step and whether the pointer is over the row.
 struct SettingsAccountRow: View {
     /// A custom label, else the address.
     let title: String
@@ -101,8 +101,13 @@ struct SettingsAccountRow: View {
     /// The priority a person is stepping to with the arrows, not yet saved. The
     /// list sorts by priority, so saving every click would move the row out
     /// from under the pointer and the next click would land on another
-    /// account. It is saved after a short pause with no click, and when the
-    /// row goes away, so no step is lost.
+    /// account. It is saved when the pointer leaves the row, when the row goes
+    /// away, and, for a person who is not using the pointer (keyboard,
+    /// VoiceOver), after a short pause with no click. While the pointer is over
+    /// the row nothing is saved, so the row cannot move between slow clicks. A
+    /// step still waiting is dropped when the saved number changes underneath
+    /// it (a drag, or a change from the command line or an MCP client), so it
+    /// never overwrites a newer value.
     ///
     /// `State` is written out instead of with `@State`: the offscreen render
     /// (`Tools/screenshots`) compiles this file on a Mac without Xcode, where the
@@ -113,6 +118,13 @@ struct SettingsAccountRow: View {
         nonmutating set { pendingStorage.wrappedValue = newValue }
     }
     private static let priorityPause: Duration = .milliseconds(800)
+
+    /// Whether the pointer is over the row (written out like `pendingStorage`).
+    private let hoverStorage = State<Bool>(initialValue: false)
+    private var hovering: Bool {
+        get { hoverStorage.wrappedValue }
+        nonmutating set { hoverStorage.wrappedValue = newValue }
+    }
 
     var body: some View {
         // Measured once per row from the language in use (see WindowColumnMetrics).
@@ -161,6 +173,14 @@ struct SettingsAccountRow: View {
                           width: columnWidth, choose: onWeekly)
         }
         .padding(.vertical, 4)
+        // A step waits while the pointer is over the row, and is saved when it
+        // leaves (`commitPriority` does nothing when no step is waiting).
+        .onHover { inside in
+            hovering = inside
+            if !inside { commitPriority() }
+        }
+        // The saved number changed underneath a waiting step: the newer value wins.
+        .onChange(of: priority) { _, _ in pendingPriority = nil }
     }
 
     // MARK: - Priority
@@ -227,14 +247,18 @@ struct SettingsAccountRow: View {
             }
         }
         // Restarts whenever the number being stepped to changes, so the save
-        // waits for a pause after the LAST click; cancelled with the row.
+        // waits for a pause after the LAST click; cancelled with the row. With
+        // the pointer over the row it saves nothing: leaving the row does.
         .task(id: pendingPriority) {
             guard pendingPriority != nil else { return }
             try? await Task.sleep(for: Self.priorityPause)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, !hovering else { return }
             commitPriority()
         }
-        .onDisappear { commitPriority() }
+        .onDisappear {
+            commitPriority()
+            hovering = false
+        }
     }
 
     // MARK: - Session and Weekly

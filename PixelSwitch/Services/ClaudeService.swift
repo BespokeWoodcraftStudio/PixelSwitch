@@ -463,7 +463,12 @@ final class ClaudeService: @unchecked Sendable {
     /// was about. Nothing is backed up unless both are known and the Keychain
     /// still holds that same login: saving an unproven login under an account
     /// is how one account's backup came to hold another's token.
-    func switchAccount(liveOwner: Account?, liveOwnerIdentity: AccountIdentity?, verifiedLiveCredential: String?, to targetAccount: Account, targetBackup: AccountBackup) async throws -> SwitchOutcome {
+    ///
+    /// `judgedLiveLogin` is set only by a switch that went ahead with NO active
+    /// account on `LiveLoginDisposal`'s word: if the live login is not the one
+    /// that was judged when step 1 looks, or when the write is about to happen,
+    /// nothing is written (`LiveLoginBackup.afterJudgedLogin`).
+    func switchAccount(liveOwner: Account?, liveOwnerIdentity: AccountIdentity?, verifiedLiveCredential: String?, judgedLiveLogin: LiveLoginBackup.JudgedLogin? = nil, to targetAccount: Account, targetBackup: AccountBackup) async throws -> SwitchOutcome {
         let keychain = KeychainService.shared
 
         // Spec D12, last line of defence (target validation has already failed an
@@ -550,6 +555,9 @@ final class ClaudeService: @unchecked Sendable {
         // A read that returns nothing never passes this check silently
         // (`LiveLoginBackup`).
         var liveNow = keychain.readClaudeToken()
+        if let abort = LiveLoginBackup.afterJudgedLogin(judged: judgedLiveLogin, seen: step1.seen, liveNow: liveNow) {
+            throw abortError(abort, stage: "judged login")
+        }
         switch LiveLoginBackup.afterFirstPass(seen: step1.seen, liveNow: liveNow, ownerKnown: liveOwner != nil, result: step1.result) {
         case .proceed:
             break
@@ -560,6 +568,9 @@ final class ClaudeService: @unchecked Sendable {
             let firstSeen = step1.seen
             step1 = await backUpLiveLogin()
             liveNow = keychain.readClaudeToken()
+            if let abort = LiveLoginBackup.afterJudgedLogin(judged: judgedLiveLogin, seen: step1.seen, liveNow: liveNow) {
+                throw abortError(abort, stage: "retry, judged login")
+            }
             if let abort = LiveLoginBackup.afterRetry(firstSeen: firstSeen, seen: step1.seen, result: step1.result,
                                                       liveNow: liveNow, ownerKnown: liveOwner != nil) {
                 throw abortError(abort, stage: "retry")

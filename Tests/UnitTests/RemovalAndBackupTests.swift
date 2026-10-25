@@ -14,6 +14,8 @@ import Foundation
     liveBackupResultTests()
     rereadDecisionTests()
     firstPassResultTests()
+    judgedLoginTests()
+    provableRemovedLoginsTests()
     stayingPutTests()
 }
 
@@ -297,6 +299,87 @@ private let blankedLogin = #"{"claudeAiOauth":{"accessToken":"","refreshToken":"
           "first pass: the same grant needs no second question, a renewed login needs the API, and nothing to compare is .none")
 }
 
+// MARK: - FD: the no-active-account decision is bound to the login it judged
+
+@MainActor private func judgedLoginTests() {
+    typealias Backup = LiveLoginBackup
+    let k = goodLogin("K1", refresh: "RK"), k2 = goodLogin("K2", refresh: "RK2"), other = goodLogin("O1", refresh: "RO")
+    func judged(_ credential: String?) -> Backup.JudgedLogin? { Backup.JudgedLogin(credential: credential) }
+
+    check(Backup.afterJudgedLogin(judged: nil, seen: other, liveNow: k) == nil,
+          "judged: a switch that judged nothing (an owner is proven, or an account is believed active) is not bound, so 1.9's rules are unchanged")
+    check(Backup.afterJudgedLogin(judged: judged(k), seen: k, liveNow: k) == nil, "judged: the login that was judged goes ahead")
+    check(Backup.afterJudgedLogin(judged: judged(k), seen: other, liveNow: other) == .stillChanging,
+          "judged: a different login at step 1 stops the switch with nothing written")
+    check(Backup.afterJudgedLogin(judged: judged(k), seen: k, liveNow: k2) == .stillChanging,
+          "judged: a login replaced between step 1 and the write stops the switch")
+    check(Backup.afterJudgedLogin(judged: judged(k), seen: k2, liveNow: k2) == .stillChanging,
+          "judged: a renewed login was never judged, so it is looked at again by a new attempt")
+    check(Backup.afterJudgedLogin(judged: judged(nil), seen: k, liveNow: k) == .stillChanging,
+          "judged: a nil judged read against a real login counts as changed")
+    check(Backup.afterJudgedLogin(judged: judged(nil), seen: nil, liveNow: nil) == nil
+          && Backup.afterJudgedLogin(judged: judged(nil), seen: nil, liveNow: k) == .stillChanging,
+          "judged: nothing judged and nothing there goes ahead; a login that appears before the write stops it")
+    check(Backup.afterJudgedLogin(judged: judged(blankedLogin), seen: blankedLogin, liveNow: blankedLogin) == nil
+          && Backup.afterJudgedLogin(judged: judged(blankedLogin), seen: k, liveNow: k) == .stillChanging,
+          "judged: a blanked login that was judged goes ahead; a real login in its place was not judged")
+
+    // The review's scenario: the first read failed (nothing to lose), then step 1 reads K's only good login.
+    let judgedNothing = LiveLoginDisposal.decide(liveLoginUsable: false, api: .couldNotSay, remainingSameGrant: nil, sameGrantAsRemovedLogin: false)
+    check(judgedNothing == .proceed(.nothingToLose)
+          && Backup.afterFirstPass(seen: k, liveNow: k, ownerKnown: false, result: .notSaved(.noOwner)) == .proceed
+          && Backup.afterJudgedLogin(judged: judged(nil), seen: k, liveNow: k) == .stillChanging,
+          "judged: after a failed first read the old checks let K's login through; the judged check stops it")
+}
+
+// MARK: - FD: only logins provably the removed account's are remembered
+
+@MainActor private func provableRemovedLoginsTests() {
+    let removed = UUID(), other = UUID()
+    let saved = goodLogin("SAVED-A", refresh: "R-SAVED")
+    let kLive = goodLogin("K-LIVE", refresh: "R-K")
+    let sameGrantLive = goodLogin("SAVED-A", refresh: "R-ROTATED")
+    let renewedLive = goodLogin("A-NEW", refresh: "R-SAVED")
+    func login(_ refresh: String) -> CredentialOwnership.Login { CredentialOwnership.Login(accessToken: "any", refreshToken: refresh) }
+    func recorded(live: String?, proof: RemovedLogins.ProvenLiveLogin? = nil, savedCredential: String? = saved) -> [String] {
+        RemovedLogins.fingerprintsToRecord(removedAccount: removed, savedCredential: savedCredential, liveCredential: live, proof: proof)
+    }
+
+    check(recorded(live: nil).count == 1 && RemovedLogins.isRemovedLogin(login("R-SAVED"), fingerprints: recorded(live: nil)),
+          "provable: the removed account's saved login is always remembered")
+    check(recorded(live: nil, savedCredential: nil).isEmpty && recorded(live: kLive, savedCredential: nil).isEmpty,
+          "provable: with no saved login and no proof nothing is remembered, even for a live login")
+
+    // Belief is not proof (the review's scenario): K signed in by hand while the removed account was believed active.
+    let unproven = recorded(live: kLive)
+    check(!RemovedLogins.isRemovedLogin(login("R-K"), fingerprints: unproven) && unproven.count == 1,
+          "provable: a live login that is neither the saved grant nor API-proven is NOT remembered as the removed account's")
+    check(LiveLoginDisposal.decide(liveLoginUsable: true, api: .couldNotSay, remainingSameGrant: [],
+                                   sameGrantAsRemovedLogin: RemovedLogins.isRemovedLogin(login("R-K"), fingerprints: unproven)) == .refuse,
+          "provable: so a later switch that cannot name that login's owner refuses it")
+
+    // The same grant as the saved login (same access token, or same refresh token).
+    check(RemovedLogins.isRemovedLogin(login("R-ROTATED"), fingerprints: recorded(live: sameGrantLive))
+          && RemovedLogins.isRemovedLogin(login("R-SAVED"), fingerprints: recorded(live: sameGrantLive)),
+          "provable: a live login with the saved login's access token is the same grant and is remembered with it")
+    check(recorded(live: renewedLive).count == 1 && RemovedLogins.isRemovedLogin(login("R-SAVED"), fingerprints: recorded(live: renewedLive)),
+          "provable: a live login with the saved login's refresh token adds nothing new")
+
+    // API-proven.
+    let proof = RemovedLogins.proof(owner: removed, credential: kLive)
+    check(proof != nil && RemovedLogins.proof(owner: removed, credential: blankedLogin) == nil && RemovedLogins.proof(owner: removed, credential: nil) == nil
+          && !(proof?.refreshFingerprint.contains("R-K") ?? true),
+          "provable: a proof is made from a login with a refresh token, and keeps only its fingerprint")
+    check(RemovedLogins.isRemovedLogin(login("R-K"), fingerprints: recorded(live: kLive, proof: proof)),
+          "provable: a live login the API proved to be the removed account's is remembered")
+    check(!RemovedLogins.isRemovedLogin(login("R-K"), fingerprints: recorded(live: kLive, proof: RemovedLogins.proof(owner: other, credential: kLive))),
+          "provable: a live login the API proved to be ANOTHER account's is not remembered")
+    check(!RemovedLogins.isRemovedLogin(login("R-K2"), fingerprints: recorded(live: goodLogin("K2", refresh: "R-K2"), proof: proof)),
+          "provable: a proof about an earlier token does not cover a login that has since changed")
+    check(recorded(live: kLive, proof: proof).allSatisfy { !$0.contains("R-K") && !$0.contains("R-SAVED") },
+          "provable: only fingerprints are kept, never a token")
+}
+
 // MARK: - Step 1: what "saved" means
 
 @MainActor private func liveBackupResultTests() {
@@ -499,8 +582,23 @@ private func comesBefore(_ first: String, _ second: String, in text: String) -> 
     let decision = member(app, startingAt: "private func unownedLiveLoginDecision(")
     check(decision.contains("LiveLoginDisposal.decide(") && decision.contains("RemovedLogins.isRemovedLogin(") && decision.contains("CredentialOwnership.lineageMatches("),
           "pins D20 r4: AppState gathers the facts and asks LiveLoginDisposal.decide")
-    check(remove.contains("RemovedLogins.fingerprints(") && comesBefore("RemovedLogins.fingerprints(", "keychain.removeAccountBackup(", in: remove),
-          "pins D20 r4: removeAccount records the removed account's logins before its backup is deleted")
+    check(remove.contains("RemovedLogins.fingerprintsToRecord(") && remove.contains("proof: provenLiveLogin")
+          && comesBefore("RemovedLogins.fingerprintsToRecord(", "keychain.removeAccountBackup(", in: remove) && !remove.contains("wasActive ? keychain.readClaudeToken()"),
+          "pins D20 r4 (FD): removeAccount records only the logins provably the removed account's, before its backup is deleted, not whatever was live on belief")
+    let reconcile = member(app, startingAt: "private func reconcileLiveLogin() async {")
+    check(reconcile.contains("provenLiveLogin = RemovedLogins.proof(owner: owner.id, credential: credential)")
+          && comesBefore("guard !isSwitching, !isLoggingIn, keychain.readClaudeToken() == credential", "provenLiveLogin = RemovedLogins.proof(", in: reconcile),
+          "pins D20 r4 (FD): the proven owner and its token's fingerprint are kept only after the lookup is confirmed against the live login")
+    let adopt = member(app, startingAt: "private func adoptActive(_ account: Account) {")
+    let updateActive = member(app, startingAt: "private func updateActiveAccount(from status: AuthStatus) {")
+    check(adopt.contains("forgetRemovedLogins()") && updateActive.contains("forgetRemovedLogins()")
+          && app.components(separatedBy: "forgetRemovedLogins()").count >= 8,
+          "pins D20 r4 (FD): adopting an account, a matched refresh, every add and every sign-in forget the removed logins")
+    check(perform.contains("judgedLiveLogin = LiveLoginBackup.JudgedLogin(credential: liveCredential)") && perform.contains("judgedLiveLogin: judgedLiveLogin,"),
+          "pins D20 r4 (FD): a switch that goes ahead on LiveLoginDisposal's word hands the login it judged to switchAccount")
+    check(switchAccount.contains("LiveLoginBackup.afterJudgedLogin(") && comesBefore("LiveLoginBackup.afterJudgedLogin(", "LiveLoginBackup.afterFirstPass(", in: switchAccount)
+          && comesBefore("LiveLoginBackup.afterJudgedLogin(", "keychain.writeClaudeToken(", in: switchAccount),
+          "pins D20 r4 (FD): switchAccount compares the live login with the judged one before the first-pass check and before it writes")
     if let gaveUp = after.range(of: "case .busyGaveUp"), let worked = after.range(of: "case .noneWorked") {
         let branch = String(after[gaveUp.lowerBound..<worked.lowerBound])
         check(branch.contains("activeAccount = nil") && branch.contains("activeAccount?.id == removed.id") && branch.contains("errorMessage = message"),
