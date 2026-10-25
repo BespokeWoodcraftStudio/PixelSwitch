@@ -119,6 +119,9 @@ struct AccountSwitcherView: View {
                     // founder's verdict: "We don't need the email address or
                     // organization. It should just be the email address."
                     HStack(spacing: 6) {
+                        if let priority = AccountOrder.validPriority(account.priority) {
+                            PriorityTag(priority: priority)
+                        }
                         Text(primaryLabel(for: account))
                             .font(.subheadline.weight(.medium))
                             .lineLimit(1)

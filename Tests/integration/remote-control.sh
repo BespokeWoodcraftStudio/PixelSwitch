@@ -111,12 +111,12 @@ printf '%s\n' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_status"}}' \
     | "$CLI" mcp > "$WORK/mcp"
-python3 - "$WORK/mcp" <<'PY' && ok "MCP: handshake, 18 tools, and a working tool call" || bad "MCP" "$(head -c 300 "$WORK/mcp")"
+python3 - "$WORK/mcp" <<'PY' && ok "MCP: handshake, 20 tools, and a working tool call" || bad "MCP" "$(head -c 300 "$WORK/mcp")"
 import json, sys
 replies = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
 assert len(replies) == 3
 assert replies[0]["result"]["protocolVersion"] == "2025-11-25"
-assert len(replies[1]["result"]["tools"]) == 18
+assert len(replies[1]["result"]["tools"]) == 20
 assert replies[2]["result"]["isError"] is False
 PY
 
