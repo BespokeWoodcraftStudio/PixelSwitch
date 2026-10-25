@@ -457,6 +457,10 @@ struct UsageDashboardView: View {
                 size: 17
             )
 
+            if let priority = AccountOrder.validPriority(account.priority) {
+                PriorityTag(priority: priority)
+            }
+
             Text(account.displayEmail(obfuscated: maskEmails))
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)

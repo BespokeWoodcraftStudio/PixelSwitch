@@ -44,6 +44,7 @@ swiftc -swift-version 6 \
   PixelSwitchCLI/MCPServer.swift \
   PixelSwitch/Control/CommandLineToolInstaller.swift \
   Tests/UnitTests/ControlTests.swift \
+  Tests/UnitTests/ControlSplitTests.swift \
   PixelSwitch/Services/AutoUpdatePolicy.swift \
   Tests/UnitTests/AutoUpdateTests.swift \
   PixelSwitch/Services/UsageRequestGuard.swift \

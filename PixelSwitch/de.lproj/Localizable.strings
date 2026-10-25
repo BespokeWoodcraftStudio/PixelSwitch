@@ -212,13 +212,10 @@
 "Also switch when Fable runs out" = "Auch wechseln, wenn Fable aufgebraucht ist";
 
 /* Auto-switch rules: Settings → General (1.2) */
-"Default threshold" = "Standardschwelle";
 "Choose the next account by" = "Nächstes Konto wählen nach";
 "Most room left" = "Größter Rest";
-"My order" = "Meine Reihenfolge";
 "Resets soonest (use quota before it expires)" = "Früheste Zurücksetzung (Kontingent vor dem Verfall nutzen)";
 "Moves you to the account with the most room left, preferring one that still has Fable to spare." = "Wechselt zum Konto mit dem größten Rest und bevorzugt eines, das noch Fable übrig hat.";
-"Moves you to the highest account in your order (Settings → Accounts) that has room. It always starts from the top." = "Wechselt zum obersten Konto deiner Reihenfolge (Einstellungen → Konten), das noch Spielraum hat. Es beginnt immer ganz oben.";
 "Moves you to the account whose weekly quota resets soonest, so quota about to expire is used before it is lost." = "Wechselt zum Konto, dessen Wochenkontingent am frühesten zurückgesetzt wird, damit bald verfallendes Kontingent nicht verloren geht.";
 "Switch early to use quota before it resets" = "Früher wechseln, um Kontingent vor der Zurücksetzung zu nutzen";
 "Within %lld hours" = "Innerhalb von %lld Stunden";
@@ -312,3 +309,21 @@
 "Status" = "Status";
 "Try again now" = "Jetzt erneut versuchen";
 "Open status.claude.com" = "status.claude.com öffnen";
+
+/* 2.0: separate session and weekly limits, priority numbers */
+"Session (5-hour) default" = "Standard für Sitzung (5 Stunden)";
+"Weekly default" = "Wöchentlicher Standard";
+"When no account under its weekly limit can take you, the session limit decides." = "Wenn kein Konto unter seinem Wochenlimit dich übernehmen kann, entscheidet das Sitzungslimit.";
+"Fable uses the weekly limit." = "Fable nutzt das Wochenlimit.";
+"Priority (lowest number first)" = "Priorität (niedrigste Zahl zuerst)";
+"Moves you to the account with the lowest priority number (Settings → Accounts) that has room. It always starts from the lowest number." = "Wechselt zum Konto mit der niedrigsten Prioritätsnummer (Einstellungen → Konten), das noch Spielraum hat. Es beginnt immer bei der niedrigsten Nummer.";
+"Priority" = "Priorität";
+"None" = "Keine";
+"Lower numbers are tried first. Dragging renumbers every account from 1." = "Niedrigere Nummern werden zuerst probiert. Beim Ziehen werden alle Konten ab 1 neu nummeriert.";
+"Auto-switch follows these numbers only when it chooses by Priority." = "Der automatische Wechsel folgt diesen Nummern nur, wenn er nach Priorität wählt.";
+"Use priority" = "Priorität verwenden";
+"Auto-switch moves you off this account at %@ of its session or %@ of its week, and moves you to it only while it is at %@ or less of its session and %@ or less of its week (up to %@ of its week when no account under its weekly limit can take you)." = "Der automatische Wechsel wechselt bei %@ der Sitzung oder %@ der Woche von diesem Konto weg und wechselt nur zu ihm, solange es bei höchstens %@ der Sitzung und höchstens %@ der Woche liegt (bis zu %@ der Woche, wenn kein Konto unter seinem Wochenlimit dich übernehmen kann).";
+"Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default thresholds (%@ of its session or %@ of its week)." = "Der automatische Wechsel wechselt nie zu diesem Konto. Du kannst selbst zu ihm wechseln; solange du es nutzt, wechselt der automatische Wechsel bei den Standardschwellen (%@ der Sitzung oder %@ der Woche) von ihm weg.";
+"You're using it now. Auto-switch moves you off it at %@ of its session or %@ of its week and won't move you back to it." = "Du nutzt es gerade. Der automatische Wechsel wechselt bei %@ der Sitzung oder %@ der Woche von ihm weg und kehrt nicht zu ihm zurück.";
+"Manual only accounts are never switched to automatically; you can still switch to them yourself." = "Zu Konten mit „Nur manuell“ wird nie automatisch gewechselt; du kannst selbst zu ihnen wechseln.";
+"Auto-switch tries accounts with lower numbers first when it chooses by Priority. Accounts with no number come last." = "Der automatische Wechsel probiert Konten mit niedrigeren Nummern zuerst, wenn er nach Priorität wählt. Konten ohne Nummer kommen zuletzt.";

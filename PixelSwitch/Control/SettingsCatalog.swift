@@ -11,6 +11,8 @@ enum SettingKey: String, CaseIterable, Sendable {
     case transcriptLookbackHours = "transcriptLookbackHours"
     case autoSwitchEnabled = "autoSwitch.enabled"
     case autoSwitchThreshold = "autoSwitch.threshold"
+    case autoSwitchSessionThreshold = "autoSwitch.sessionThreshold"
+    case autoSwitchWeeklyThreshold = "autoSwitch.weeklyThreshold"
     case autoSwitchOnFable = "autoSwitch.onFable"
     case autoSwitchStrategy = "autoSwitch.strategy"
     case autoSwitchDrainEarly = "autoSwitch.drainEarly"
@@ -36,6 +38,9 @@ enum SettingKey: String, CaseIterable, Sendable {
         case choice([JSONValue])
         /// A number in range, rounded to `step` when given.
         case number(ClosedRange<Double>, step: Double?)
+        /// Like `number`, and `null` or the text `default` clears it (the value
+        /// then follows another setting). Normalizes to `.null` for "clear".
+        case numberOrDefault(ClosedRange<Double>, step: Double?)
         /// An ordered list drawn from these values, no repeats.
         case list([String])
         /// `#RRGGBB`.
@@ -52,6 +57,8 @@ enum SettingKey: String, CaseIterable, Sendable {
              .colorCodeAccounts, .launchAtLogin, .menuBarShowsHeadIcon, .menuBarCustomizesLimitBarColors, .autoUpdate:
             return .bool
         case .autoSwitchThreshold: return .number(AutoSwitchSettings.thresholdRange, step: 1)
+        case .autoSwitchSessionThreshold, .autoSwitchWeeklyThreshold:
+            return .numberOrDefault(AutoSwitchSettings.thresholdRange, step: 1)
         case .autoSwitchStrategy: return .choice(AutoSwitchStrategy.allCases.map { .string($0.rawValue) })
         case .autoSwitchDrainWithinHours: return .number(AutoSwitchSettings.drainHoursRange, step: 1)
         case .appLanguage: return .choice(["auto", "en", "zh-Hans", "ja", "de", "fr"].map(JSONValue.string))
@@ -69,6 +76,8 @@ enum SettingKey: String, CaseIterable, Sendable {
         case .choice(let values): return "one of " + values.map(\.compactText).joined(separator: ", ")
         case .number(let range, let step):
             return "\(Self.format(range.lowerBound))–\(Self.format(range.upperBound))" + (step == 1 ? ", whole numbers" : "")
+        case .numberOrDefault(let range, let step):
+            return "\(Self.format(range.lowerBound))–\(Self.format(range.upperBound))" + (step == 1 ? ", whole numbers" : "") + ", or \"default\""
         case .list(let values): return "a list drawn from " + values.joined(separator: ", ")
         case .color: return "a colour as #RRGGBB"
         case .path: return "\"\" to auto-detect, or an absolute path"
@@ -95,9 +104,21 @@ enum SettingKey: String, CaseIterable, Sendable {
                let match = values.first(where: { $0.stringValue?.caseInsensitiveCompare(text) == .orderedSame }) {
                 return match
             }
+            // 2.0: the strategy `myOrder` is called Priority; it is still stored as myOrder.
+            if self == .autoSwitchStrategy, value.stringValue?.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare("priority") == .orderedSame {
+                return .string("myOrder")
+            }
             throw invalid()
 
         case .number(let range, let step):
+            guard var number = Self.number(value), number.isFinite else { throw invalid() }
+            if let step { number = (number / step).rounded() * step }
+            guard range.contains(number) else { throw invalid() }
+            return .number(number)
+
+        case .numberOrDefault(let range, let step):
+            if value.isNull { return .null }
+            if let text = value.stringValue?.trimmingCharacters(in: .whitespaces), text.caseInsensitiveCompare("default") == .orderedSame { return .null }
             guard var number = Self.number(value), number.isFinite else { throw invalid() }
             if let step { number = (number / step).rounded() * step }
             guard range.contains(number) else { throw invalid() }

@@ -7,10 +7,26 @@ import Foundation
 /// Compiled into the app, the command-line tool and the unit harness, so it
 /// is pure Foundation. No type here may ever carry a login token.
 enum ControlProtocol {
-    /// Bumped whenever a method, parameter or result changes shape. The CLI
-    /// refuses to talk to an app with a different number (an old app still
-    /// running after an update).
+    /// Bumped whenever an EXISTING method, parameter or result changes shape.
+    /// The CLI refuses to talk to an app with a different number (an old app
+    /// still running after an update). Additive changes (a new optional field,
+    /// a new method) never bump it: 2.0 added both and stays at 2, so every
+    /// shipped CLI keeps working. What a build adds is told by `revision` and
+    /// `features`.
     static let version = 2
+
+    /// 3 = 2.0: separate session and weekly thresholds, priority numbers.
+    static let revision = 3
+
+    /// What this build can do beyond protocol 2's first methods, sent in
+    /// `status.get`. A CLI checks it before it sends a method an older app
+    /// would answer `methodNotFound`.
+    static let featurePriority = "priority"
+    static let featureSplitThresholds = "splitThresholds"
+    static let features = [featurePriority, featureSplitThresholds]
+
+    /// `status.platform` for this app.
+    static let platform = "macos"
 
     static let appBundleIdentifier = "ai.pixelventures.pixelswitch"
 
@@ -261,6 +277,8 @@ enum ControlMethod: String, CaseIterable, Sendable {
     case accountsRemove = "accounts.remove"
     case accountsSetLabel = "accounts.setLabel"
     case accountsSetThreshold = "accounts.setThreshold"
+    case accountsSetThresholds = "accounts.setThresholds"
+    case accountsSetPriority = "accounts.setPriority"
     case accountsSetOrder = "accounts.setOrder"
     case usageGet = "usage.get"
     case usageRefresh = "usage.refresh"
@@ -298,6 +316,11 @@ struct ThresholdParams: Codable, Equatable, Sendable {
     var threshold: Double?
 }
 
+// `accounts.setThresholds` and `accounts.setPriority` have no params struct on
+// purpose: whether `session`, `weekly` or `priority` is present, null or a
+// number decides what happens, and a `Double?` cannot tell absent from null.
+// `ControlAPI` reads those from the raw params object.
+
 struct OrderParams: Codable, Equatable, Sendable { let accounts: [String] }
 
 struct UsageParams: Codable, Equatable, Sendable { var account: String? }
@@ -313,11 +336,16 @@ struct SettingSetParams: Codable, Equatable, Sendable {
 
 struct AutoSwitchInfo: Codable, Equatable, Sendable {
     let enabled: Bool
+    /// The base default (`autoSwitch.threshold`).
     let defaultThreshold: Double
     let onFable: Bool
     let strategy: String
     let drainEarly: Bool
     let drainWithinHours: Double
+    /// 2.0: the effective global session and weekly defaults (each follows
+    /// `defaultThreshold` until set). Optional so an older app's reply decodes.
+    var defaultSessionThreshold: Double?
+    var defaultWeeklyThreshold: Double?
 }
 
 struct SignInInfo: Codable, Equatable, Sendable {
@@ -352,6 +380,14 @@ struct StatusInfo: Codable, Equatable, Sendable {
     let lastRefresh: Date?
     let autoSwitch: AutoSwitchInfo
     let signIn: SignInInfo?
+    /// 2.0, all optional so an older app's reply decodes: the build's
+    /// `ControlProtocol.revision` (3), what it can do (`priority`,
+    /// `splitThresholds`), `macos` or `linux`, and `true` only for a Linux
+    /// daemon running in test mode.
+    var protocolRevision: Int?
+    var features: [String]?
+    var platform: String?
+    var testMode: Bool?
 }
 
 struct WindowInfo: Codable, Equatable, Sendable {
@@ -398,6 +434,18 @@ struct AccountInfo: Codable, Equatable, Sendable {
     /// accounts.switch still can.
     let manualOnly: Bool
     let usage: UsageInfo?
+    /// 2.0, all optional so an older app's reply decodes. `priority`: 1–99,
+    /// absent when none (lower is tried first; never an account reference).
+    var priority: Int?
+    /// This account's own limit for one window, 1–100; absent while it follows
+    /// the next layer.
+    var sessionThreshold: Double?
+    var weeklyThreshold: Double?
+    /// Where auto-switch moves off the account while it is active, per window
+    /// (the default for a Manual only account). `effectiveThreshold` is the
+    /// lower of the two.
+    var effectiveSessionThreshold: Double?
+    var effectiveWeeklyThreshold: Double?
 }
 
 /// Cost and activity for this Mac as a whole (all accounts together).
@@ -417,8 +465,13 @@ struct UsageReport: Codable, Equatable, Sendable {
 }
 
 /// One pushed event. `type` is `activeAccountChanged`, `usageUpdated`,
-/// `autoSwitched`, `signInChanged` or `error`. An `autoSwitched` event's
-/// `trigger` is `threshold`, `drainEarly` or `noSubscription` (1.7 also sent `exhausted`; 1.8 folded it into `threshold`).
+/// `autoSwitched`, `accountsChanged`, `signInChanged` or `error`. An
+/// `autoSwitched` event's `trigger` is `threshold`, `drainEarly` or `noSubscription`
+/// (1.7 also sent `exhausted`; 1.8 folded it into `threshold`); 2.0 adds `window`
+/// (`session` or `weekly`, when a window's limit fired) and `relaxed` (the
+/// weekly-overflow pass made the switch). `accountsChanged` carries
+/// `{accounts: [AccountInfo]}` after any change to the list or to a field
+/// `AccountInfo` carries apart from usage.
 struct ControlEvent: Codable, Equatable, Sendable {
     let type: String
     let at: Date

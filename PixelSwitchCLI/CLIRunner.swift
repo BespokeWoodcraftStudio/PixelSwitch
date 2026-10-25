@@ -42,8 +42,8 @@ struct CLIRunner {
         }
         do {
             try client.connect()
-            try Self.checkProtocol(client, timeout: invocation.timeout)
-            return try execute(invocation)
+            let status = try Self.checkProtocol(client, timeout: invocation.timeout)
+            return try execute(invocation, app: status)
         } catch let error as ControlError {
             err("error: \(error.message)")
             if !error.candidates.isEmpty { err("  choices: " + error.candidates.joined(separator: ", ")) }
@@ -58,16 +58,28 @@ struct CLIRunner {
         }
     }
 
-    /// Refuses an app that speaks another protocol version.
-    static func checkProtocol(_ client: ControlClient, timeout: TimeInterval) throws {
+    /// Refuses an app that speaks another protocol version. Returns what the
+    /// app said about itself, so a command can check what that app can do.
+    @discardableResult
+    static func checkProtocol(_ client: ControlClient, timeout: TimeInterval) throws -> StatusInfo {
         let status = try client.call(.statusGet, timeout: timeout).decode(StatusInfo.self)
         guard status.protocolVersion == ControlProtocol.version else {
             throw ControlError(.protocolMismatch,
                                "PixelSwitch \(status.appVersion) speaks remote-control protocol \(status.protocolVersion), but this pixelswitch speaks \(ControlProtocol.version). Quit and reopen PixelSwitch, then run the command again.")
         }
+        return status
     }
 
-    private func execute(_ invocation: CLIInvocation) throws -> Int32 {
+    /// Stops a command that needs a method an older app does not have, before
+    /// it is sent: that app would answer methodNotFound (or, worse, ignore a
+    /// parameter it does not know).
+    static func requireFeature(_ feature: String, doing what: String, app: StatusInfo) throws {
+        guard app.features?.contains(feature) == true else {
+            throw ControlError(.failed, "This PixelSwitch (\(app.appVersion)) cannot \(what); update it.")
+        }
+    }
+
+    private func execute(_ invocation: CLIInvocation, app: StatusInfo) throws -> Int32 {
         let timeout = invocation.timeout
         let json = invocation.json
         func call(_ method: ControlMethod, _ params: JSONValue? = nil, slow: Bool = false) throws -> JSONValue {
@@ -148,9 +160,22 @@ struct CLIRunner {
             let result = try call(.accountsSetThreshold, .object(["account": .string(reference), "threshold": threshold.map(JSONValue.number) ?? .null]))
             show(result) { CLIOutput.thresholdSet(try? result["account"]?.decode(AccountInfo.self)) }
 
+        case .windowThresholds(let reference, let session, let weekly):
+            try Self.requireFeature(ControlProtocol.featureSplitThresholds, doing: "set separate thresholds", app: app)
+            var params: [String: JSONValue] = ["account": .string(reference)]
+            if let session { params["session"] = session.parameter }
+            if let weekly { params["weekly"] = weekly.parameter }
+            let result = try call(.accountsSetThresholds, .object(params))
+            show(result) { CLIOutput.thresholdSet(try? result["account"]?.decode(AccountInfo.self)) }
+
+        case .priority(let reference, let priority):
+            try Self.requireFeature(ControlProtocol.featurePriority, doing: "set priorities", app: app)
+            let result = try call(.accountsSetPriority, .object(["account": .string(reference), "priority": priority.map { .number(Double($0)) } ?? .null]))
+            show(result) { CLIOutput.prioritySet(Self.accounts(result["accounts"]), strategy: app.autoSwitch.strategy) }
+
         case .order(let references):
             let result = try call(.accountsSetOrder, .object(["accounts": .array(references.map(JSONValue.string))]))
-            show(result) { CLIOutput.accounts(Self.accounts(result["accounts"])) }
+            show(result) { CLIOutput.orderSet(Self.accounts(result["accounts"])) }
 
         case .usage(let reference):
             let result = try call(.usageGet, reference.map { .object(["account": .string($0)]) })
@@ -241,7 +266,7 @@ enum CLIOutput {
 
     static func strategyWords(_ raw: String) -> String {
         switch raw {
-        case "myOrder": return "my order"
+        case "myOrder": return "priority"
         case "resetsSoonest": return "resets soonest"
         default: return "most room left"
         }
@@ -253,7 +278,7 @@ enum CLIOutput {
         lines.append("Active:        \(status.activeAccountEmail ?? "none")")
         lines.append("Accounts:      \(status.accountCount)")
         let a = status.autoSwitch
-        var auto = a.enabled ? "on, default \(percent(a.defaultThreshold)), next by \(strategyWords(a.strategy))" : "off"
+        var auto = a.enabled ? "on, default \(defaultWords(a)), next by \(strategyWords(a.strategy))" : "off"
         if a.enabled, !a.onFable { auto += ", Fable ignored" }
         if a.enabled, a.strategy == "resetsSoonest" {
             auto += a.drainEarly ? ", switches early within \(Int(a.drainWithinHours)) h" : ", no early switching"
@@ -265,9 +290,32 @@ enum CLIOutput {
         return lines.joined(separator: "\n")
     }
 
+    /// "90%" when the two windows share a default, else "5h 90% / 7d 50%".
+    static func defaultWords(_ a: AutoSwitchInfo) -> String {
+        if let session = a.defaultSessionThreshold, let weekly = a.defaultWeeklyThreshold, session != weekly {
+            return windowsWords(session: session, weekly: weekly)
+        }
+        return percent(a.defaultThreshold)
+    }
+
+    static func windowsWords(session: Double, weekly: Double) -> String {
+        "5h \(percent(session)) / 7d \(percent(weekly))"
+    }
+
+    /// P1, P2, ...; a dash for an account with no priority.
+    static func priorityCell(_ account: AccountInfo) -> String {
+        account.priority.map { "P\($0)" } ?? "—"
+    }
+
+    /// Whether the account's two limits differ, so one number would tell it wrong.
+    static func hasSplit(_ account: AccountInfo) -> Bool {
+        guard let session = account.effectiveSessionThreshold, let weekly = account.effectiveWeeklyThreshold else { return false }
+        return session != weekly
+    }
+
     static func accounts(_ accounts: [AccountInfo]) -> String {
         guard !accounts.isEmpty else { return "No accounts yet. Add one: pixelswitch accounts add-current" }
-        var rows = [["", "#", "Account", "Session", "Weekly", "Fable", "Switches at"]]
+        var rows = [["", "#", "Account", "Session", "Weekly", "Fable", "Switches at", "Priority"]]
         for account in accounts {
             let usage = account.usage
             let at = switchesAt(account)
@@ -278,7 +326,8 @@ enum CLIOutput {
                 percent(usage?.session?.utilization),
                 percent(usage?.weekly?.utilization),
                 percent(usage?.fable?.utilization),
-                at
+                at,
+                priorityCell(account)
             ])
         }
         var text = table(rows)
@@ -291,7 +340,39 @@ enum CLIOutput {
 
     /// The "Switches at" cell: where auto-switch moves off the account.
     static func switchesAt(_ account: AccountInfo) -> String {
-        percent(account.effectiveThreshold) + (account.manualOnly ? " (manual only)" : account.threshold == nil ? " (default)" : "")
+        let limit = hasSplit(account)
+            ? windowsWords(session: account.effectiveSessionThreshold ?? account.effectiveThreshold,
+                           weekly: account.effectiveWeeklyThreshold ?? account.effectiveThreshold)
+            : percent(account.effectiveThreshold)
+        let follows = account.threshold == nil && account.sessionThreshold == nil && account.weeklyThreshold == nil
+        return limit + (account.manualOnly ? " (manual only)" : follows ? " (default)" : "")
+    }
+
+    /// Where auto-switch moves off the account, in words: "90%", or, when the
+    /// two limits differ, "90% of its session or 50% of its week".
+    static func leaveWords(_ account: AccountInfo) -> String {
+        guard hasSplit(account), let session = account.effectiveSessionThreshold, let weekly = account.effectiveWeeklyThreshold else {
+            return percent(account.effectiveThreshold)
+        }
+        return "\(percent(session)) of its session or \(percent(weekly)) of its week"
+    }
+
+    /// The sentence under the table when numbers exist but auto-switch does not choose by them.
+    static let priorityNote = "Auto-switch follows these numbers only when it chooses by Priority."
+
+    /// What `accounts priority` prints: the accounts in their new order, and
+    /// the note when the strategy would ignore the numbers.
+    static func prioritySet(_ list: [AccountInfo], strategy: String) -> String {
+        var text = accounts(list)
+        if strategy != "myOrder" {
+            text += "\n" + priorityNote + " To use them: pixelswitch settings set autoSwitch.strategy priority"
+        }
+        return text
+    }
+
+    /// What `accounts order` prints: the new order, and that it numbered the accounts.
+    static func orderSet(_ list: [AccountInfo]) -> String {
+        accounts(list) + "\nEvery account is now numbered from 1 in this order, replacing any priority numbers you set. Lower numbers are tried first."
     }
 
     /// What `accounts threshold` prints once the app has saved it.
@@ -300,11 +381,15 @@ enum CLIOutput {
         if account.manualOnly {
             var text = "\(account.email) is now manual only: auto-switch never switches to it. You can still switch to it yourself."
             if account.isActive {
-                text += " You're using it now: auto-switch moves you off it at \(percent(account.effectiveThreshold)) and won't move you back to it."
+                text += " You're using it now: auto-switch moves you off it at \(leaveWords(account)) and won't move you back to it."
             }
             return text
         }
-        return account.threshold == nil
+        if hasSplit(account) {
+            return "\(account.email) now switches at \(leaveWords(account))."
+        }
+        let follows = account.threshold == nil && account.sessionThreshold == nil && account.weeklyThreshold == nil
+        return follows
             ? "\(account.email) now follows the default threshold (\(percent(account.effectiveThreshold)))."
             : "\(account.email) now switches at \(percent(account.effectiveThreshold))."
     }
@@ -313,7 +398,7 @@ enum CLIOutput {
     static func switched(_ account: AccountInfo?) -> String {
         var text = "Switched to \(name(account))."
         if let account, account.manualOnly {
-            text += " It is manual only: auto-switch moves you off it at \(percent(account.effectiveThreshold)) and won't move you back to it."
+            text += " It is manual only: auto-switch moves you off it at \(leaveWords(account)) and won't move you back to it."
         }
         return text
     }
@@ -388,7 +473,7 @@ enum CLIOutput {
 enum SettingKeyNames {
     static let all = [
         "refreshInterval", "transcriptLookbackHours",
-        "autoSwitch.enabled", "autoSwitch.threshold", "autoSwitch.onFable", "autoSwitch.strategy",
+        "autoSwitch.enabled", "autoSwitch.threshold", "autoSwitch.sessionThreshold", "autoSwitch.weeklyThreshold", "autoSwitch.onFable", "autoSwitch.strategy",
         "autoSwitch.drainEarly", "autoSwitch.drainWithinHours",
         "maskEmailAddresses", "colorCodeAccounts", "appLanguage", "launchAtLogin",
         "menuBar.showsHeadIcon", "menuBar.modules", "menuBar.customizesLimitBarColors",

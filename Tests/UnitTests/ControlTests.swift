@@ -15,6 +15,7 @@ import Foundation
     runControlCLIOutputTests()
     runControlMCPTests()
     runControlInstallerTests()
+    runControlSplitTests()
 }
 
 /// Shared helpers, in one namespace so nothing collides with other test files.
@@ -85,6 +86,8 @@ enum ControlTestKit {
                                    threshold: nil, effectiveThreshold: 90, manualOnly: false, usage: nil)
     check(ControlProtocol.version == 2 && (try? JSONValue.encode(plainAccount))?["manualOnly"] == .bool(false),
           "control protocol: version 2 (accounts carry manualOnly)")
+    check(ControlProtocol.revision == 3 && ControlProtocol.features == ["priority", "splitThresholds"] && ControlProtocol.platform == "macos",
+          "control protocol: 2.0 stays protocol 2 and says revision 3 with its two features")
     check(JSONValue.bool(true).compactText == "true" && JSONValue.number(1).compactText == "1", "control protocol: true stays a boolean and 1 a number")
 
     let success = RPCResponse.success(.int(7), .object(["ok": .bool(true)])).line
@@ -102,8 +105,9 @@ enum ControlTestKit {
     check(ControlMethod.allCases.map(\.rawValue) == [
         "status.get", "accounts.list", "accounts.switch", "accounts.addCurrent", "accounts.signIn.start", "accounts.signIn.status",
         "accounts.signIn.submitCode", "accounts.signIn.cancel", "accounts.remove", "accounts.setLabel", "accounts.setThreshold",
+        "accounts.setThresholds", "accounts.setPriority",
         "accounts.setOrder", "usage.get", "usage.refresh", "settings.get", "settings.set", "events.subscribe",
-        "app.checkForUpdates", "app.quit"], "control protocol: the method names are the ones the design lists")
+        "app.checkForUpdates", "app.quit"], "control protocol: the 21 method names are the ones the design lists")
 
     let socket = ControlProtocol.socketPath(home: "/Users/someone")
     check(socket == "/Users/someone/Library/Application Support/PixelSwitch/control.sock", "control protocol: the socket lives in PixelSwitch's Application Support folder")
@@ -204,6 +208,8 @@ extension ControlTestKit {
         var nextError: ControlError?
         var orderResult = true
         var settings: [SettingKey: JSONValue] = [:]
+        /// The global defaults the fake reports (the app reads them from UserDefaults).
+        var windowDefaults = AutoSwitchEngine.WindowPair(both: 90)
 
         init() {
             usageById[ControlTestKit.a.id] = try? JSONDecoder().decode(UsageAPIResponse.self, from: Data(ControlTestKit.usageJSON.utf8))
@@ -213,7 +219,9 @@ extension ControlTestKit {
         func usageSampledAt(for id: UUID) -> Date? { usageById[id] == nil ? nil : Date(timeIntervalSince1970: 1_790_000_100) }
         func usageError(for id: UUID) -> String? { id == ControlTestKit.c.id ? "Token expired. Switch to refresh." : nil }
         func isSwitchable(_ id: UUID) -> Bool { switchable.contains(id) }
-        func effectiveSwitchThreshold(for account: Account) -> Double { account.switchThreshold ?? autoSwitch.defaultThreshold }
+        func leaveAt(for account: Account) -> AutoSwitchEngine.WindowPair {
+            AutoSwitchSettings.leaveAtPair(rule: AutoSwitchSettings.rule(for: account, defaults: windowDefaults), defaults: windowDefaults)
+        }
 
         private func fail() throws { if let error = nextError { nextError = nil; throw error } }
 
@@ -257,12 +265,25 @@ extension ControlTestKit {
         }
         func setSwitchThreshold(_ threshold: Double?, for id: UUID) {
             calls.append("threshold \(threshold.map { String($0) } ?? "nil")")
-            accounts = accounts.map { var a = $0; if a.id == id { a.switchThreshold = threshold }; return a }
+            accounts = accounts.map { $0.id == id ? AutoSwitchSettings.applyingBothWindows(threshold, to: $0) : $0 }
+        }
+        func setWindowThresholds(session: AutoSwitchSettings.WindowEdit, weekly: AutoSwitchSettings.WindowEdit, for id: UUID) -> Bool {
+            calls.append("thresholds \(session) \(weekly)")
+            guard let account = accounts.first(where: { $0.id == id }),
+                  let updated = AutoSwitchSettings.applyingWindowEdits(to: account, session: session, weekly: weekly) else { return false }
+            accounts = accounts.map { $0.id == id ? updated : $0 }
+            return true
+        }
+        func setPriority(_ priority: Int?, for id: UUID) -> Bool {
+            calls.append("priority \(priority.map { String($0) } ?? "nil")")
+            guard let updated = AccountOrder.settingPriority(priority, of: id, in: accounts) else { return false }
+            accounts = updated
+            return true
         }
         func setAccountOrder(_ ids: [UUID]) -> Bool {
             calls.append("order \(ids.map { String($0.uuidString.prefix(1)) }.joined())")
-            guard orderResult else { return false }
-            accounts = ids.compactMap { id in accounts.first { $0.id == id } }
+            guard orderResult, let reordered = AccountOrder.reordered(accounts, by: ids) else { return false }
+            accounts = AccountOrder.numberedInOrder(reordered)
             return true
         }
         func refreshUsage() async { calls.append("refresh") }
@@ -800,7 +821,7 @@ extension ControlTestKit {
 
     let modernList = reply(#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{\#(modernMeta)}}"#)
     let tools = modernList?["result"]?["tools"]?.arrayValue ?? []
-    check(tools.count == 18 && modernList?["result"]?["resultType"] == .string("complete"), "mcp: a modern tools/list has all 18 tools and a resultType", "\(tools.count)")
+    check(tools.count == 20 && modernList?["result"]?["resultType"] == .string("complete"), "mcp: a modern tools/list has all 20 tools and a resultType", "\(tools.count)")
     check(tools.allSatisfy { $0["inputSchema"]?["type"] == .string("object") && $0["description"]?.stringValue?.isEmpty == false },
           "mcp: every tool has a description and an object input schema")
     func tool(_ name: String) -> JSONValue? { tools.first { $0["name"] == .string(name) } }
@@ -814,10 +835,10 @@ extension ControlTestKit {
     let names = Set(tools.compactMap { $0["name"]?.stringValue })
     check(names == Set(["get_status", "list_accounts", "get_usage", "refresh_usage", "switch_account", "add_current_account", "remove_account",
                         "start_sign_in", "get_sign_in_status", "submit_sign_in_code", "cancel_sign_in", "set_account_label", "set_account_threshold",
-                        "set_account_order", "get_settings", "set_setting", "check_for_updates", "quit_app"]),
+                        "set_account_thresholds", "set_account_priority", "set_account_order", "get_settings", "set_setting", "check_for_updates", "quit_app"]),
           "mcp: the tools are the ones the design lists")
     let legacyList = reply(#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#)
-    check(legacyList?["result"]?["resultType"] == nil && legacyList?["result"]?["tools"]?.arrayValue?.count == 18, "mcp: a legacy tools/list has no resultType")
+    check(legacyList?["result"]?["resultType"] == nil && legacyList?["result"]?["tools"]?.arrayValue?.count == 20, "mcp: a legacy tools/list has no resultType")
 
     let unsupported = reply(#"{"jsonrpc":"2.0","id":4,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"1900-01-01","io.modelcontextprotocol/clientCapabilities":{}}}}"#)
     check(unsupported?["error"]?["code"] == .number(-32022) && unsupported?["error"]?["data"]?["requested"] == .string("1900-01-01"),

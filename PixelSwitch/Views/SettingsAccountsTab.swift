@@ -1,26 +1,25 @@
-import SwiftUI
-
 /// Settings → Accounts: every account in priority order.
 ///
-/// The order here IS the accounts list's order: dragging a row changes the
-/// order "My order" follows and the order every list in the app shows (the
-/// popover's Accounts and Usage tabs, the widget). Each row also carries the
-/// account's weekly reset and its own auto-switch threshold.
+/// The order here IS the accounts list's order, which is the priority order
+/// (2.0): rows are sorted by their priority number, and dragging a row numbers
+/// every account from 1 in the new order. Every list in the app (the popover's
+/// Accounts and Usage tabs, the widget) follows it, and "Priority" in Settings →
+/// General tries accounts from the lowest number up. Each row (`SettingsAccountRow`)
+/// carries the account's priority, its weekly reset, and its Session and Weekly
+/// auto-switch limits.
 ///
 /// Add Current Account and Sign In New Account sit under the list
 /// (`SettingsSignInButtons`); both open the same sign-in window as the popover.
 struct SettingsAccountsTab: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage(EmailDisplay.key) private var maskEmails = false
-    @AppStorage(AutoSwitchSettings.thresholdKey) private var defaultThreshold = AutoSwitchSettings.fallbackThreshold
+    // The three stored defaults, read here so the rows redraw when the General
+    // sliders move. 0 (the value of an absent key) is "not set" to the readers.
+    @AppStorage(AutoSwitchSettings.thresholdKey) private var baseThreshold = 0.0
+    @AppStorage(AutoSwitchSettings.sessionThresholdKey) private var sessionDefault = 0.0
+    @AppStorage(AutoSwitchSettings.weeklyThresholdKey) private var weeklyDefault = 0.0
     @AppStorage(AutoSwitchSettings.enabledKey) private var autoSwitchEnabled = false
     @AppStorage(AutoSwitchSettings.strategyKey) private var strategyName = AutoSwitchStrategy.mostRoom.rawValue
-    @AppStorage(AutoSwitchSettings.drainEarlyKey) private var drainEarly = true
-
-    /// The thresholds the menu offers: 10–40 in 10s, then 50–100 in 5s; the
-    /// stepper beside a custom value reaches every whole number from 1 to 100.
-    /// Manual only (0) is its own named item, never a stepper stop.
-    private static let thresholdChoices: [Double] = [10, 20, 30, 40] + Array(stride(from: 50.0, through: 100.0, by: 5.0))
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -53,10 +52,20 @@ struct SettingsAccountsTab: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("Drag an account to change the order. \"My order\" in Settings → General tries accounts from the top down, and every account list follows this order. A threshold other than the default applies to that account only. Manual only accounts are never switched to automatically; you can still switch to them yourself.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Lower numbers are tried first. Dragging renumbers every account from 1.")
+                Text("Manual only accounts are never switched to automatically; you can still switch to them yourself.")
+                if strategy != .myOrder {
+                    HStack(spacing: 8) {
+                        Text("Auto-switch follows these numbers only when it chooses by Priority.")
+                        Button("Use priority") { strategyName = AutoSwitchStrategy.myOrder.rawValue }
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
 
             SettingsSignInButtons()
         }
@@ -66,44 +75,23 @@ struct SettingsAccountsTab: View {
     // MARK: - Row
 
     private func row(_ account: Account) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "line.3.horizontal")
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(primaryLabel(for: account))
-                        .font(.body.weight(.medium))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if account.isActive {
-                        Badge(text: String(localized: "Active", bundle: L10n.bundle), color: .green)
-                            .fixedSize()
-                    }
-                }
-                if let label = account.customLabel, !label.isEmpty {
-                    Text(account.displayEmail(obfuscated: maskEmails))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                weeklyReset(for: account)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if autoSwitchEnabled && account.isActive && isManualOnly(account) {
-                    Text("You're using it now. Auto-switch moves you off it at \(Self.percent(shownDefault)) and won't move you back to it.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            thresholdControl(for: account)
-        }
-        .padding(.vertical, 4)
+        SettingsAccountRow(
+            title: primaryLabel(for: account),
+            subtitle: (account.customLabel ?? "").isEmpty ? nil : account.displayEmail(obfuscated: maskEmails),
+            isActive: account.isActive,
+            activeBadge: String(localized: "Active", bundle: L10n.bundle),
+            resetNote: weeklyReset(for: account),
+            manualNote: autoSwitchEnabled && account.isActive && isManualOnly(account) ? manualNote : nil,
+            priority: AccountOrder.validPriority(account.priority),
+            sessionOwn: AccountRowThresholds.own(.session, of: account),
+            weeklyOwn: AccountRowThresholds.own(.weekly, of: account),
+            manualOnly: isManualOnly(account),
+            defaults: defaults,
+            help: thresholdHelp(for: account),
+            onPriority: { appState.setPriority($0, for: account) },
+            onSession: { choose($0, window: .session, for: account) },
+            onWeekly: { choose($0, window: .weekly, for: account) }
+        )
     }
 
     /// A custom label if one is set, otherwise the address (masked when the
@@ -115,29 +103,24 @@ struct SettingsAccountsTab: View {
 
     /// When this account's weekly window resets, if a reading says so. A
     /// reading from a week that has already ended says nothing about the next.
-    @ViewBuilder
-    private func weeklyReset(for account: Account) -> some View {
+    private func weeklyReset(for account: Account) -> Text {
         let usage = appState.accountUsage[account.id]
         if AutoSwitchEngine.weeklyReset(usage, limit: .windows) != nil,
            let window = usage?.sevenDay, let when = window.resetTimeString {
-            if window.resetIsAbsolute {
-                Text("Weekly resets \(when)")
-            } else {
-                Text("Weekly resets in \(when)")
-            }
-        } else {
-            Text("Weekly reset not known yet")
+            return window.resetIsAbsolute ? Text("Weekly resets \(when)") : Text("Weekly resets in \(when)")
         }
+        return Text("Weekly reset not known yet")
     }
 
-    // MARK: - Threshold
+    // MARK: - Thresholds
 
-    /// The default threshold as auto-switch reads it (unset or 0 is 90; kept
-    /// within 50–100). Reads the @AppStorage value so rows redraw when the
-    /// General slider moves.
-    private var shownDefault: Double {
-        AutoSwitchSettings.clampedThreshold(defaultThreshold == 0 ? AutoSwitchSettings.fallbackThreshold : defaultThreshold)
+    /// The two defaults as auto-switch reads them (spec 2.2), from the stored
+    /// values this view watches.
+    private var defaults: AutoSwitchEngine.WindowPair {
+        AutoSwitchSettings.windowDefaults(base: baseThreshold, session: sessionDefault, weekly: weeklyDefault)
     }
+
+    private var strategy: AutoSwitchStrategy { AutoSwitchStrategy(rawValue: strategyName) ?? .mostRoom }
 
     private func isManualOnly(_ account: Account) -> Bool {
         AutoSwitchSettings.isManualOnly(own: account.switchThreshold)
@@ -154,63 +137,43 @@ struct SettingsAccountsTab: View {
         (value / 100).formatted(.percent.precision(.fractionLength(0...1)))
     }
 
-    private func thresholdControl(for account: Account) -> some View {
-        let own = AutoSwitchSettings.normalizedAccountThreshold(account.switchThreshold)
-        return HStack(spacing: 4) {
-            Menu {
-                Button("Default (\(Int(shownDefault))%)") {
-                    appState.setSwitchThreshold(nil, for: account)
-                }
-                Divider()
-                Button("Manual only (\(Int(AutoSwitchSettings.manualOnlyThreshold))%)") {
-                    appState.setSwitchThreshold(AutoSwitchSettings.manualOnlyThreshold, for: account)
-                }
-                Divider()
-                ForEach(Self.thresholdChoices, id: \.self) { value in
-                    Button {
-                        appState.setSwitchThreshold(value, for: account)
-                    } label: {
-                        Text(verbatim: "\(Int(value))%")
-                    }
-                }
-            } label: {
-                if own == AutoSwitchSettings.manualOnlyThreshold {
-                    Text("Manual only")
-                } else if let own {
-                    Text("Switch at \(Int(own))%")
-                } else {
-                    Text("Default (\(Int(shownDefault))%)")
-                }
-            }
-            .fixedSize()
-            .help(thresholdHelp(own: own))
-
-            if let own, own > AutoSwitchSettings.manualOnlyThreshold {
-                Stepper("", value: customThreshold(for: account), in: AutoSwitchSettings.accountStepperRange, step: 1)
-                    .labelsHidden()
-            }
+    /// What a Session or Weekly menu choice does. Default on a Manual only row
+    /// clears Manual only; Manual only in either menu makes the whole account
+    /// Manual only; a number sets just that window.
+    private func choose(_ choice: ThresholdMenuChoice, window: AutoSwitchEngine.Window, for account: Account) {
+        switch choice {
+        case .followDefault:
+            appState.chooseDefaultThreshold(window, for: account)
+        case .manualOnly:
+            appState.setSwitchThreshold(AutoSwitchSettings.manualOnlyThreshold, for: account)
+        case .percent(let value):
+            appState.setWindowThresholds(session: window == .session ? .set(value) : .leave,
+                                         weekly: window == .weekly ? .set(value) : .leave, for: account)
         }
+    }
+
+    /// The line under a Manual only account that is in use.
+    private var manualNote: Text {
+        if defaults.session == defaults.weekly {
+            return Text("You're using it now. Auto-switch moves you off it at \(Self.percent(defaults.session)) and won't move you back to it.")
+        }
+        return Text("You're using it now. Auto-switch moves you off it at \(Self.percent(defaults.session)) of its session or \(Self.percent(defaults.weekly)) of its week and won't move you back to it.")
     }
 
     /// What the account's setting does, in numbers from the engine's own rule.
-    private func thresholdHelp(own: Double?) -> Text {
-        if own == AutoSwitchSettings.manualOnlyThreshold {
-            return Text("Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default threshold (\(Self.percent(shownDefault))).")
+    /// With equal windows it is 1.9's sentence, word for word.
+    private func thresholdHelp(for account: Account) -> Text {
+        let rule = AutoSwitchSettings.rule(for: account, defaults: defaults)
+        if rule.manualOnly {
+            if defaults.session == defaults.weekly {
+                return Text("Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default threshold (\(Self.percent(defaults.session))).")
+            }
+            return Text("Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default thresholds (\(Self.percent(defaults.session)) of its session or \(Self.percent(defaults.weekly)) of its week).")
         }
-        let strategy = AutoSwitchStrategy(rawValue: strategyName) ?? .mostRoom
-        guard let numbers = AutoSwitchSettings.explanation(own: own, defaultThreshold: shownDefault,
-                                                           strategy: strategy, drainEarly: drainEarly) else { return Text(verbatim: "") }
-        if let drainAt = numbers.drainArriveAt {
-            return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt)), and moves you to it only while it is at \(Self.percent(numbers.arriveAt)) or less (\(Self.percent(drainAt)) or less when it switches early before this account's weekly quota resets).")
+        guard let numbers = AutoSwitchSettings.windowExplanation(rule: rule, defaults: defaults) else { return Text(verbatim: "") }
+        if rule.session == rule.weekly {
+            return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt.session)), and moves you to it only while it is at \(Self.percent(numbers.arriveAt.session)) or less.")
         }
-        return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt)), and moves you to it only while it is at \(Self.percent(numbers.arriveAt)) or less.")
-    }
-
-    /// The stepper's binding: the account's own threshold, saved on change.
-    private func customThreshold(for account: Account) -> Binding<Double> {
-        Binding(
-            get: { appState.effectiveSwitchThreshold(for: account) },
-            set: { appState.setSwitchThreshold($0, for: account) }
-        )
+        return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt.session)) of its session or \(Self.percent(numbers.leaveAt.weekly)) of its week, and moves you to it only while it is at \(Self.percent(numbers.arriveAt.session)) or less of its session and \(Self.percent(numbers.arriveAt.weekly)) or less of its week (up to \(Self.percent(numbers.relaxedArriveWeekly)) of its week when no account under its weekly limit can take you).")
     }
 }

@@ -257,6 +257,9 @@ struct MainMenuView: View {
             VStack(alignment: .leading, spacing: 3) {
                 if let account = appState.activeAccount {
                     HStack(spacing: 6) {
+                        if let priority = AccountOrder.validPriority(account.priority) {
+                            PriorityTag(priority: priority)
+                        }
                         Text(account.effectiveDisplayName(obfuscated: maskEmails))
                             .font(.headline)
                         if let sub = account.displaySubscriptionType {

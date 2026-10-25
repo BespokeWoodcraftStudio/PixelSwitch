@@ -11,7 +11,11 @@ struct SettingsView: View {
     @AppStorage("showInDock") private var showInDock = false
     @AppStorage("appLanguage") private var appLanguage = "auto"
     @AppStorage(AutoSwitchSettings.enabledKey) private var autoSwitchEnabled = false
-    @AppStorage(AutoSwitchSettings.thresholdKey) private var autoSwitchThreshold = AutoSwitchSettings.fallbackThreshold
+    // The three stored defaults, read so the sliders show the effective value
+    // while their own key is absent. 0 (an absent key) is "not set" to the readers.
+    @AppStorage(AutoSwitchSettings.thresholdKey) private var baseThreshold = 0.0
+    @AppStorage(AutoSwitchSettings.sessionThresholdKey) private var sessionDefault = 0.0
+    @AppStorage(AutoSwitchSettings.weeklyThresholdKey) private var weeklyDefault = 0.0
     @AppStorage(AutoSwitchSettings.onFableKey) private var autoSwitchOnFable = true
     @AppStorage(AutoSwitchSettings.strategyKey) private var autoSwitchStrategy: AutoSwitchStrategy = .mostRoom
     @AppStorage(AutoSwitchSettings.drainEarlyKey) private var autoSwitchDrainEarly = true
@@ -46,7 +50,9 @@ struct SettingsView: View {
                     Label("About", systemImage: "info.circle")
                 }
         }
-        .frame(width: 520, height: 440)
+        // Wide enough that the Accounts tab's rows (Priority, the account, Session
+        // and Weekly) leave an address at least 28 characters.
+        .frame(width: 820, height: 520)
         .onAppear {
             launchAtLogin = SettingsStore.shared.launchAtLogin
         }
@@ -85,23 +91,19 @@ struct SettingsView: View {
             Section("Auto-switch") {
                 Toggle("Switch account before hitting the limit", isOn: $autoSwitchEnabled)
                 if autoSwitchEnabled {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Default threshold")
-                            Spacer()
-                            Text("\(Int(autoSwitchThreshold))%")
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                        }
-                        Slider(value: $autoSwitchThreshold, in: AutoSwitchSettings.thresholdRange, step: 1)
-                        Text("Any account can have its own threshold in Settings → Accounts, from 1% to 100%, or be Manual only so auto-switch never moves you to it. 100% uses an account until it is empty.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    SettingsThresholdDefaults(
+                        session: effectiveDefault(.session),
+                        weekly: effectiveDefault(.weekly),
+                        onSession: { appState.setDefaultWindowThreshold(.session, to: $0) },
+                        onWeekly: { appState.setDefaultWindowThreshold(.weekly, to: $0) }
+                    )
                     Toggle("Also switch when Fable runs out", isOn: $autoSwitchOnFable)
+                    Text("Fable uses the weekly limit.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Picker("Choose the next account by", selection: $autoSwitchStrategy) {
                         Text("Most room left").tag(AutoSwitchStrategy.mostRoom)
-                        Text("My order").tag(AutoSwitchStrategy.myOrder)
+                        Text("Priority (lowest number first)").tag(AutoSwitchStrategy.myOrder)
                         Text("Resets soonest (use quota before it expires)").tag(AutoSwitchStrategy.resetsSoonest)
                     }
                     Text(strategyExplanation)
@@ -323,12 +325,18 @@ struct SettingsView: View {
     // MARK: - Helpers
 
     /// One line under the strategy picker saying what the chosen strategy does.
+    /// The effective default for one window: its own stored value if set, else
+    /// the base (spec 2.1). Never a stand-in for "absent".
+    private func effectiveDefault(_ window: AutoSwitchEngine.Window) -> Double {
+        AutoSwitchSettings.windowDefaults(base: baseThreshold, session: sessionDefault, weekly: weeklyDefault).value(for: window)
+    }
+
     private var strategyExplanation: LocalizedStringKey {
         switch autoSwitchStrategy {
         case .mostRoom:
             return "Moves you to the account with the most room left, preferring one that still has Fable to spare."
         case .myOrder:
-            return "Moves you to the highest account in your order (Settings → Accounts) that has room. It always starts from the top."
+            return "Moves you to the account with the lowest priority number (Settings → Accounts) that has room. It always starts from the lowest number."
         case .resetsSoonest:
             return "Moves you to the account whose weekly quota resets soonest, so quota about to expire is used before it is lost."
         }

@@ -19,7 +19,10 @@ protocol AppControlling: AnyObject {
     func usageSampledAt(for id: UUID) -> Date?
     func usageError(for id: UUID) -> String?
     func isSwitchable(_ id: UUID) -> Bool
-    func effectiveSwitchThreshold(for account: Account) -> Double
+    /// The two global defaults as auto-switch reads them now.
+    var windowDefaults: AutoSwitchEngine.WindowPair { get }
+    /// Where auto-switch moves off `account` while it is active, per window.
+    func leaveAt(for account: Account) -> AutoSwitchEngine.WindowPair
 
     /// Returns once the switch has finished. Throws `ControlError`.
     func switchAccount(to id: UUID) async throws
@@ -31,7 +34,14 @@ protocol AppControlling: AnyObject {
     func cancelSignIn() throws -> SignInInfo
     func removeAccount(_ id: UUID) throws
     func setLabel(_ label: String?, for id: UUID)
+    /// The legacy "both windows" write: clears the account's window values too.
     func setSwitchThreshold(_ threshold: Double?, for id: UUID)
+    /// One or both windows (`.leave` = not in the request). False when the
+    /// account is gone.
+    func setWindowThresholds(session: AutoSwitchSettings.WindowEdit, weekly: AutoSwitchSettings.WindowEdit, for id: UUID) -> Bool
+    /// 1–99, or nil to clear. Re-sorts the list. False when the account is gone.
+    func setPriority(_ priority: Int?, for id: UUID) -> Bool
+    /// Puts the accounts in this order and numbers them 1...N.
     func setAccountOrder(_ ids: [UUID]) -> Bool
     func refreshUsage() async
     func settingValue(_ key: SettingKey) -> JSONValue
@@ -160,6 +170,45 @@ final class ControlAPI {
             controller.setSwitchThreshold(threshold, for: target.id)
             return .object(["account": try .encode(info(for: target.id))])
 
+        case .accountsSetThresholds:
+            let reference = try params(request, AccountParams.self).account
+            let object = request.params?.objectValue ?? [:]
+            guard object["session"] != nil || object["weekly"] != nil else {
+                throw ControlError(.invalidParams, "The parameters for \(request.method) are missing or the wrong shape.")
+            }
+            let target = try resolve(reference)
+            detail = " \(target.id.uuidString)"
+            let session = try windowEdit(object["session"])
+            let weekly = try windowEdit(object["weekly"])
+            guard controller.setWindowThresholds(session: session, weekly: weekly, for: target.id) else {
+                throw ControlError(.notFound, "That account no longer exists.")
+            }
+            return .object(["account": try .encode(info(for: target.id))])
+
+        case .accountsSetPriority:
+            let reference = try params(request, AccountParams.self).account
+            guard let raw = request.params?.objectValue?["priority"] else {
+                throw ControlError(.invalidParams, "The parameters for \(request.method) are missing or the wrong shape.")
+            }
+            let target = try resolve(reference)
+            detail = " \(target.id.uuidString)"
+            let priority: Int?
+            switch raw {
+            case .null:
+                priority = nil
+            case .number(let value):
+                guard value.isFinite, value == value.rounded(), AccountOrder.priorityRange.contains(Int(exactly: value) ?? 0) else {
+                    throw Self.badPriority
+                }
+                priority = Int(value)
+            default:
+                throw Self.badPriority
+            }
+            guard controller.setPriority(priority, for: target.id) else {
+                throw ControlError(.notFound, "That account no longer exists.")
+            }
+            return .object(["accounts": try .encode(accountInfos())])
+
         case .accountsSetOrder:
             let listed = try AccountResolver.resolveAll(params(request, OrderParams.self).accounts, in: controller.accounts)
             let ids = listed.map(\.id)
@@ -217,6 +266,23 @@ final class ControlAPI {
         }
     }
 
+    private static let badPriority = ControlError(.invalidValue, "A priority must be a whole number from 1 to 99, or null for none.")
+
+    /// One window of an `accounts.setThresholds` request: absent leaves it, null
+    /// follows the default, a number (rounded half away from zero) is its own
+    /// value and must come to 1–100.
+    private func windowEdit(_ value: JSONValue?) throws -> AutoSwitchSettings.WindowEdit {
+        guard let value else { return .leave }
+        let refusal = ControlError(.invalidValue, "A threshold must be 1–100, or null to follow the default. For manual only use accounts.setThreshold with 0.")
+        switch value {
+        case .null: return .clear
+        case .number(let number):
+            guard number.isFinite, (1.0...100.0).contains(number.rounded()) else { throw refusal }
+            return .set(number.rounded())
+        default: throw refusal
+        }
+    }
+
     private func resolve(_ reference: String) throws -> Account {
         try AccountResolver.resolve(reference, in: controller.accounts)
     }
@@ -232,8 +298,17 @@ final class ControlAPI {
             claudeAvailable: controller.claudeAvailable,
             lastRefresh: controller.lastUsageRefresh,
             autoSwitch: controller.autoSwitch,
-            signIn: controller.signIn
+            signIn: controller.signIn,
+            protocolRevision: ControlProtocol.revision,
+            features: ControlProtocol.features,
+            platform: ControlProtocol.platform
         )
+    }
+
+    /// The data of an `accountsChanged` event: the list as `accounts.list`
+    /// would answer it now.
+    func accountsChangedData() -> JSONValue {
+        (try? .object(["accounts": .encode(accountInfos())])) ?? .object([:])
     }
 
     private func accountInfos() -> [AccountInfo] {
@@ -251,8 +326,7 @@ final class ControlAPI {
             account,
             position: position,
             isSwitchable: controller.isSwitchable(account.id),
-            effectiveThreshold: AutoSwitchSettings.leaveAtThreshold(rule: controller.effectiveSwitchThreshold(for: account),
-                                                                    defaultThreshold: controller.autoSwitch.defaultThreshold),
+            leaveAt: controller.leaveAt(for: account),
             usage: ControlSnapshots.usageInfo(controller.usage(for: account.id),
                                               sampledAt: controller.usageSampledAt(for: account.id),
                                               error: controller.usageError(for: account.id))
@@ -272,7 +346,9 @@ final class ControlAPI {
 /// Turns app models into protocol results. Pure, so the no-token rule and the
 /// shapes are unit-tested.
 enum ControlSnapshots {
-    static func accountInfo(_ account: Account, position: Int, isSwitchable: Bool, effectiveThreshold: Double, usage: UsageInfo?) -> AccountInfo {
+    /// `leaveAt`: where auto-switch moves off the account while it is active,
+    /// per window. `effectiveThreshold` (what a 1.9 reader sees) is the lower.
+    static func accountInfo(_ account: Account, position: Int, isSwitchable: Bool, leaveAt: AutoSwitchEngine.WindowPair, usage: UsageInfo?) -> AccountInfo {
         AccountInfo(
             id: account.id.uuidString,
             email: account.email,
@@ -282,10 +358,26 @@ enum ControlSnapshots {
             isSwitchable: isSwitchable,
             position: position,
             threshold: account.switchThreshold,
-            effectiveThreshold: effectiveThreshold,
+            effectiveThreshold: min(leaveAt.session, leaveAt.weekly),
             manualOnly: AutoSwitchSettings.isManualOnly(own: account.switchThreshold),
-            usage: usage
+            usage: usage,
+            priority: AccountOrder.validPriority(account.priority),
+            sessionThreshold: AutoSwitchSettings.normalizedWindowThreshold(account.sessionThreshold),
+            weeklyThreshold: AutoSwitchSettings.normalizedWindowThreshold(account.weeklyThreshold),
+            effectiveSessionThreshold: leaveAt.session,
+            effectiveWeeklyThreshold: leaveAt.weekly
         )
+    }
+
+    /// The data of an `autoSwitched` event. `window` is left out unless a
+    /// window's limit fired; `relaxed` is always sent.
+    static func autoSwitchedData(from: UUID, to: UUID, limit: AutoSwitchEngine.Limit, trigger: AutoSwitchEngine.Trigger,
+                                 window: AutoSwitchEngine.Window?, relaxed: Bool) -> [String: JSONValue] {
+        var data: [String: JSONValue] = ["from": .string(from.uuidString), "to": .string(to.uuidString),
+                                         "limit": .string(limit.rawValue), "trigger": .string(trigger.rawValue),
+                                         "relaxed": .bool(relaxed)]
+        if let window { data["window"] = .string(window.rawValue) }
+        return data
     }
 
     static func usageInfo(_ usage: UsageAPIResponse?, sampledAt: Date?, error: String?) -> UsageInfo? {
