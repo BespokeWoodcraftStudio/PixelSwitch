@@ -13,8 +13,10 @@ Lifecycle:
 * Everything the daemon spends (the usage cycle, saved-login renewals, auto-switch, the updater)
   starts only after that. The machine-usage line of the Mac status is omitted on Linux (D15).
 * SIGTERM and SIGINT: no new cycle, switch, renewal or sign-in; in-flight renewals finish their POST,
-  ownership check and save (at most 80 s); a running sign-in is cancelled as Cancel does; then the
-  socket and ``socket-path`` are removed and the process exits 0.
+  ownership check and save (at most 80 s); a running sign-in is cancelled as Cancel does; the updater
+  abandons a download or self-check at once; then the socket and ``socket-path`` are removed and the
+  process exits 0. The whole stop is held inside :data:`STOP_BUDGET_SECONDS` (85 s), under the unit's
+  ``TimeoutStopSec=90``.
 * ``--self-check``: imports every module, reads settings, accounts and saved logins READ-ONLY, prints
   ``pixelswitchd <version> (build <n>)`` and exits 0. It takes no lock, binds no socket and writes
   nothing, so it runs beside a live daemon.
@@ -42,6 +44,12 @@ EXIT_FAILED = 1
 EXIT_CONFIG = 78  # EX_CONFIG: test mode refused, or a path that cannot work
 
 USER_AGENT_FORMAT = "PixelSwitch/{version} (Linux)"
+
+#: ``TimeoutStopSec=90`` in the unit; after that systemd sends SIGKILL. The in-flight renewals get at
+#: most 80 s (spec 5.1) and the whole stop is held to 85 s.
+RENEWAL_WAIT_SECONDS = 80.0
+STOP_BUDGET_SECONDS = 85.0
+UPDATER_STOP_SECONDS = 5.0
 
 
 def ensure_own_code_on_path() -> None:
@@ -154,15 +162,26 @@ class Daemon:
         else:
             self.shutdown.set()
 
-    def stop(self) -> None:
-        coordinator, server = self.coordinator, self.server
+    def stop(self, *, server_started: bool = True, clock=time.monotonic) -> None:
+        """Shuts down within :data:`STOP_BUDGET_SECONDS`. ``server_started`` False (the control server
+        never bound, e.g. another daemon already answers on the socket) leaves the socket and the
+        ``socket-path`` pointer alone: they belong to the daemon that is running."""
+        began = clock()
+
+        def remaining() -> float:
+            return max(0.0, STOP_BUDGET_SECONDS - (clock() - began))
+
+        coordinator, server, updater = self.coordinator, self.server, self.updater
         coordinator.begin_shutdown()
+        if updater is not None:
+            updater.stop(0.0)  # the flag only: no download, self-check or restart may start from here on
         server.stop_accepting()
-        finished = coordinator.finish_shutdown(80.0)
-        if self.updater is not None:
-            self.updater.stop()
-        server.stop()
-        _remove_socket_pointer(self.paths)
+        finished = coordinator.finish_shutdown(min(RENEWAL_WAIT_SECONDS, remaining()))
+        if updater is not None:
+            updater.stop(min(UPDATER_STOP_SECONDS, remaining()))
+        if server_started:
+            server.stop()
+            _remove_socket_pointer(self.paths)
         self.log.category("Daemon").info("[daemon] Stopped" + ("" if finished else " (some work did not finish in time)"))
         self.log.close()
         try:
@@ -215,7 +234,11 @@ def build(env: Mapping[str, str], lock_fd: int, paths, shutdown: threading.Event
     accounts_file = AccountsFile(paths.accounts, log.category("Accounts"))
     backups = BackupStore(paths.backups, log.category("Keychain"))
     needs_file = NeedsReauthFile(paths.needs_reauth, log.category("AppState"))
-    transport = Transport(user_agent=USER_AGENT_FORMAT.format(version=version.version), test_mode=test_mode)
+    user_agent = USER_AGENT_FORMAT.format(version=version.version)
+    transport = Transport(user_agent=user_agent, test_mode=test_mode)  # carries tokens: never follows a redirect
+    # The updater has its own transport: GitHub answers a release download with redirects, and the
+    # one that carries tokens must never follow any. This one has no token and goes to GitHub hosts only.
+    update_transport = Transport(user_agent=user_agent, test_mode=test_mode, follow_redirects=True)
     service = ClaudeService(transport, ApiBases.from_env(env), UsageRequestGuard(), log.category("Claude"))
     cli: ClaudeCli
     coordinator_ref: list = []
@@ -253,8 +276,7 @@ def build(env: Mapping[str, str], lock_fd: int, paths, shutdown: threading.Event
         updater_kwargs["public_key"] = public_key
 
     def idle() -> bool:
-        """No switch, sign-in, saved-login renewal or store write is in progress (spec 5.4)."""
-        return (not coordinator.gate.busy and coordinator.renewals_in_flight() == 0 and backups.is_idle())
+        return is_idle(coordinator)
 
     def restart() -> None:
         if test_mode:
@@ -263,7 +285,7 @@ def build(env: Mapping[str, str], lock_fd: int, paths, shutdown: threading.Event
         restart_service()
 
     updater = Updater(
-        paths=paths, log=log.category("Update"), running=version, transport=transport,
+        paths=paths, log=log.category("Update"), running=version, transport=update_transport,
         automatic=lambda: bool(coordinator.setting_value(_automatic_key())), idle=idle, restart=restart,
         scheduled=scheduled, **updater_kwargs)
     daemon.updater = updater
@@ -279,14 +301,35 @@ def build(env: Mapping[str, str], lock_fd: int, paths, shutdown: threading.Event
         marker_written.set()
         try:
             fsio.atomic_write(paths.good_marker(version.build), f"{int(time.time())}\n")
-            from .updater import prune_old_versions
+            from .updater import prune_old_versions, read_bad_builds
 
-            prune_old_versions(paths.app_dir, log.category("Update"))
+            prune_old_versions(paths.app_dir, log.category("Update"), read_bad_builds(paths))
         except OSError as error:
             log.category("Daemon").warning(f"[daemon] Could not write the good marker ({type(error).__name__})")
 
     coordinator.on_cycle_complete = cycle_done
     return daemon
+
+
+def _store_idle(store) -> bool:
+    """False while a read or write of the store is in progress (its lock is held)."""
+    probe = getattr(store, "is_idle", None)
+    if callable(probe):
+        return bool(probe())
+    lock = getattr(store, "_lock", None)
+    if lock is None:
+        return True
+    if lock.acquire(blocking=False):
+        lock.release()
+        return True
+    return False
+
+
+def is_idle(coordinator) -> bool:
+    """Spec 5.1 and 5.4: a switch (or capture, removal), a sign-in, a saved-login renewal or a write to
+    the saved logins, the accounts or the settings blocks the updater's restart."""
+    return (not coordinator.gate.busy and coordinator.renewals_in_flight() == 0
+            and all(_store_idle(store) for store in (coordinator.backups, coordinator.accounts_file, coordinator.settings)))
 
 
 def _automatic_key():
@@ -330,7 +373,7 @@ def run_daemon(env: Mapping[str, str]) -> int:
     except StartError as error:
         log.error(f"[control] Not started: {error}")
         print(f"pixelswitchd: {error}", file=sys.stderr)
-        daemon.stop()
+        daemon.stop(server_started=False)
         return EXIT_OK if error.already_running else EXIT_FAILED
     try:
         fsio.atomic_write(paths.socket_path_file, paths.socket + "\n")
