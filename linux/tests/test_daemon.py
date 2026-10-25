@@ -57,7 +57,16 @@ class Proc:
         if wait:
             assert wait_for(lambda: self._answers() or self.process.poll() is not None, 30), "the daemon never answered"
             assert self.process.poll() is None, self.process.communicate()
+            # settled: the pointer to the socket is written right after the bind, so wait for it too
+            assert wait_for(lambda: self._pointer_is_current(), 10), "socket-path was not written"
         return self
+
+    def _pointer_is_current(self) -> bool:
+        try:
+            with open(self.paths.socket_path_file, encoding="utf-8") as handle:
+                return handle.read().strip() == self.paths.socket
+        except OSError:
+            return False
 
     def _answers(self) -> bool:
         import socket as socket_module
