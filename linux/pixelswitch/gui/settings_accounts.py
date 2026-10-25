@@ -2,7 +2,7 @@
 
 Each card shows what the Mac's account row and usage card show: the account (label and address), a green
 Active badge, both usage windows with their percentage and reset time, Fable, "Updated N ago", the account's
-message, Retry and Re-sign where they help, the Priority menu (P1 to P9 and a number), the Session and Weekly
+message and Retry where it helps, Re-sign (on every account, as the Mac's re-authenticate button is), the Priority menu (P1 to P9 and a number), the Session and Weekly
 limit menus (Default (N%), Manual only, 10 to 100 and a number), the help sentence for those numbers, the
 label, Switch and Remove (with a confirmation). Under the cards: the sentences of spec D3 and D6 with Use
 priority, and the buttons that add an account.
@@ -43,11 +43,16 @@ class AccountCard(Adw.PreferencesGroup):
         self._updating = False
         self._label_dirty = False
 
-        # Header: Active badge, Switch, Remove.
+        # Header: Active badge, Re-sign, Switch, Remove.
         suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, valign=Gtk.Align.CENTER)
         self.badge = Gtk.Label(label="Active")
         self.badge.add_css_class("active-badge")
         self.badge.set_valign(Gtk.Align.CENTER)
+        # The Mac's re-authenticate button is on every account row, and the daemon's own sentences ("Re-authenticate
+        # (↻) to fix.") name that glyph, so this button carries it. It is highlighted when signing in again is the fix.
+        self.resign_button = Gtk.Button(label="↻ Re-sign")
+        self.resign_button.set_valign(Gtk.Align.CENTER)
+        self.resign_button.connect("clicked", lambda _b: window.start_resign(self.info))
         self.switch_button = Gtk.Button(label="Switch to this account")
         self.switch_button.set_valign(Gtk.Align.CENTER)
         self.switch_button.connect("clicked", self._switch_clicked)
@@ -55,7 +60,7 @@ class AccountCard(Adw.PreferencesGroup):
         self.remove_button.add_css_class("destructive-action")
         self.remove_button.set_valign(Gtk.Align.CENTER)
         self.remove_button.connect("clicked", self._remove_clicked)
-        for widget in (self.badge, self.switch_button, self.remove_button):
+        for widget in (self.badge, self.resign_button, self.switch_button, self.remove_button):
             suffix.append(widget)
         self.set_header_suffix(suffix)
 
@@ -70,19 +75,14 @@ class AccountCard(Adw.PreferencesGroup):
         self.fable_bar = usage_bar()
         self.fable_row.add_suffix(self.fable_bar)
 
-        # The account's message, with Retry and Re-sign.
+        # The account's message, with Retry.
         self.message_row = plain_row("")
         self.message_row.set_title_lines(0)
         self.message_row.add_prefix(Gtk.Image.new_from_icon_name("dialog-information-symbolic"))
         self.retry_button = Gtk.Button(label="Retry")
         self.retry_button.set_valign(Gtk.Align.CENTER)
         self.retry_button.connect("clicked", lambda _b: window.run("usage.refresh", None, timeout=120.0))
-        self.resign_button = Gtk.Button(label="Re-sign")
-        self.resign_button.add_css_class("suggested-action")
-        self.resign_button.set_valign(Gtk.Align.CENTER)
-        self.resign_button.connect("clicked", lambda _b: window.start_resign(self.info))
         self.message_row.add_suffix(self.retry_button)
-        self.message_row.add_suffix(self.resign_button)
 
         # Priority and the two limits.
         self.priority_row = plain_row("Priority", model.TEXT_PRIORITY_ORDER)
@@ -140,7 +140,10 @@ class AccountCard(Adw.PreferencesGroup):
             self.message_row.set_visible(bool(message))
             if message:
                 self.message_row.set_title(message)
-            self.resign_button.set_visible(bool(message) and model.needs_resign(info))
+            if model.needs_resign(info):
+                self.resign_button.add_css_class("suggested-action")
+            else:
+                self.resign_button.remove_css_class("suggested-action")
             self.retry_button.set_visible(bool(message) and model.can_retry(info))
 
             defaults = snapshot.defaults
@@ -204,8 +207,7 @@ class AccountCard(Adw.PreferencesGroup):
         name = model.account_title(self.info)
         confirm_dialog(
             self.window, f"Remove {name}?",
-            "This deletes the account's saved login from PixelSwitch. Signing it back in needs a person at a browser. "
-            "Claude Code's own login is not touched.",
+            model.remove_body(self.info, self.window.snapshot.accounts),
             "Remove", lambda: self.window.run("accounts.remove", {"account": self.reference}),
         )
 

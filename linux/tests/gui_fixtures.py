@@ -22,7 +22,8 @@ def fixture_accounts(now: float | None = None) -> list[dict]:
     return [
         {"id": "11111111-1111-1111-1111-111111111111", "email": "ahamade@gmail.com", "label": "Personal", "subscription": "Max",
          "isActive": True, "isSwitchable": True, "position": 1, "priority": 1, "manualOnly": False,
-         "effectiveThreshold": 90, "effectiveSessionThreshold": 90, "effectiveWeeklyThreshold": 90,
+         # follows the defaults of fixture_snapshot (session 90, weekly 50), as the daemon would report it
+         "effectiveThreshold": 50, "effectiveSessionThreshold": 90, "effectiveWeeklyThreshold": 50,
          "usage": {"session": {"utilization": 42, "resetsAt": iso(now, 3 * 3600 + 12 * 60)},
                    "weekly": {"utilization": 61, "resetsAt": iso(now, 2 * 86400 + 5 * 3600)},
                    "fable": {"utilization": 10, "resetsAt": iso(now, 2 * 86400 + 5 * 3600)},

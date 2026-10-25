@@ -90,13 +90,18 @@ and a menu with every account in priority order (`P1 address · S 42% · W 61%`,
 of its message under it), click to switch, Auto-switch on or off, Refresh, Settings, Sign in another account and Quit
 tray. It registers itself with the desktop over D-Bus and exports its menu with Dbusmenu, so it needs no AppIndicator
 package (it uses AyatanaAppIndicator3 only when that is installed). It follows the daemon live and restarts itself when
-the daemon reports a new version.
+the daemon runs a new version or build (a build-only update restarts it too).
 
 **The settings window** (`pixelswitch-settings`, GTK 4 and libadwaita) has Accounts (priority, Session and Weekly
 limits, label, both usage windows with their reset times, Fable, "Updated N ago", the account's message, Retry,
-Re-sign, Remove), General (auto-switch, the two defaults from 50 to 100, the strategy, Fable, early switching, the
-refresh interval), Sign in (Start, both links each with Open and Copy, the code box, status) and About (version,
-Update automatically, Check now, the log path). Nothing opens a browser unless you press Open.
+Re-sign, Remove; Re-sign (the ↻ button) is on every account, as the Mac's is, and highlighted where it is the fix; Remove
+says so when it will also switch Claude Code to another account), General (auto-switch, the two defaults from 50 to
+100, Fable, the strategy with the "numbers matter only when it chooses by Priority" line and its Use priority button,
+early switching, the refresh interval), Sign in (Start, both links each with Open and Copy, the code box, status) and About (version,
+Update automatically, Check now, the log path). Nothing opens a browser unless you press Open. While the service restarts (every update does), the window keeps
+the last accounts on screen, greyed out under the "not running" banner, instead of showing "No Accounts"; "Updated N
+ago" counts up by itself; and a number held under the pointer is saved when the pointer leaves, so the list does not
+re-sort under your next click.
 
 The tray and the settings window never send a usage refresh by themselves (only Refresh and Retry do) and never run
 the daemon: when it is not running they start it with `systemctl --user start pixelswitch.service` and nothing else.

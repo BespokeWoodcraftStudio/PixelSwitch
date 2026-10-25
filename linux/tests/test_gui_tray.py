@@ -65,12 +65,18 @@ class TrayRuleTests(unittest.TestCase):
         self.assertTrue(sibling.endswith(os.path.join("bin", "pixelswitch-settings")))
         self.assertIsNone(self.tray.launcher_path("nope", self.dir))
 
-    def make_tray(self, own, env=None):
+    def make_tray(self, own, env=None, own_build=None, installed=None):
         from pixelswitch.gui import model
 
         obj = object.__new__(self.tray.Tray)
         obj.env = env if env is not None else {}
         obj.own_version = own
+        obj.own_build = own_build
+        if installed is not None:  # the VERSION of app/current, as the updater leaves it
+            current = os.path.join(self.dir, ".local", "share", "pixelswitch", "app", "current")
+            os.makedirs(current, exist_ok=True)
+            with open(os.path.join(current, "VERSION"), "w") as handle:
+                handle.write(installed)
         obj._reexec_done = False
         obj.paths = type("P", (), {"home": self.dir})()
         stopped = []
@@ -105,6 +111,31 @@ class TrayRuleTests(unittest.TestCase):
         self.addCleanup(setattr, os, "execv", original)
         obj.maybe_reexec(model.Snapshot(connected=True, status={"appVersion": "2.0"}))
         self.assertEqual(calls, [])  # no loop if the launcher still resolves to the old version
+
+    def test_a_build_only_update_restarts_the_tray_too_once(self):
+        # 2.0 build 31 to 2.0 build 32: the marketing version is the same, so only the build tells.
+        obj, launcher, stopped, model = self.make_tray("2.0", own_build=31, installed="version=2.0\nbuild=32\n")
+        calls = []
+        original = os.execv
+        os.execv = lambda path, args: calls.append((path, args))
+        self.addCleanup(setattr, os, "execv", original)
+        self.addCleanup(os.environ.pop, self.tray.REEXEC_ENV, None)
+        obj.maybe_reexec(model.Snapshot(connected=True, status={"appVersion": "2.0"}))
+        self.assertEqual(calls, [(launcher, [launcher])])
+        self.assertEqual(os.environ[self.tray.REEXEC_ENV], "2.0-32")
+
+    def test_the_same_build_or_a_tray_that_already_restarted_for_it_stays(self):
+        calls = []
+        original = os.execv
+        os.execv = lambda path, args: calls.append(path)
+        self.addCleanup(setattr, os, "execv", original)
+        same, _, _, model = self.make_tray("2.0", own_build=32, installed="version=2.0\nbuild=32\n")
+        same.maybe_reexec(model.Snapshot(connected=True, status={"appVersion": "2.0"}))
+        again, _, _, _ = self.make_tray("2.0", env={self.tray.REEXEC_ENV: "2.0-32"}, own_build=31, installed="version=2.0\nbuild=32\n")
+        again.maybe_reexec(model.Snapshot(connected=True, status={"appVersion": "2.0"}))
+        unreadable, _, _, _ = self.make_tray("2.0", own_build=31, installed="garbage")  # no build to compare: the version decides
+        unreadable.maybe_reexec(model.Snapshot(connected=True, status={"appVersion": "2.0"}))
+        self.assertEqual(calls, [])
 
     def test_nothing_while_the_daemon_is_not_answering(self):
         obj, launcher, stopped, model = self.make_tray("1.9")

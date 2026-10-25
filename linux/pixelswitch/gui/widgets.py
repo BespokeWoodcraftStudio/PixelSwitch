@@ -3,7 +3,9 @@
 The Priority control and the Session and Weekly limit controls are the Mac row's controls (a menu plus a
 number for any whole value). They report only what the user did: setting them from a daemon reply never
 calls back (``_updating``), and a number typed with the spin button is saved after a short pause, so the
-list (which sorts by priority) does not move under the pointer between two clicks.
+list (which sorts by priority) does not move under the pointer between two clicks. While the pointer is over a
+control the save is held (the pause starts over), and it is sent when the pointer leaves or the number loses focus,
+as the Mac's priority stepper holds its save while the pointer is over the row.
 """
 from __future__ import annotations
 
@@ -109,7 +111,45 @@ def set_items(dropdown: Gtk.DropDown, strings: list[str], selected: int) -> None
         dropdown.set_selected(selected)
 
 
-class PriorityControl(Gtk.Box):
+class _HoldsWhilePointed:
+    """What the number controls share: a pointer over the control holds the pending save back, and leaving it (or the
+    number losing keyboard focus) sends it. Needs ``self.spin``, ``self._debounce`` and ``self._commit_now``."""
+
+    def _watch_pointer(self) -> None:
+        self._pointer_inside = False
+        motion = Gtk.EventControllerMotion()
+        motion.connect("enter", lambda *_a: self._hold_begin())
+        motion.connect("leave", lambda *_a: self._hold_end())
+        self.add_controller(motion)
+        focus = Gtk.EventControllerFocus()
+        focus.connect("leave", lambda *_a: self._release())
+        self.spin.add_controller(focus)
+
+    def _hold_begin(self) -> None:
+        self._pointer_inside = True
+
+    def _hold_end(self) -> None:
+        self._pointer_inside = False
+        self._release()
+
+    def _release(self) -> None:
+        """Sends a pending number now (the pointer left, or focus did)."""
+        if self._debounce.pending:
+            self._debounce.cancel()
+            self._commit_now()
+
+    def _commit(self) -> None:
+        """The pause ran out: send the number, unless the pointer is still over the control (then wait another pause)."""
+        if self._pointer_inside:
+            self._debounce.trigger()
+            return
+        self._commit_now()
+
+    def flush(self) -> None:
+        self._release()
+
+
+class PriorityControl(_HoldsWhilePointed, Gtk.Box):
     """None or P1 to P9 in a menu, and a number 1 to 99 beside it once there is one."""
 
     def __init__(self, on_change: Callable[[int | None], None]) -> None:
@@ -128,6 +168,7 @@ class PriorityControl(Gtk.Box):
         self._pending: int | None = None
         self.append(self.dropdown)
         self.append(self.spin)
+        self._watch_pointer()
 
     def update(self, priority: int | None) -> None:
         self._updating = True
@@ -158,16 +199,13 @@ class PriorityControl(Gtk.Box):
         self._pending = int(self.spin.get_value())
         self._debounce.trigger()
 
-    def _commit(self) -> None:
+    def _commit_now(self) -> None:
         value, self._pending = self._pending, None
         if value is not None:
             self._on_change(value)
 
-    def flush(self) -> None:
-        self._debounce.flush()
 
-
-class LimitControl(Gtk.Box):
+class LimitControl(_HoldsWhilePointed, Gtk.Box):
     """The Session or Weekly menu of one account: Default (N%), Manual only, 10 to 100, and a number."""
 
     def __init__(self, window: str, on_choice: Callable[[str, float | None], None]) -> None:
@@ -188,6 +226,7 @@ class LimitControl(Gtk.Box):
         self._pending: int | None = None
         self.append(self.dropdown)
         self.append(self.spin)
+        self._watch_pointer()
 
     def update(self, info: dict, defaults: tuple[float, float]) -> None:
         self._updating = True
@@ -231,13 +270,10 @@ class LimitControl(Gtk.Box):
         self._pending = int(self.spin.get_value())
         self._debounce.trigger()
 
-    def _commit(self) -> None:
+    def _commit_now(self) -> None:
         value, self._pending = self._pending, None
         if value is not None:
             self._on_choice("percent", float(value))
-
-    def flush(self) -> None:
-        self._debounce.flush()
 
 
 def usage_bar() -> Gtk.ProgressBar:

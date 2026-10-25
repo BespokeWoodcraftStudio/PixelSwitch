@@ -97,6 +97,7 @@ def run_item() -> int:
          "usage": {"session": {"utilization": 42}, "weekly": {"utilization": 61}}},
         {"id": "B", "email": "bob@home.com", "isActive": False, "isSwitchable": True, "position": 2,
          "usage": {"error": "Anthropic's usage service isn't responding (HTTP 503). Your account is fine; PixelSwitch keeps trying."}},
+        {"id": "C", "email": "ahmed_h@example.com", "label": "side_project", "isActive": False, "isSwitchable": True, "position": 3},
     ]
     snapshot = model.Snapshot(connected=True, status={"appVersion": "2.0", "autoSwitch": {"enabled": True}}, accounts=accounts)
     backend.set_menu(model.build_tray_menu(snapshot))
@@ -177,6 +178,8 @@ def run_main() -> int:
         check(texts[0] == "P1 alice@work.com · S 42% · W 61%", f"the first menu line is the active account ({texts[0]})")
         check(texts[1] == "bob@home.com · S — · W —", f"the second account follows ({texts[1]})")
         check(texts[2].strip().startswith("Anthropic's usage service isn't responding"), "a short message sits under the account")
+        # Dbusmenu hides a single underscore (an access-key mark), so a real one must be exported doubled.
+        check(texts[3].startswith("side__project"), f"an underscore in a label is exported doubled ({texts[3]})")
         check("Auto-switch" in texts and "Refresh" in texts and "Settings…" in texts and "Quit tray" in texts, "the fixed items are there")
         first_props = labels[0][1]
         check(first_props.get("toggle-type") == "checkmark" and first_props.get("toggle-state") == 1, "the active account is checked")

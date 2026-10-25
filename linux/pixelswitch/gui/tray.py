@@ -7,8 +7,8 @@ and Quit tray. It is a client of the daemon's socket and lives off ``events.subs
 
 Rules (spec 5.1): the tray never sends ``usage.refresh`` by itself (only the user's Refresh does), never
 execs ``pixelswitchd`` (it only asks systemd to start the service, through the control client), and
-re-executes itself when the daemon reports another version than its own, once per version so a daemon that
-stays on the old one cannot loop it. One tray per user (a lock in the state folder).
+re-executes itself when the daemon runs another version or build than its own (a build-only update, 2.0 build 31
+to 2.0 build 32, counts), once per version and build so a daemon that stays on the old one cannot loop it. One tray per user (a lock in the state folder).
 
 Needs PyGObject. The backend is chosen by ``sni.pick_backend`` (AyatanaAppIndicator3 only if importable).
 """
@@ -64,9 +64,10 @@ class Tray:
         self.loop = GLib.MainLoop()
         self.snapshot = model.Snapshot()
         try:
-            self.own_version = version_module.read_version().version
+            own = version_module.read_version()
+            self.own_version, self.own_build = own.version, own.build
         except version_module.VersionUnavailable:
-            self.own_version = None
+            self.own_version, self.own_build = None, None
         icons = os.path.join(self.paths.home, ".local", "share", "icons")
         self.backend = sni.pick_backend(self.on_action, icon_theme_path=icons if os.path.isdir(icons) else "",
                                         forced=self.env.get("PIXELSWITCH_TRAY_BACKEND"))
@@ -92,19 +93,34 @@ class Tray:
             self.backend.set_menu(entries)
         self.maybe_reexec(snapshot)
 
+    def installed_build(self, version: str) -> int | None:
+        """The build of the installed version (``app/current/VERSION``) when it is ``version``, else None. The
+        daemon reports only the marketing version, and a build-only update keeps it."""
+        path = os.path.join(self.paths.home, ".local", "share", "pixelswitch", "app", "current", "VERSION")
+        try:
+            with open(path, encoding="utf-8") as handle:
+                installed = version_module.parse_version_file(handle.read())
+        except (OSError, ValueError, UnicodeDecodeError):
+            return None
+        return installed.build if installed.version == version else None
+
     def maybe_reexec(self, snapshot: model.Snapshot) -> None:
-        """The daemon reports another version than this tray: start the tray again through the launcher,
-        which resolves ``current``. Once per daemon version: if the new process still differs, it stays."""
+        """The daemon runs another version or build than this tray: start the tray again through the launcher,
+        which resolves ``current``. Once per version and build: if the new process still differs, it stays."""
         daemon_version = snapshot.app_version
         if self._reexec_done or not snapshot.connected or not daemon_version or not self.own_version:
             return
-        if daemon_version == self.own_version or self.env.get(REEXEC_ENV) == daemon_version:
+        build = self.installed_build(daemon_version)
+        own_build = getattr(self, "own_build", None)
+        key = f"{daemon_version}-{build}" if build is not None else daemon_version
+        differs = daemon_version != self.own_version or (build is not None and own_build is not None and build != own_build)
+        if not differs or self.env.get(REEXEC_ENV) == key:
             return
         launcher = launcher_path("pixelswitch-tray", self.paths.home)
         if launcher is None:
             return
         self._reexec_done = True
-        os.environ[REEXEC_ENV] = daemon_version
+        os.environ[REEXEC_ENV] = key
         self.link.stop()
         self.backend.stop()
         os.execv(launcher, [launcher])
@@ -155,6 +171,9 @@ class Tray:
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError:
             self.notify("PixelSwitch", "systemd could not be run to start the service.")
+            return
+        # Look again when it is up, so "PixelSwitch is not running" does not outlast the start by a reconnect wait.
+        GLib.timeout_add(1500, lambda: self.link.request_snapshot() or False)
 
     def notify(self, summary: str, body: str) -> None:
         """A desktop notification over org.freedesktop.Notifications; silently nothing when there is none."""
