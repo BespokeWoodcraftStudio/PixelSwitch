@@ -1,0 +1,245 @@
+[
+ {
+  "lens": "parity",
+  "severity": "P1",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/accounts.py",
+  "line": 238,
+  "problem": "setting_priority re-stamps priority_set_order even when the account already has that number. The Mac's AccountOrder.settingPriority (PixelSwitch/Models/AccountOrder.swift:53) returns the list unchanged in that case. Its test pins it: \"setting the number an account already has changes nothing, not even its recency\" (Tests/UnitTests/TwoWindowTests.swift:278-279). AppState.setPriority then saves nothing and sends no accountsChanged (AppState.swift:812-821). The Linux test pins the opposite: linux/tests/test_accounts.py:139-140, \"set again: now most recent\", expects ABC.",
+  "failure_scenario": "Accounts A and B both have priority 2. A was set first and B second, so the list is B, A. The user runs `pixelswitch accounts priority A 2`, or sends accounts.setPriority {account: A, priority: 2}. On the Mac the order stays B, A and nothing is written. On Linux A gets stamp 3, the order becomes A, B and the file is rewritten. Under the Priority strategy, the next auto-switch then goes to A on Linux but to B on the Mac. The CLI `#` positions also swap, so `pixelswitch accounts switch 1` targets a different account than it would on the Mac.",
+  "fix": "In setting_priority, after the unknown-id check, add: `current = next(a for a in accounts if a.id == account_id); if current.priority == priority: return sorted_by_priority(accounts)` (stamps kept). Change test_accounts.py:139-140 to expect \"BAC\". Also port the Swift check: setting the same number with a later clock must return a list equal to the input."
+ },
+ {
+  "lens": "parity",
+  "severity": "P1",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/protocol.py",
+  "line": 831,
+  "problem": "auto_switched_data(from_id, to_id, limit, trigger, window=None) has no way to send `relaxed`. The merged Mac always sends it: ControlSnapshots.autoSwitchedData puts \"relaxed\": .bool(relaxed) in every autoSwitched event (PixelSwitch/Control/ControlAPI.swift:374-381). It is pinned by Tests/UnitTests/ControlSplitTests.swift:247-252 (\"gains window and relaxed\"), and spec 2.3 rule 10 says AutoSwitchRecord gains window and relaxed.",
+  "failure_scenario": "A weekly-overflow switch (Plan.relaxed == True) on Linux sends {\"from\":\u2026,\"limit\":\"windows\",\"to\":\u2026,\"trigger\":\"threshold\",\"window\":\"session\"} with no relaxed key. The Mac sends the same event with \"relaxed\":true. Any event subscriber (the CLI, MCP, the tray) cannot tell an overflow switch apart on Linux, and every Linux autoSwitched event is shaped differently from the Mac's.",
+  "fix": "Change the signature to `auto_switched_data(from_id, to_id, limit, trigger, window=None, *, relaxed: bool)` and always set `data[\"relaxed\"] = bool(relaxed)`. Keep window omitted when None. Add a test that mirrors ControlSplitTests.swift:247-254: weekly threshold gives window \"weekly\" and relaxed false; drainEarly gives no window and relaxed true; Fable gives no window."
+ },
+ {
+  "lens": "parity",
+  "severity": "P1",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/settings_catalog.py",
+  "line": 216,
+  "problem": "The strategy alias is looked up as `STRATEGY_ALIASES.get(value.casefold())`, without trimming. The merged Mac trims whitespace first: `value.stringValue?.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(\"priority\")` (PixelSwitch/Control/SettingsCatalog.swift:108). Its test pins `norm(.autoSwitchStrategy, .string(\" Priority \")) == .string(\"myOrder\")` (Tests/UnitTests/ControlSplitTests.swift:206).",
+  "failure_scenario": "settings.set {\"key\":\"autoSwitch.strategy\",\"value\":\" Priority \"} (or \"\\tpriority\"). The Mac stores myOrder. Linux returns invalidValue \"autoSwitch.strategy must be one of \\\"mostRoom\\\", \\\"myOrder\\\", \\\"resetsSoonest\\\".\" Confirmed by running both implementations.",
+  "fix": "Use `alias = STRATEGY_ALIASES.get(trim_whitespace(value).casefold())`, where trim_whitespace is the Zs-plus-tab helper already imported. Add a test with \" Priority \" and \"\\tpriority\"."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/accounts.py",
+  "line": 214,
+  "problem": "Out-of-range priorities are not handled the way the Mac handles them. sorted_by_priority sorts any stored int as numbered, while the Mac first applies validPriority (1-99) and treats anything else as unnumbered (AccountOrder.swift:28). build_account_info sends the raw value (protocol.py:715), while the Mac sends validPriority(account.priority) (ControlAPI.swift:364). numbered_in_order does not cap at 99, while the Mac uses min(offset + 1, 99) (AccountOrder.swift:70).",
+  "failure_scenario": "An accounts.json entry with \"priority\": 0, or 150, loads sorted FIRST on Linux (confirmed: load_accounts gives ['Z','N'] for priority 0 against 5), and AccountInfo reports priority 0. On the Mac it sorts after every numbered account and AccountInfo omits priority. Separately, a setOrder over more than 99 accounts gives priorities 100 and up on Linux but 99 on the Mac.",
+  "fix": "Add `def _valid(p): return p if valid_priority(p) else None`. Use `_valid(account.priority)` in sorted_by_priority's key and in build_account_info's priority field, and change numbered_in_order to `priority=min(index, PRIORITY_RANGE[1])`."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/accounts.py",
+  "line": 289,
+  "problem": "Only fallback() is ported. The Mac's AccountOrder.fallbackOrder(from:) (AccountOrder.swift:109-113) is missing: accounts that are not Manual only, in priority order, then the Manual only ones. D20 needs that full list, because when removing the active account, \"if the switch fails, the next candidate is tried\".",
+  "failure_scenario": "The daemon removes the active account and calls fallback(); the switch to that account fails. The core gives the daemon no ordered list to try next, so it either reimplements the order (and can drift) or clears the active account without trying the other accounts, as D20 forbids. The Mac tries every remaining account in order.",
+  "fix": "Add `def fallback_order(remaining): ordered = sorted_by_priority(remaining); return [a for a in ordered if not a.manual_only] + [a for a in ordered if a.manual_only]`, and define fallback() as its first element. Port TwoWindowTests.swift:294-302, which expects [c, b, d, a]."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/protocol.py",
+  "line": 96,
+  "problem": "loads() differs from Foundation's JSONDecoder in three ways (all confirmed by running both): (1) a duplicate key keeps the LAST value in Python and the FIRST in Swift; (2) an overflowing float literal such as 1.8e308 becomes inf in Python, where Foundation refuses the whole line; (3) a 400-digit integer parses as a Python int, and float(value) inside normalize_legacy_threshold, normalize_window_threshold, normalize_priority and settings _as_number then raises OverflowError, which is not a ControlError.",
+  "failure_scenario": "For duplicate keys, {\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"status.get\",\"method\":\"app.quit\"} answers status on the Mac but quits the Linux daemon. In the same way, params {\"account\":\"alice\",\"account\":\"bob\"} for accounts.switch switches to alice on the Mac and to bob on Linux. For the large integer, {\"\u2026\",\"method\":\"accounts.setThreshold\",\"params\":{\"account\":\"1\",\"threshold\":111\u2026(400 digits)}} is a parse error on the Mac, but on Linux an OverflowError escapes the protocol helper.",
+  "fix": "Use `json.loads(text, parse_constant=_reject_constant, parse_float=_finite_float, parse_int=_bounded_int, object_pairs_hook=_first_wins)`. Here _finite_float raises ValueError unless math.isfinite(float(s)); _bounded_int raises ValueError when abs(int(s)) > sys.float_info.max; and _first_wins builds the dict keeping the first occurrence of each key. Correct the docstring on line 95 to match."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/usage_model.py",
+  "line": 81,
+  "problem": "parse_iso8601 is stricter than the Mac's ISO8601DateFormatter, and its docstring claim that \"the colon is required, as .withInternetDateTime requires it\" is false. Probed live, Apple parses \"\u2026T18:00:00+0000\", \"\u2026+00\" and more than 9 fractional digits, all of which Python returns None for. Also, _opt_number (line 108) accepts non-finite floats that Swift's decoder rejects for the whole body.",
+  "failure_scenario": "If the usage API ever sends resets_at \"2026-09-28T18:00:00+0000\", the two platforms diverge. The Mac knows the reset. Linux treats it as unknown: a retained active reading is dropped (strict expiry), a candidate's expired reading is kept, weekly_reset() returns None so early drain never runs, and Resets soonest ranks every account as unknown. Linux can then pick a different target than the Mac. A body with utilization 1e400 is a decode error on the Mac but becomes inf on Linux, which fires a switch.",
+  "fix": "Accept the forms Apple accepts in the regex: `(Z|[+-][0-9]{2}(?::?[0-9]{2})?)`, and `\\.([0-9]+)` for the fraction, truncated to milliseconds as Apple does. Add a test with \"+0000\" and \"+00\". In _opt_number, raise UsageDecodeError when the value is not math.isfinite. Fix the docstring."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/usage_model.py",
+  "line": 59,
+  "problem": "swift_double says it is Swift's Double(String), but it rejects forms Swift accepts. Swift returns 30 for Double(\"0x1E\"), inf for \"inf\" and nan for \"nan\". It is used for settings text values (settings_catalog.py:193) and for Retry-After (usage_guard.py:466).",
+  "failure_scenario": "`pixelswitch settings set autoSwitch.threshold 0x50` stores 80 on the Mac and is refused on Linux; the same goes for refreshInterval 0x1E and drainWithinHours 0x1E (confirmed by running both). A 429 with `Retry-After: inf` parks the token for 3600 s on the Mac and for 120 s on Linux.",
+  "fix": "Either reproduce Swift (accept the 0x hex-float form via float.fromhex, and inf/infinity/nan case-insensitively, before the finiteness check that callers already apply), or keep the strict parser and change the docstring to name the deliberate difference, with a test pinning it. Whichever you choose, make Retry-After 'inf' park for LONGEST_PARK."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/protocol.py",
+  "line": 604,
+  "problem": "The resolver compares with casefold(), while the Mac uses Foundation caseInsensitiveCompare. That also treats canonically equivalent strings (NFC against NFD) as equal and ignores ignorable characters such as U+200B. normalize_label (line 536) counts code points with len(), while the Mac's label.count counts grapheme clusters (ControlAPI.swift accountsSetLabel).",
+  "failure_scenario": "An account labelled \"caf\u00e9\" in NFC: the reference \"cafe\u0301\" (NFD) resolves on the Mac and gives notFound on Linux. \"\u200bbob@home.com\" resolves on the Mac and not on Linux (both confirmed by running both resolvers). A label of 60 '\ud83d\udc4d\ud83c\udffd' is 60 characters on the Mac (accepted) but 120 code points on Linux, which refuses it with \"A label can be at most 100 characters.\"",
+  "fix": "Normalise both sides before comparing: `key = lambda s: unicodedata.normalize('NFKC', s).casefold()` with Cf/ignorable characters stripped, the same in levels 1-3 and in settings named(). Count labels in grapheme clusters, approximating Swift by treating combining marks (unicodedata.combining), ZWJ sequences, variation selectors, emoji modifiers and regional-indicator pairs as one cluster, or document the difference."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/usage_guard.py",
+  "line": 433,
+  "problem": "_OFFLINE_ERRNOS treats only ENETDOWN, ENETUNREACH, EHOSTUNREACH, ECONNRESET, ECONNABORTED and EPIPE as offline. The Mac's main offline case is URLError.notConnectedToInternet, which URLSession reports before any DNS lookup when the machine has no network. On Ubuntu with the network down, the request typically fails earlier, in getaddrinfo, with socket.gaierror EAI_AGAIN (\"Temporary failure in name resolution\"), which maps to offline=False (the test at test_guard_errors.py:64 pins DNS failures as not offline).",
+  "failure_scenario": "With the laptop's Wi-Fi off, every account card on Linux reads \"Can't reach Anthropic right now; PixelSwitch keeps trying.\" The Mac shows \"Can't reach Anthropic. Check your internet connection; PixelSwitch keeps trying.\" in the same situation, so the Mac's offline sentence never appears on Linux.",
+  "fix": "In from_transport_error, also treat socket.gaierror with errno socket.EAI_AGAIN as offline. Leave EAI_NONAME as not offline: that is a genuinely unknown host. Add a test with socket.gaierror(socket.EAI_AGAIN, 'Temporary failure in name resolution'), wrapped in urllib.error.URLError."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/pixelswitch/protocol.py",
+  "line": 332,
+  "problem": "event_line(event_type, at, data=None) leaves out `data` when it is None, and the core has no helper for usageUpdated. The Mac always sends a data object; usageUpdated sends `\"data\":{}` (RemoteControlService.swift:123, emit(\"usageUpdated\", [:])).",
+  "failure_scenario": "The daemon calls event_line(\"usageUpdated\", now), as the API invites. Linux sends {\"params\":{\"at\":\u2026,\"type\":\"usageUpdated\"}} with no data key, while the Mac sends {\"params\":{\"at\":\u2026,\"data\":{},\"type\":\"usageUpdated\"}}. A subscriber that reads params.data then behaves differently on the two platforms.",
+  "fix": "Add `def usage_updated_data() -> dict: return {}` next to the other *_data helpers. Make event_line require data, or default it to {}, so every event carries a data object as on the Mac."
+ },
+ {
+  "lens": "parity",
+  "severity": "P2",
+  "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/linux/tests/test_conformance.py",
+  "line": 164,
+  "problem": "The Linux harness only requires at least one case (assertGreaterEqual(len(names), 1)). The Mac harness requires every case to pass AND cases.count >= 150 (Tests/UnitTests/ConformanceTests.swift:28). This is separate from the missing-file skip that LB is already fixing.",
+  "failure_scenario": "If autoswitch-vectors.json is truncated or replaced by a short file (a bad merge, or a partial checkout), Linux stays green on a few cases while the Mac fails, so the shared contract is no longer checked on Linux.",
+  "fix": "Use `self.assertGreaterEqual(len(names), 150)`, matching ConformanceTests.swift:28 (or read the floor from one shared place both harnesses use)."
+ },
+ {
+  "lens": "security",
+  "severity": "P1",
+  "file": "linux/pixelswitch/update_check.py",
+  "line": 90,
+  "problem": "parse_feed does not catch RecursionError. On Python 3.12 and 3.13 (D13's supported floor, Ubuntu 24.04), a deeply nested JSON document under MAX_FEED_BYTES makes json.loads raise RecursionError, which escapes as a non-UpdateError exception. That breaks the module's own contract ('Every failure is an UpdateError') and spec 5.4 ('Nothing in the feed is trusted until checked'). logins.loads_object and protocol.py already catch RecursionError; parse_feed is the only parser of untrusted network input that does not.",
+  "failure_scenario": "Anyone who can replace the release asset latest-linux.json (repository write, or a leaked workflow token used by `gh release upload --clobber`) uploads '[' * 16000 + ']' * 16000 (32,000 bytes, under the 64 KiB cap). Verified: under python3.12.14 and python3.13.15, uc.parse_feed(doc) raises RecursionError ('maximum recursion depth exceeded while decoding a JSON array'), not UpdateError. Python 3.14 survives this input, which is why the suite does not catch it. If the daemon's updater catches only UpdateError, the update check dies or the daemon crashes on every poll on every Linux install. Each crash restarts after RestartSec=120 and re-checks the feed, so StartLimitBurst=4 can leave pixelswitch.service stopped, and auto-switch with it, without the signing key ever being needed.",
+  "fix": "Line 90: `except (ValueError, UnicodeDecodeError, RecursionError):` (raise the same UpdateError('feed', 'The update feed is not valid JSON.')). Add to FeedParsingTests: `with self.assertRaises(UpdateError) as caught: uc.parse_feed('[' * 16000 + ']' * 16000)` then `self.assertEqual(caught.exception.reason, 'feed')`. This test pins the fix on the ubuntu-24.04 CI job, which runs 3.12."
+ },
+ {
+  "lens": "security",
+  "severity": "P1",
+  "file": "linux/pixelswitch/logins.py",
+  "line": 72,
+  "problem": "The D12 usable-login predicate raises OverflowError instead of answering. float(expires) on a JSON integer of 309 or more digits (above the largest float) raises OverflowError before math.isfinite is reached. So login_problem, usable_login, login_from_credential (line 129) and same_oauth_tokens all raise on a corrupted credential. On the Mac, Foundation refuses that document (verified with swift: JSONSerialization error), so unusableReason returns a reason. D12 says such a value counts as blank, giving 'not usable' and the re-sign message, never an exception from the one test behind save, target validation and isSwitchable.",
+  "failure_scenario": "backups.json or ~/.claude/.credentials.json holds {\"claudeAiOauth\":{\"accessToken\":\"a\",\"refreshToken\":\"r\",\"expiresAt\":1000...0 (400 digits)}}, from a corrupted or hand-edited file. Verified: login_problem, usable_login, login_from_credential and same_oauth_tokens all raise OverflowError ('int too large to convert to float'). Any daemon path that checks switchability or capture every cycle then raises every cycle. Uncaught, that is a crash loop until the file is fixed, instead of one account showing the re-sign message. The same pattern raises in accounts._opt_num (accounts.py:73, so load_accounts raises OverflowError rather than AccountsFormatError), accounts.whole_threshold (359), protocol.normalize_legacy_threshold and normalize_window_threshold (protocol.py:495, 509: invalidValue is never produced for such a value) and settings_catalog.py:321, 408.",
+  "fix": "Add to usage_model.py: `def finite_number(value):` returning None unless is_number(value), then `try: number = float(value)` / `except OverflowError: return None` / `return number if math.isfinite(number) else None`. In logins.py:70-73 use `expires = finite_number(oauth[\"expiresAt\"])` and `if expires is None or not expires > 0: return \"expiresAt is not a positive number\"`. In logins.py:129 use `elif (number := finite_number(expires)) is not None: expires_at = number`. Replace every `is_number(v) and math.isfinite(float(v))` at accounts.py:73, 359, protocol.py:495, 509 and settings_catalog.py:321, 408 with `finite_number(v) is not None` / `finite_number(v)`. Add a test that login_problem('{\"claudeAiOauth\":{\"accessToken\":\"a\",\"refreshToken\":\"r\",\"expiresAt\":' + '9'*400 + '}}') == 'expiresAt is not a positive number' and usable_login(...) is False."
+ },
+ {
+  "lens": "security",
+  "severity": "P2",
+  "file": "linux/pixelswitch/logins.py",
+  "line": 33,
+  "problem": "loads_object accepts JSON escapes of unpaired surrogates (for example \\ud800), which Foundation refuses (verified with swift: JSONSerialization error). So usable_login says yes to a credential the Mac calls 'not a JSON object', and credential_for_switch returns kind 'merged' with text that cannot be encoded as UTF-8.",
+  "failure_scenario": "Two inputs were run. (1) usable_login('{\"claudeAiOauth\":{\"accessToken\":\"\\\\ud800\",\"refreshToken\":\"r\"}}') returns True on Linux; the Mac says unusable and shows the re-sign message. (2) A live credential {\"claudeAiOauth\":{...},\"mcpOAuth\":{\"x\":\"\\\\ud800\"}} (Node's JSON.stringify writes lone surrogates as such escapes) gives credential_for_switch(live, target).kind == 'merged', and .credential.encode('utf-8') raises UnicodeEncodeError. The Mac returns targetOnly. On Linux the switch's atomic write fails with an unexpected exception instead of a decision the rule made, and the save path accepts a login that cannot be stored.",
+  "fix": "In loads_object, after json.loads, also run `json.dumps(value, ensure_ascii=False).encode(\"utf-8\")` inside the same try. UnicodeEncodeError is a ValueError, so the existing `except (ValueError, RecursionError): return None` handles it, and the result matches Foundation. Add tests that the accessToken '\\\\ud800' credential is not usable, and that credential_for_switch with the surrogate-bearing live item returns kind 'targetOnly'."
+ },
+ {
+  "lens": "security",
+  "severity": "P2",
+  "file": "linux/pixelswitch/update_check.py",
+  "line": 228,
+  "problem": "The scan pass resolves symlink targets lexically and never refuses a member whose path runs through an earlier symlink. A link chain therefore passes the scan, so the docstring claim (lines 17-18 and 247-252) that an archive with 'a symlink or hard link that leaves the tree' is refused before anything is written is false. Only tarfile's data filter stops it, mid-extraction and with files already written. Defence in depth only: the archive must carry a valid signature first.",
+  "failure_scenario": "Archive members: symlink 'a' -> '.', symlink 'a/b' -> '..', file 'b/escaped'. Run on this machine: every member passes _scan, because 'a/b' resolves lexically to 'a/..' == '.'. safe_extract then fails with LinkOutsideDestinationError from the data filter after 'a' has been written into dest. On a Python whose data filter has a known bypass (unpatched 3.12 before the CVE-2025-4517 fixes), the scan is not a second wall against it.",
+  "fix": "In safe_extract's scan loop, keep `symlinks: set[str]`. For each member, set `norm = posixpath.normpath(member.name)` and `parts = norm.split('/')`, then raise UpdateError('archive', 'The update contains a path through a link.') if `any('/'.join(parts[:i]) in symlinks for i in range(1, len(parts)))`. Apply the same test to a hard link's normalized linkname. After the checks, add norm to symlinks when member.issym(). Add to SafeExtractTests.test_a_link_then_a_file_through_it: `self.refused(ArchiveBuilder().symlink('a', '.').symlink('a/b', '..').file('b/escaped', b'x'))`. That helper asserts dest stays empty."
+ },
+ {
+  "lens": "security",
+  "severity": "P2",
+  "file": "linux/pixelswitch/client.py",
+  "line": 174,
+  "problem": "_server_is_us unpacks struct ucred as '3i', so uid_t (unsigned) reads as negative for uids of 2^31 or more and the client refuses its own daemon. Separately, no test pins the SO_PEERCRED refusal. That check, named in spec 5.2, is the only thing that stops a client talking to a socket another local user planted at the socket-path or XDG_RUNTIME_DIR candidate, and a regression to `return True` would pass the whole suite.",
+  "failure_scenario": "(1) A user with uid 3000000000 (large directory-service id ranges): struct.unpack('3i') gives uid -1294967296, which is not os.getuid(), so every connect fails with 'unreachable' (fails closed, but the product is unusable). (2) Someone edits _server_is_us to always return True: all 672 tests still pass, and a client following a socket-path file that points at /tmp/evil.sock owned by another user would send its commands there and print that user's fake account data.",
+  "fix": "Line 173-174: `creds = sock.getsockopt(socket.SOL_SOCKET, option, struct.calcsize('iII'))` and `_pid, uid, _gid = struct.unpack('iII', creds)`. Add a test, skipped where socket lacks SO_PEERCRED: bind an AF_UNIX listener in a temp dir and confirm ControlClient(path).connect(launch=False) succeeds. Then, with unittest.mock.patch('os.getuid', return_value=os.getuid() + 1), confirm it raises ClientError with kind 'unreachable' and that the listener received no bytes."
+ },
+ {
+  "lens": "security",
+  "severity": "P2",
+  "file": "linux/pixelswitch/update_check.py",
+  "line": 160,
+  "problem": "What gets verified and what gets extracted are separate opens of the same path. verify_download opens it three times (getsize, the SHA-256 read, the openssl or pure-verifier read) and safe_extract twice more (lines 263 and 274). So the signature check does not guarantee that the bytes unpacked are the bytes verified, although the docstring promises the checks happen 'before anything is extracted'. Exploitation needs write access to the download file (the same uid, or two update checks sharing one download name), so the risk is small. The fix costs nothing at the 50 MB cap.",
+  "failure_scenario": "The 6-hourly check and a 'Check now' both download to the same temp name in the daemon's download directory. The first passes verify_download. The second then truncates and rewrites the file, so safe_extract's second tarfile.open unpacks a partial or different archive the signature never covered. The scan pass and the extract pass can even see different contents.",
+  "fix": "Read the download once: `data = open(path, 'rb').read(MAX_TARBALL_BYTES + 1)`, then check len(data) == feed.size, hashlib.sha256(data).hexdigest() == feed.sha256 and ed25519.verify(data, feed.signature, public_key_b64). Have safe_extract take those bytes (a `data: bytes` argument) and open both passes with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz'). Keep the path-based entry point only as a thin wrapper, if callers need it."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "linux/pixelswitch/logins.py",
+  "line": 175,
+  "problem": "same_oauth_tokens (spec 5.3 re-read before write) differs from the Mac's CredentialOwnership.liveLoginChanged, and its test pins the difference. The Mac first compares the two texts: identical text, including nil and nil, is unchanged. After that it compares claudeAiOauth.accessToken and refreshToken as String? values, so blank strings compare equal. Python says 'different' whenever either side fails login_from_credential, which rejects an empty accessToken. So same_oauth_tokens(None, None), same_oauth_tokens(blank, blank) and same_oauth_tokens('x', 'x') all return False. I ran all three and got False. test_accounts_logins.py:146 asserts assertFalse(same_oauth_tokens('garbage', 'garbage')), the opposite of LoginSafetyTests.swift:120 (`!liveLoginChanged(savedAtStep4: \"x\", now: \"x\")`). The other Mac re-read checks (lines 105-121), such as nil/nil unchanged, are not ported.",
+  "failure_scenario": "Claude Code has blanked the dead live login (~/.claude/.credentials.json holds claudeAiOauth {accessToken:\"\", refreshToken:\"\", expiresAt:0}, which is recon risk R4), or there is no .credentials.json at all. The user switches to a good saved account. LB's switch re-reads the live credential just before writing S1 and calls same_oauth_tokens(step4, now). That returns False, so per spec 5.3 it repeats step 4 once, gets False again, and fails the switch with nothing written. The user can never switch away from a dead login on Linux, which is exactly when switching is needed. The Mac proceeds and writes.",
+  "fix": "Port liveLoginChanged exactly. Add `def live_login_changed(saved, now):`. If both are bytes or str, decode to str; `if saved == now: return False`. Then `a, b = _token_pair(saved), _token_pair(now)`, where _token_pair returns (oauth.get('accessToken') if it is a str else None, oauth.get('refreshToken') if it is a str else None) when claudeAiOauth is a dict, and None otherwise. `if a is None or b is None: return True`, then `return a != b`. Define same_oauth_tokens as `not live_login_changed(a, b)`. In test_accounts_logins.py:138-146, change line 146 to assertTrue. Add assertTrue for same_oauth_tokens(None, None) and for (blank, blank). Port the nine reread checks from LoginSafetyTests.swift:105-121, including 'a renewed login (both tokens new) is a change' and 'another MCP login is not a change'."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "linux/pixelswitch/accounts.py",
+  "line": 238,
+  "problem": "setting_priority always re-stamps priority_set_order, even when the account already has that number. The Mac's AccountOrder.settingPriority returns the list unchanged in that case (`guard accounts[index].priority != priority`). TwoWindowTests.swift:278-279 pins 'setting the number an account already has changes nothing, not even its recency'. The Python test does the opposite: test_accounts.py:139-140 sets A to 2 again and expects A to move first ('ABC').",
+  "failure_scenario": "gmail=2 is set, then pv=2, so pv was set last and goes first: [pv, gmail, other]. The user runs `pixelswitch accounts priority gmail 2` again, or the settings window re-submits the unchanged field. Linux gives [gmail, pv, other]; I ran it. The Mac keeps [pv, gmail, other]. Under the Priority strategy, auto-switch now goes to a different account on Linux than on the Mac, and the user typed nothing new.",
+  "fix": "In setting_priority, after the range and unknown-id checks, add `current = next(a for a in accounts if a.id == account_id)` and `if current.priority == priority: return sorted_by_priority(accounts)`. In test_accounts.py:139-140, replace the 'set again: now most recent' step with `self.assertEqual(names(acc.setting_priority(base, 'A', 2)), 'BAC')`. Also assert that the returned A keeps its old priority_set_order."
+ },
+ {
+  "lens": "tests",
+  "severity": "P1",
+  "file": "linux/pixelswitch/accounts.py",
+  "line": 217,
+  "problem": "sorted_by_priority uses the stored priority raw, so 0, 100 or -3 read from accounts.json sort as real numbers. The Mac's sortedByPriority maps them through validPriority, so they count as none. The Mac test 'priority: a stored number outside 1\u201399 counts as none' (TwoWindowTests.swift:250-251) is not ported. In the same family: build_account_info (protocol.py:715) sends priority raw where the Mac sends AccountOrder.validPriority. And numbered_in_order (accounts.py:248) numbers past 99, where the Mac caps with min(offset+1, 99) ('Numbers stop at 99').",
+  "failure_scenario": "accounts.json holds a:{priority:0}, b:{priority:100}, c:{priority:5}, from a hand edit or a setOrder over 100 accounts. load_accounts gives [a, c, b]; I ran it. The Mac gives [c, a, b]. So list order, the CLI # column and the Priority strategy pick a first. AccountInfo also reports priority 0, outside the documented 1-99.",
+  "fix": "In sorted_by_priority's key, use `p = account.priority if valid_priority(account.priority) else None` and branch on p. In build_account_info use `_put(info, 'priority', account.priority if valid_priority(account.priority) else None)`. In numbered_in_order use `priority=min(index, PRIORITY_RANGE[1])`. Add the Mac case to test_accounts.py: `sorted_by_priority([acct('A', priority=0), acct('B', priority=100), acct('C', priority=5)])` must equal 'CAB'. Add a builder test that priority 0 is absent from AccountInfo."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/test_engine_split.py",
+  "line": 245,
+  "problem": "No test, and no conformance vector, pins that a Manual only active account leaves at the RAISED defaults in the relaxed pass (rule 9; the vectors README says 'Manual only stays Manual only and still leaves at the (raised) defaults'). Mutant E5 changes engine.py:621 to `leave = leave_at(active_rule, defaults)` and passes all 672 tests. The vector overflow-manual-only-active-leaves-at-session-default-and-relaxed-moves fires on the session window, so it cannot see the weekly side.",
+  "failure_scenario": "Defaults are session 90 and weekly 50. The active account M is Manual only and reads (session 20, weekly 60); B reads (20, 70). The correct engine stays (None). Under the E5 mutant it moves to B with relaxed=True and window weekly; I ran both. That regression would ship green, and the user would be moved off a Manual only account at 60% of its week, the ping-pong-prone move that D19 forbids.",
+  "fix": "Add to WeeklyOverflowStayTests: `m = acct('M', switch=0, active=True); self.assertIsNone(go(m, [self.y], {'M': sample(20, 60), 'Y': sample(20, 70)}))`. Add the moving counterpart: `self.assertEqual(line(go(m, [self.y], {'M': sample(90, 60), 'Y': sample(20, 70)})), 'windows/threshold: Y [session] relaxed')`. Report the gap in the shared vectors to the orchestrator; lanes must not edit that file."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/test_guard.py",
+  "line": 166,
+  "problem": "Two guard branches have no test on either platform, so the faithful port inherits the Swift gaps. (a) In may_use, the `state.rejected_fingerprint == fp` branch (usage_guard.py:179-180) can be deleted with every test still passing (mutant G11). Every may_use test either uses a 429 cool-down, an orphan refusal or an expiresAt. (b) In decision, 'a live login that is refused or expired waits, whatever else is known' (live-dead before park, usage_guard.py:156-159) can be swapped with the park check, again with every test passing (mutant G12).",
+  "failure_scenario": "(a) Account X's live token T gets a 401 from /usage. 21 minutes later the cool-down has ended, and a caller with no account to hand asks may_use('T'). The mutant returns True, so /api/oauth/profile is sent a token the server already refused. That is the 2026-10-13 history (453 profile 401s, then 429s) coming back unnoticed. (b) A live token that is both parked by a 429 and refused would show 'Usage reading paused until \u2026' instead of 'Waiting for Claude Code', and choose_notice would pick the wrong card.",
+  "fix": "(a) Add to RefusedTokenTests: `g = UsageRequestGuard(); g.record_rejected('id', 'T', T0); self.assertFalse(g.may_use('T', None, T0 + 21 * MINUTE)); self.assertTrue(g.may_use('U', None, T0 + 21 * MINUTE))`. (b) Add `g = UsageRequestGuard(); g.record_rate_limited('id', 'T', 3600, T0); g.record_rejected('id', 'T', T0); self.assertEqual(g.decision('id', True, login('T', 5 * HOUR), T0 + MINUTE), WAIT_FOR_CLAUDE_CODE)`. The same two checks are worth adding to UsageGuardTests.swift."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/test_protocol_client.py",
+  "line": 263,
+  "problem": "The SO_PEERCRED uid check (client.py:166-177, spec 5.2) has only a positive test. On macOS, where SO_PEERCRED is absent, that test passes trivially. On Linux nothing would fail if the check were gone: mutants C1 and C1b (`return True`) both survive. This is the one client-side defence against a socket owned by another user.",
+  "failure_scenario": "A refactor makes _server_is_us return True on any OSError, or drops the uid comparison. A socket at a candidate path owned by another uid, for example through a PIXELSWITCH_CONTROL_SOCKET override or a recorded socket-path, would be trusted. The suite stays green on Mac and Linux.",
+  "fix": "Add a platform-independent unit test with a fake socket: `class FakeSock: def __init__(s, uid): s.uid = uid; def getsockopt(s, *a): return struct.pack('3i', 1, s.uid, 0)`. Then `with mock.patch.object(cl.socket, 'SO_PEERCRED', 17, create=True):` assertFalse(cl._server_is_us(FakeSock(os.getuid() + 1))) and assertTrue(cl._server_is_us(FakeSock(os.getuid()))). Also give a fake whose getsockopt raises OSError and assert False."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/test_update_check.py",
+  "line": 387,
+  "problem": "The scan pass's symlink and hard-link refusals (update_check.py:228-233) are untested. Every link case is a single-member archive, so tarfile's data filter produces the same outcome without the scan: reason 'archive' and an empty destination. Mutants U6 and U15 delete the two link checks and all tests pass. The helper's own comment says 'the scan pass refuses the whole archive first'. On Ubuntu 24.04's Python 3.12.3, the scan is the independent guard if the data filter lacks the 2025 link-bypass fixes.",
+  "failure_scenario": "A change that drops or weakens _scan's link checks ships green. A signed but badly built tarball holding a regular file followed by `link -> /etc` then gets the regular file written into the new version directory before the filter raises, contrary to 'refused before anything is written'.",
+  "fix": "In test_links_that_leave_the_tree and test_a_link_then_a_file_through_it, put a regular member first, e.g. `self.refused(ArchiveBuilder().file('ok', b'x').symlink('link', '/etc'))` and `self.refused(ArchiveBuilder().file('ok', b'x').hardlink('hl', '../outside/x'))`. refused() already asserts the destination is empty, so the test then pins the scan."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/tests/test_accounts_logins.py",
+  "line": 68,
+  "problem": "Two tests cannot fail for the defect they are named for. (a) test_nan_is_not_json puts NaN in expiresAt, which the isfinite check rejects anyway. Removing parse_constant from loads_object (mutant L6) passes. (b) test_engine_split.py:319 test_resets_soonest_uses_whole_minutes has B resetting 30 s after C with less room, so exact-second ranking also gives 'C,B'. It is the conformance vectors, not this test, that catch the bug (mutant E7).",
+  "failure_scenario": "(a) `{\"claudeAiOauth\":{\"accessToken\":\"a\",\"refreshToken\":\"r\"},\"other\":NaN}` is refused today, matching the Mac, which refuses NaN anywhere. If parse_constant is dropped it becomes a usable login, and no test notices. (b) If the whole-minute bucketing is removed, this unit test stays green.",
+  "fix": "(a) Add `self.assertFalse(usable_login('{\"claudeAiOauth\":{\"accessToken\":\"a\",\"refreshToken\":\"r\"},\"other\":NaN}'))`. (b) Make B reset at weekly_resets_in=30 + 10/3600 with weekly 30, and C at 30 + 50/3600 with weekly 20. Whole minutes give 'C,B'; exact seconds would give 'B,C'."
+ },
+ {
+  "lens": "tests",
+  "severity": "P2",
+  "file": "linux/pixelswitch/logins.py",
+  "line": 77,
+  "problem": "LA has no pure equivalents of two Mac helpers that the D12 and D20 acceptance rest on, so those spec-named tests have nothing on Linux to run against yet. First, LoginGate (save, targetProblem, isSwitchable(backupToken, needsReauth, cardSaysLoginExpired)), whose tests run every D12 case against save, switch and switchable. Second, AccountOrder.fallbackOrder (TwoWindowTests removalOrderTests: not-Manual-only accounts in priority order, then the Manual only ones). LA only pins the usable_login predicate and a single fallback().",
+  "failure_scenario": "LB writes its own save, switch and switchable gates and its own D20 retry loop. Unless it adds the tests itself, the spec 7 acceptance ('tests for a blank accessToken, a blank refreshToken, a missing claudeAiOauth, null fields and expiresAt 0, each against save, switch and switchable') and D20's 'the next candidate is tried' stay unpinned on Linux.",
+  "fix": "Either add `login_gate_save(token)`, `login_gate_target_problem(token)` and `login_gate_is_switchable(token, needs_reauth, card_says_expired)` to logins.py, plus `fallback_order(remaining)` to accounts.py, and port LoginSafetyTests.swift gateTests and TwoWindowTests removalOrderTests; or tell LB in its brief that those tests are its own. Hand LB the waiting sentence from UsageGuardTests.swift:354 in the same note."
+ }
+]
