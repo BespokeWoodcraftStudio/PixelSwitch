@@ -5,11 +5,11 @@ the updater in the daemon downloads, then calls these in this order.
 1. :func:`parse_feed` and :func:`validate_feed` - nothing in the feed is trusted until
    checked (version format, build greater than the running build, url prefix, size cap).
 2. The download is cut off at the feed's ``size`` (``feed.size`` is validated to be at
-   most :data:`MAX_TARBALL_BYTES`), then :func:`verify_download` checks size, SHA-256 and
-   the Ed25519 signature BEFORE anything is extracted.
-3. :func:`safe_extract` unpacks into a fresh temp directory (``tarfile`` with
-   ``filter='data'`` plus refusals of absolute paths, ``..``, links that leave the tree,
-   devices and oversize archives).
+   most :data:`MAX_TARBALL_BYTES`), then :func:`verify_download` reads the file once and checks
+   size, SHA-256 and the Ed25519 signature over those bytes BEFORE anything is extracted.
+3. :func:`safe_extract` unpacks those same bytes into a fresh temp directory (``tarfile`` with
+   ``filter='data'`` plus refusals of absolute paths, ``..``, links that leave the tree, paths
+   through a link, devices and oversize archives).
 4. :func:`check_extracted_version` reads the ``VERSION`` file inside the tarball: it must
    equal the feed's version and build, and the build must be greater than the running one.
    Only then does the caller rename the directory to ``<version>-<build>``.
@@ -23,6 +23,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import io
 import json
 import os
 import posixpath
@@ -82,12 +83,17 @@ def parse_feed(text: "str | bytes | dict") -> dict:
     """The feed as a dict. A document over :data:`MAX_FEED_BYTES` or not a JSON object is refused."""
     if isinstance(text, dict):
         return text
-    raw = text.encode("utf-8") if isinstance(text, str) else bytes(text)
+    try:
+        raw = text.encode("utf-8") if isinstance(text, str) else bytes(text)
+    except (UnicodeEncodeError, TypeError, ValueError):  # a lone surrogate in a str
+        raise UpdateError("feed", "The update feed is not valid JSON.") from None
     if len(raw) > MAX_FEED_BYTES:
         raise UpdateError("feed", "The update feed is larger than expected.")
     try:
         value = json.loads(raw.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError, MemoryError):
+        # RecursionError: a deeply nested document under MAX_FEED_BYTES (Python 3.12 and later). The feed
+        # comes off the network, so whatever the parser does with it, the answer is one UpdateError.
         raise UpdateError("feed", "The update feed is not valid JSON.") from None
     if not isinstance(value, dict):
         raise UpdateError("feed", "The update feed is not a JSON object.")
@@ -139,12 +145,17 @@ def validate_feed(feed: dict, running_build: int, *, release_base: str = RELEASE
     return Feed(version, build, url, size, digest.lower(), signature)
 
 
-def _sha256_of(path: str) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def read_download(path: str) -> bytes:
+    """The downloaded file, read ONCE (a symlink is refused), at most :data:`MAX_TARBALL_BYTES` + 1
+    bytes. Everything that follows (size, SHA-256, signature, extraction) works on these bytes, so the
+    bytes that were verified are the bytes that are unpacked."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as handle:
+            return handle.read(MAX_TARBALL_BYTES + 1)
+    except OSError:
+        raise UpdateError("size", "The downloaded update could not be read.") from None
 
 
 def verify_download(
@@ -152,21 +163,20 @@ def verify_download(
     feed: Feed,
     public_key_b64: str = SU_PUBLIC_ED_KEY,
     *,
-    verify_file: Callable[..., bool] = ed25519.verify_file,
-) -> None:
+    verify: Callable[..., bool] = ed25519.verify,
+) -> bytes:
     """Size, SHA-256 and signature of the downloaded file, in that order, before anything is
-    extracted. The signature is checked over the raw bytes of the file. Fails closed: if neither
-    openssl nor the pure verifier can say yes, the answer is no."""
-    try:
-        actual = os.path.getsize(path)
-    except OSError:
-        raise UpdateError("size", "The downloaded update could not be read.") from None
-    if actual != feed.size:
+    extracted. The file is read once; the signature is checked over those bytes, and the same bytes
+    are returned for :func:`safe_extract`. Fails closed: if neither openssl nor the pure verifier
+    can say yes, the answer is no."""
+    data = read_download(path)
+    if len(data) != feed.size:
         raise UpdateError("size", "The downloaded update is not the size the feed promised.")
-    if _sha256_of(path) != feed.sha256:
+    if hashlib.sha256(data).hexdigest() != feed.sha256:
         raise UpdateError("sha256", "The downloaded update does not match its SHA-256.")
-    if not verify_file(path, feed.signature, public_key_b64):
+    if not verify(data, feed.signature, public_key_b64):
         raise UpdateError("signature", "The downloaded update is not signed by PixelSwitch.")
+    return data
 
 
 def check_version_text(text: str, feed: Feed, running_build: int) -> VersionInfo:
@@ -235,8 +245,16 @@ def _scan(member: tarfile.TarInfo) -> None:
         raise UpdateError("archive", "The update contains a file of a kind that is not allowed.")
 
 
+def _through_a_link(name: str, symlinks: set[str], *, include_self: bool = False) -> bool:
+    """Whether the normalised member path runs through (or, with ``include_self``, is) a symlink the
+    archive itself created earlier. Such a path would be written to wherever the link points."""
+    parts = posixpath.normpath(name).split("/")
+    stop = len(parts) + 1 if include_self else len(parts)
+    return any("/".join(parts[:i]) in symlinks for i in range(1, stop))
+
+
 def safe_extract(
-    tarball: str,
+    source: "bytes | str",
     dest: str,
     *,
     max_members: int = MAX_ARCHIVE_MEMBERS,
@@ -244,13 +262,21 @@ def safe_extract(
 ) -> int:
     """Unpacks the (already verified) gzip tarball into ``dest`` and returns the member count.
 
+    ``source`` is the verified bytes that :func:`verify_download` returned (or, as a convenience, the
+    path of a file, which is read once). Both passes read those same bytes.
+
     ``dest`` is created 0700 if missing and must otherwise be an empty directory. Two passes:
     the first scans every member header and refuses the whole archive on any of: an absolute
-    path, a ``..`` component, a symlink or hard link that leaves the tree, a device or pipe, a
-    member of an unknown kind, too many members, or too many declared bytes; the second
-    extracts with ``tarfile``'s ``filter='data'`` (which independently refuses the same things
-    against the real paths, drops setuid bits and group/other write bits, and ignores owners).
+    path, a ``..`` component, a symlink or hard link that leaves the tree, a member whose path runs
+    through a symlink the archive made earlier, a device or pipe, a member of an unknown kind, too
+    many members, or too many declared bytes; the second extracts with ``tarfile``'s
+    ``filter='data'`` (which independently refuses the same things against the real paths, drops
+    setuid bits and group/other write bits, and ignores owners).
     """
+    if isinstance(source, (bytes, bytearray, memoryview)):
+        data = bytes(source)
+    else:
+        data = read_download(source)
     if os.path.lexists(dest):
         if not os.path.isdir(dest) or os.path.islink(dest) or os.listdir(dest):
             raise UpdateError("archive", "The update folder is not empty.")
@@ -260,18 +286,26 @@ def safe_extract(
         count = 0
         total = 0
         directories: list[tuple[str, int]] = []
-        with tarfile.open(tarball, "r:gz") as archive:
+        symlinks: set[str] = set()
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
             for member in archive:
                 count += 1
                 if count > max_members:
                     raise UpdateError("archive", "The update contains too many files.")
                 _scan(member)
+                norm = posixpath.normpath(member.name)
+                if _through_a_link(norm, symlinks) or (norm in symlinks and not member.issym()):
+                    raise UpdateError("archive", "The update contains a path through a link.")
+                if member.islnk() and _through_a_link(member.linkname, symlinks, include_self=True):
+                    raise UpdateError("archive", "The update contains a path through a link.")
+                if member.issym():
+                    symlinks.add(norm)
                 total += max(member.size, 0)
                 if total > max_total_bytes:
                     raise UpdateError("archive", "The update unpacks to more than is allowed.")
                 if member.isdir():
                     directories.append((member.name, member.mode))
-        with tarfile.open(tarball, "r:gz") as archive:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
             archive.extractall(dest, filter="data")
         # The data filter ignores a directory's mode, so a directory gets 0777 & ~umask. Give
         # each one the archive's mode without the high bits and the group/other write bits,

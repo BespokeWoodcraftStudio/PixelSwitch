@@ -18,7 +18,10 @@ Against ``StartLimitBurst=4`` that is: the boot start (the old, proven build), t
 and then this script rolls back, so the third start of the new build never happens and the
 rolled-back start is the fourth. A unit test plays exactly that sequence.
 
-State: ``~/.local/state/pixelswitch/rollback.json`` (``{"build": n, "attempts": k}``). Exit code 0
+State: ``~/.local/state/pixelswitch/rollback.json`` (``{"build": n, "attempts": k}``). A build it rolled
+back is also added to ``~/.local/state/pixelswitch/bad-builds`` (``{"builds": [n, ...]}``, 0600): the
+daemon's updater reads that file and never installs a recorded build again (without it the rolled-back
+daemon would find the same build in the feed two minutes later and flip straight back to it). Exit code 0
 always (a failing ``ExecStartPre`` would stop the daemon from starting at all); what it did is
 printed on one line.
 """
@@ -31,6 +34,7 @@ import sys
 import tempfile
 
 MAX_UNPROVEN_ATTEMPTS = 2
+MAX_BAD_BUILDS = 50
 _VERSION_DIR = re.compile(r"([0-9]{1,6}\.[0-9]{1,6})-([0-9]{1,9})\Z")
 
 
@@ -79,6 +83,15 @@ def _write_state(path: str, data: dict) -> None:
             pass
 
 
+def _record_bad_build(state_dir: str, build: int) -> None:
+    """Adds ``build`` to ``bad-builds`` (the same file and shape ``updater.record_bad_build`` writes)."""
+    path = os.path.join(state_dir, "bad-builds")
+    known = _read_state(path).get("builds")
+    builds = {b for b in known if isinstance(b, int) and not isinstance(b, bool)} if isinstance(known, list) else set()
+    builds.add(build)
+    _write_state(path, {"builds": sorted(builds)[-MAX_BAD_BUILDS:]})
+
+
 def _flip(link: str, name: str) -> None:
     temp = f"{link}.rollback-{os.getpid()}"
     try:
@@ -106,6 +119,7 @@ def run(home: str) -> str:
         previous_build = _build_of(previous)
         if attempts >= MAX_UNPROVEN_ATTEMPTS and previous and previous != current and previous_build is not None \
                 and os.path.isdir(os.path.join(app_dir, previous)):
+            _record_bad_build(state_dir, build)
             _flip(os.path.join(app_dir, "current"), previous)
             _write_state(state_file, {"build": previous_build, "attempts": 0})
             return f"build {build} failed to start {attempts} times without a good marker; rolled back to {previous}"

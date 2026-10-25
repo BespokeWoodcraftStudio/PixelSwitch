@@ -9,6 +9,7 @@ import json
 import os
 import tarfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -18,7 +19,8 @@ from pixelswitch.api import Transport
 from pixelswitch.logfile import Log
 from pixelswitch.paths import Paths
 from pixelswitch.updater import (
-    Updater, flip_symlink, parse_version_dir, prune_old_versions, read_link_name, version_dir_name,
+    Updater, bad_builds_path, flip_symlink, parse_version_dir, prune_old_versions, read_bad_builds, read_link_name,
+    record_bad_build, version_dir_name,
 )
 from pixelswitch.version import VersionInfo
 
@@ -49,9 +51,14 @@ def good_files(self_check=SELF_CHECK_OK, version="2.1", build=32):
 
 
 class ReleaseServer:
+    """A local release server. A route is ``(status, body)`` or ``(status, body, headers)``; a 302 route
+    carries a ``Location`` header. ``redirect`` builds a chain, ``slow`` a download that dribbles."""
+
     def __init__(self):
-        self.routes: dict[str, tuple[int, bytes]] = {}
+        self.routes: dict[str, tuple] = {}
+        self.slow_routes: dict[str, int] = {}
         self.requests: list[str] = []
+        self.received_headers: list[dict[str, str]] = []
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -62,8 +69,25 @@ class ReleaseServer:
 
             def do_GET(self):
                 outer.requests.append(self.path)
-                status, body = outer.routes.get(self.path, (404, b"missing"))
+                outer.received_headers.append({key.lower(): value for key, value in self.headers.items()})
+                if self.path in outer.slow_routes:
+                    total = outer.slow_routes[self.path]
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(total))
+                    self.end_headers()
+                    try:
+                        for _ in range(total // 1024):
+                            self.wfile.write(b"x" * 1024)
+                            self.wfile.flush()
+                            time.sleep(0.05)
+                    except OSError:
+                        pass
+                    return
+                route = outer.routes.get(self.path, (404, b"missing"))
+                status, body = route[0], route[1]
                 self.send_response(status)
+                for key, value in (route[2] if len(route) > 2 else {}).items():
+                    self.send_header(key, value)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -80,6 +104,16 @@ class ReleaseServer:
         self.routes["/releases/latest/download/latest-linux.json"] = (200, json.dumps(feed).encode())
         self.routes[f"/releases/download/v{version}/{name}"] = (200, data)
         return feed
+
+    def redirect(self, path: str, *hops: str) -> str:
+        """Makes ``path`` answer 302 -> hop 1 -> 302 -> hop 2 ... and the content ends at the LAST hop
+        (the route already stored for ``path`` moves there). Returns the last path."""
+        final = self.routes.pop(path, (404, b"missing"))
+        chain = [path, *hops]
+        for here, there in zip(chain, chain[1:]):
+            self.routes[here] = (302, b"", {"Location": there})
+        self.routes[chain[-1]] = final
+        return chain[-1]
 
     def stop(self):
         self.server.shutdown()
@@ -107,7 +141,8 @@ class UpdaterCase(unittest.TestCase):
             return self.idle_answers.pop(0) if self.idle_answers else True
 
         options = dict(paths=self.paths, log=Log(None).category("t"), running=VersionInfo("2.0", 31),
-                       transport=Transport(user_agent="PixelSwitch/test", test_mode=True), automatic=lambda: True,
+                       transport=Transport(user_agent="PixelSwitch/test", test_mode=True, follow_redirects=True),
+                       automatic=lambda: True,
                        idle=idle, restart=restart, feed_url=self.server.base + "/latest/download/latest-linux.json",
                        release_base=self.server.base, public_key=PUBLIC, scheduled=False, sleep=self.clock.sleep,
                        clock=self.clock)
@@ -378,6 +413,324 @@ class VersionsOnDiskTests(UpdaterCase):
         self.assertEqual([n for n in os.listdir(self.paths.app_dir) if ".new-" in n], [])
 
 
+class UpdaterLogCase(UpdaterCase):
+    """An updater whose log lines can be read back."""
+
+    def setUp(self):
+        super().setUp()
+        self.log_path = os.path.join(self.home, "update.log")
+        self.log = Log(self.log_path)
+        self.addCleanup(self.log.close)
+
+    def updater(self, **kw):
+        kw.setdefault("log", self.log.category("Update"))
+        return super().updater(**kw)
+
+    def update_lines(self):
+        try:
+            return [line for line in read_file(self.log_path).splitlines() if "[update]" in line]
+        except OSError:
+            return []
+
+    def publish_build(self, version, build, **kw):
+        files = good_files(self_check=f"import sys\nif '--self-check' in sys.argv:\n    print('pixelswitchd {version} (build {build})')\n",
+                           version=version, build=build)
+        return self.server.publish(tarball(files), version=version, build=build, **kw)
+
+
+class RedirectTests(UpdaterLogCase):
+    """GitHub answers a release download with redirects (api.py: RELEASE_REDIRECT_HOSTS)."""
+
+    def test_the_feed_and_the_tarball_arrive_through_two_hop_redirect_chains_and_the_update_installs(self):
+        feed = self.server.publish(tarball(good_files()))
+        name = feed["url"].rsplit("/", 1)[1]
+        self.server.redirect("/releases/latest/download/latest-linux.json",
+                             "/releases/download/v2.1/latest-linux.json", "/assets/feed-blob")
+        self.server.redirect(f"/releases/download/v2.1/{name}", "/assets/hop-a", "/assets/tarball-blob")
+        outcome = self.updater().check_and_install()
+        self.assertEqual((outcome.kind, outcome.version, outcome.build), ("installed", "2.1", 32))
+        self.assertEqual(self.current(), "2.1-32")
+        self.assertEqual(self.restarts, [("2.1-32",)])
+        self.assertIn("/assets/tarball-blob", self.server.requests)
+        self.assertEqual(self.server.requests.count("/assets/feed-blob"), 1)
+
+    def test_no_authorization_or_cookie_header_is_sent_to_any_hop(self):
+        feed = self.server.publish(tarball(good_files()))
+        name = feed["url"].rsplit("/", 1)[1]
+        self.server.redirect("/releases/latest/download/latest-linux.json", "/releases/download/v2.1/latest-linux.json")
+        self.server.redirect(f"/releases/download/v2.1/{name}", "/assets/blob")
+        self.assertEqual(self.updater().check_and_install().kind, "installed")
+        self.assertGreaterEqual(len(self.server.received_headers), 4)
+        for headers in self.server.received_headers:
+            for forbidden in ("authorization", "cookie", "proxy-authorization"):
+                self.assertNotIn(forbidden, headers)
+
+    def test_a_404_at_the_end_of_the_feed_chain_is_no_update(self):
+        self.server.routes["/releases/latest/download/latest-linux.json"] = (
+            302, b"", {"Location": "/releases/download/v1.9/latest-linux.json"})  # GitHub: no such asset in that release
+        outcome = self.updater().check_and_install()
+        self.assertEqual((outcome.kind, outcome.reason), ("none", "no feed"))
+        self.assert_untouched()
+        self.assertEqual(self.update_lines(), [], "quietly")
+
+    def test_a_404_at_the_end_of_the_tarball_chain_is_no_update(self):
+        feed = self.server.publish(tarball(good_files()))
+        name = feed["url"].rsplit("/", 1)[1]
+        del self.server.routes[f"/releases/download/v2.1/{name}"]
+        self.server.routes[f"/releases/download/v2.1/{name}"] = (302, b"", {"Location": "/assets/gone"})
+        outcome = self.updater().check_and_install()
+        self.assertEqual((outcome.kind, outcome.reason), ("none", "no download"))
+        self.assert_untouched()
+
+    def test_more_than_five_redirects_is_unreachable_and_installs_nothing(self):
+        self.server.publish(tarball(good_files()))
+        self.server.redirect("/releases/latest/download/latest-linux.json",
+                             *[f"/hop/{n}" for n in range(1, 7)])  # six hops
+        outcome = self.updater().check_and_install()
+        self.assertEqual((outcome.kind, outcome.reason), ("none", "unreachable"))
+        self.assert_untouched()
+
+    def test_exactly_five_redirects_are_followed(self):
+        self.server.publish(tarball(good_files()))
+        self.server.redirect("/releases/latest/download/latest-linux.json", *[f"/hop/{n}" for n in range(1, 6)])
+        self.assertEqual(self.updater().check_and_install().kind, "installed")
+
+    def test_a_redirect_loop_ends(self):
+        self.server.routes["/releases/latest/download/latest-linux.json"] = (
+            302, b"", {"Location": "/releases/latest/download/latest-linux.json"})
+        outcome = self.updater().check_and_install()
+        self.assertEqual(outcome.kind, "none")  # urllib's own loop guard or ours: either way, no update
+        self.assertLessEqual(len(self.server.requests), 6)
+        self.assert_untouched()
+
+    def test_a_redirect_to_a_blocked_host_is_refused(self):
+        self.server.routes["/releases/latest/download/latest-linux.json"] = (
+            302, b"", {"Location": "http://api.anthropic.com/steal"})
+        outcome = self.updater().check_and_install()
+        self.assertEqual((outcome.kind, outcome.reason), ("none", "unreachable"))
+        self.assert_untouched()
+
+    def test_the_size_cut_off_holds_across_redirects(self):
+        data = tarball(good_files())
+        feed = self.server.publish(data, size=len(data) - 10)
+        name = feed["url"].rsplit("/", 1)[1]
+        self.server.redirect(f"/releases/download/v2.1/{name}", "/assets/a", "/assets/b")
+        outcome = self.updater().check_and_install()
+        self.assertEqual((outcome.kind, outcome.reason), ("failed", "size"))
+        self.assert_untouched()
+
+    def test_the_token_transport_still_never_follows_a_redirect(self):
+        self.server.routes["/r"] = (302, b"", {"Location": "/target"})
+        self.server.routes["/target"] = (200, b"hello")
+        plain = Transport(user_agent="PixelSwitch/test", test_mode=True)
+        reply = plain.request("GET", self.server.base.replace("/releases", "") + "/r", timeout=5)
+        self.assertEqual(reply.status, 302)
+        self.assertNotIn("/target", self.server.requests)
+
+
+class BadBuildTests(UpdaterLogCase):
+    """A build that failed its self-check, or was rolled back, is never installed again (review LB: process-updater P1)."""
+
+    def systemd_start(self, proven):
+        message = rollback_module.run(self.home)
+        build = self.current()
+        if proven(build):
+            with open(self.paths.good_marker(int(build.split("-")[1])), "w") as handle:
+                handle.write("1")
+        return message
+
+    def play_a_failed_update(self):
+        """Boot (proven old build), the update, two failed starts, the rollback."""
+        self.systemd_start(lambda build: True)
+        self.assertEqual(self.updater().check_and_install().kind, "installed")
+        self.assertEqual(self.current(), "2.1-32")
+        proven = lambda build: build == "2.0-31"
+        self.systemd_start(proven)
+        self.systemd_start(proven)
+        self.assertIn("rolled back", self.systemd_start(proven))
+        self.assertEqual(self.current(), "2.0-31")
+
+    def test_a_rolled_back_build_is_not_installed_again_and_a_later_build_is(self):
+        self.server.publish(tarball(good_files()))
+        self.play_a_failed_update()
+        self.assertEqual(self.restarts, [("2.1-32",)])
+        requests_before = len(self.server.requests)
+        self.assertTrue(os.path.isdir(os.path.join(self.paths.app_dir, "2.1-32")), "still on disk, as in the review")
+        outcome = self.updater().check_and_install()
+        self.assertEqual((outcome.kind, outcome.reason), ("none", "rolled back"))
+        self.assertEqual(self.current(), "2.0-31", "it did not flip back to the bad build")
+        self.assertEqual(self.restarts, [("2.1-32",)], "and asked for no second restart")
+        self.assertEqual(len(self.server.requests), requests_before + 1, "only the feed was asked for: no download")
+        self.assertFalse(os.path.exists(os.path.join(self.paths.app_dir, "2.1-32")), "the bad version folder is removed")
+        # a later, higher build installs
+        self.publish_build("2.2", 33)
+        outcome = self.updater().check_and_install()
+        self.assertEqual((outcome.kind, outcome.build), ("installed", 33))
+        self.assertEqual(self.current(), "2.2-33")
+        self.assertEqual(self.previous(), "2.0-31")
+
+    def test_the_skip_is_logged_once_per_run_and_the_state_file_is_private(self):
+        self.server.publish(tarball(good_files()))
+        self.play_a_failed_update()
+        updater = self.updater()
+        for _ in range(3):
+            updater.check_and_install()
+        lines = [line for line in self.update_lines() if "rolled back" in line]
+        self.assertEqual(len(lines), 1, lines)
+        path = bad_builds_path(self.paths)
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        self.assertEqual(json.loads(read_file(path)), {"builds": [32]})
+        self.assertEqual(read_bad_builds(self.paths), {32})
+
+    def test_a_build_that_fails_its_self_check_is_remembered_and_not_downloaded_again(self):
+        self.server.publish(tarball(good_files(self_check=SELF_CHECK_BAD)))
+        self.assertEqual(self.updater().check_and_install().reason, "self-check")
+        self.assertEqual(read_bad_builds(self.paths), {32})
+        downloads = len([r for r in self.server.requests if r.endswith(".tar.gz")])
+        self.assertEqual(downloads, 1)
+        again = self.updater().check_and_install()
+        self.assertEqual((again.kind, again.reason), ("none", "rolled back"))
+        self.assertEqual(len([r for r in self.server.requests if r.endswith(".tar.gz")]), downloads)
+        self.assert_untouched()
+        self.publish_build("2.2", 33)
+        self.assertEqual(self.updater().check_and_install().kind, "installed")
+
+    def test_a_self_check_that_could_not_be_run_is_not_held_against_the_build(self):
+        self.server.publish(tarball(good_files()))
+        outcome = self.updater(python="/nonexistent/python3").check_and_install()
+        self.assertEqual((outcome.kind, outcome.reason), ("failed", "self-check"))
+        self.assertEqual(read_bad_builds(self.paths), set())
+        self.assertFalse(os.path.exists(bad_builds_path(self.paths)))
+        self.assertEqual(self.updater().check_and_install().kind, "installed", "tried again, and it works")
+
+    def test_rollback_without_a_previous_version_records_nothing(self):
+        flip_symlink(os.path.join(self.paths.app_dir, "current"), "2.0-31")
+        for _ in range(5):
+            self.systemd_start(lambda build: False)
+        self.assertFalse(os.path.exists(bad_builds_path(self.paths)))
+
+    def test_the_file_is_read_defensively(self):
+        os.makedirs(self.paths.state_dir, exist_ok=True)
+        path = bad_builds_path(self.paths)
+        for text in ("", "{broken", "[]", '{"builds": "x"}', '{"builds": [true, "a", -1, 7]}', "[" * 20000):
+            with open(path, "w") as handle:
+                handle.write(text)
+            self.assertIn(read_bad_builds(self.paths), (set(), {7}), text[:20])
+        record_bad_build(self.paths, 40)
+        self.assertEqual(read_bad_builds(self.paths), {40})
+
+    def test_prune_also_removes_the_folders_of_bad_builds(self):
+        for name in ("2.0-31", "2.1-32", "2.2-33"):
+            os.makedirs(os.path.join(self.paths.app_dir, name), exist_ok=True)
+        flip_symlink(os.path.join(self.paths.app_dir, "previous"), "2.0-31")
+        self.assertEqual(prune_old_versions(self.paths.app_dir), [])
+        self.assertEqual(prune_old_versions(self.paths.app_dir, bad_builds={32}), ["2.1-32"])
+        self.assertTrue(os.path.isdir(os.path.join(self.paths.app_dir, "2.2-33")))
+        self.assertTrue(os.path.isdir(os.path.join(self.paths.app_dir, "2.0-31")), "current is never pruned")
+
+
+class MalformedFeedTests(UpdaterLogCase):
+    def feed_body(self, body):
+        self.server.routes["/releases/latest/download/latest-linux.json"] = (200, body)
+
+    def test_a_deeply_nested_feed_is_no_update_with_one_log_line(self):
+        for body in (b"[" * 16000 + b"]" * 16000, b'{"a":' * 12000 + b"1" + b"}" * 12000, b"[" * 30000):
+            self.feed_body(body)
+            outcome = self.updater().check_and_install()
+            self.assertEqual((outcome.kind, outcome.reason), ("failed", "feed"))
+            self.assert_untouched()
+        self.assertEqual(len(self.update_lines()), 3, "one line per refused feed")
+
+    def test_other_malformed_feeds_are_the_same(self):
+        for body in (b"", b"\xff\xfe\x00", b"null", b"[1,2]", b'{"version": 5}', b"{" * 40, b'{"a": NaN}', b"x" * 70000):
+            self.feed_body(body)
+            before = len(self.update_lines())
+            outcome = self.updater().check_and_install()
+            self.assertEqual(outcome.kind, "failed", body[:20])
+            self.assertEqual(len(self.update_lines()) - before, 1, body[:20])
+            self.assert_untouched()
+
+
+class StagingAndStopTests(UpdaterLogCase):
+    def test_start_removes_unfinished_downloads_left_by_other_processes_only(self):
+        data = self.paths.data_dir
+        stale = os.path.join(data, ".update-99999-1700000000")
+        os.makedirs(os.path.join(stale, "extracted", "bin"))
+        with open(os.path.join(stale, "update.tar.gz"), "wb") as handle:
+            handle.write(b"x" * 100)
+        mine = os.path.join(data, f".update-{os.getpid()}-1700000001")
+        os.makedirs(mine)
+        elsewhere = os.path.join(self.home, "elsewhere")
+        os.makedirs(elsewhere)
+        link = os.path.join(data, ".update-88888-1")
+        os.symlink(elsewhere, link)
+        others = [os.path.join(data, name) for name in (".update-x-1", ".updates-1-1", "update-1-1", ".update-1-1-x")]
+        for other in others:
+            os.makedirs(other)
+        updater = self.updater(scheduled=False)
+        updater.start()
+        self.addCleanup(updater.stop)
+        self.assertFalse(os.path.exists(stale), "another process's staging folder is gone")
+        self.assertTrue(os.path.isdir(mine), "this process's own folder is left to its own check")
+        self.assertTrue(os.path.islink(link) and os.path.isdir(elsewhere), "a symlink is never followed")
+        for other in others:
+            self.assertTrue(os.path.isdir(other), other)
+        self.assertTrue(os.path.isdir(os.path.join(data, "app")), "the install is untouched")
+        self.assertEqual(len([line for line in self.update_lines() if "unfinished download" in line]), 1)
+
+    def test_stop_abandons_a_slow_download_at_once_and_leaves_nothing_behind(self):
+        data = tarball(good_files())
+        feed = self.server.publish(data)
+        name = feed["url"].rsplit("/", 1)[1]
+        feed = self.server.publish(data, size=2_000_000)
+        del self.server.routes[f"/releases/download/v2.1/{name}"]
+        self.server.slow_routes[f"/releases/download/v2.1/{name}"] = 2_000_000  # about 100 s at 20 KiB/s
+        updater = self.updater()
+        outcomes = []
+        worker = threading.Thread(target=lambda: outcomes.append(updater.check_and_install()), daemon=True)
+        worker.start()
+        self.assertTrue(wait_for(lambda: any(r.endswith(".tar.gz") for r in self.server.requests), 10))
+        time.sleep(0.3)
+        began = time.monotonic()
+        updater.stop(0.0)
+        worker.join(10)
+        self.assertFalse(worker.is_alive(), "the download was abandoned")
+        self.assertLess(time.monotonic() - began, 5.0)
+        self.assertEqual(outcomes[0].kind, "none")
+        self.assert_untouched()
+
+    def test_stop_kills_a_running_self_check_and_keeps_the_verified_install_for_the_next_start(self):
+        sleeper = "import sys,time\nif '--self-check' in sys.argv:\n    time.sleep(60)\n"
+        self.server.publish(tarball(good_files(self_check=sleeper)))
+        updater = self.updater()
+        outcomes = []
+        worker = threading.Thread(target=lambda: outcomes.append(updater.check_and_install()), daemon=True)
+        worker.start()
+        self.assertTrue(wait_for(lambda: os.path.isdir(os.path.join(self.paths.app_dir, "2.1-32")), 10))
+        time.sleep(0.5)
+        began = time.monotonic()
+        updater.stop(0.0)
+        worker.join(10)
+        self.assertFalse(worker.is_alive())
+        self.assertLess(time.monotonic() - began, 5.0)
+        self.assertEqual((outcomes[0].kind, outcomes[0].reason), ("none", "stopping"))
+        self.assertEqual(self.current(), "2.0-31")
+        self.assertEqual(self.restarts, [])
+        self.assertEqual(read_bad_builds(self.paths), set(), "a stop is not a failed self-check")
+        self.assertTrue(os.path.isdir(os.path.join(self.paths.app_dir, "2.1-32")))
+
+    def test_nothing_is_flipped_once_stop_has_been_called(self):
+        self.server.publish(tarball(good_files()))
+        updater = self.updater()
+        original = updater._idle
+        updater._idle = lambda: (updater._stop.set(), True)[1]  # SIGTERM arrives just as the daemon goes idle
+        outcome = updater.check_and_install()
+        self.assertEqual((outcome.kind, outcome.reason), ("waiting", "stopping"))
+        self.assertEqual(self.current(), "2.0-31")
+        self.assertEqual(self.restarts, [])
+        updater._idle = original
+
+
 class RollbackTests(unittest.TestCase):
     """The rollback script plays the sequence the spec names against StartLimitBurst=4."""
 
@@ -417,6 +770,41 @@ class RollbackTests(unittest.TestCase):
         self.assertIn("rolled back to 2.0-31", message)
         self.assertEqual(self.cur(), "2.0-31")
         self.assertTrue(os.path.exists(self.paths.good_marker(31)))
+
+    def test_the_sequence_fits_the_start_limit_in_the_packaged_unit_and_records_the_bad_build(self):
+        import re as regex
+
+        unit = read_file(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "packaging",
+                                      "pixelswitch.service"))
+        burst = int(regex.search(r"^StartLimitBurst=(\d+)$", unit, regex.M).group(1))
+        proven = lambda build: build == "2.0-31"
+        self.systemd_start(proven)  # boot
+        flip_symlink(os.path.join(self.paths.app_dir, "previous"), "2.0-31")
+        flip_symlink(os.path.join(self.paths.app_dir, "current"), "2.1-32")
+        self.systemd_start(proven)  # the update restart: the new build fails (1st failure)
+        self.systemd_start(proven)  # Restart=on-failure: fails again (2nd failure)
+        message = self.systemd_start(proven)  # ExecStartPre rolls back; the old build runs
+        self.assertLessEqual(len(self.starts), burst, f"{self.starts} must fit StartLimitBurst={burst}")
+        self.assertEqual(self.starts[-1], "2.0-31")
+        self.assertIn("rolled back", message)
+        bad = os.path.join(self.paths.state_dir, "bad-builds")
+        self.assertEqual(json.loads(read_file(bad)), {"builds": [32]})
+        self.assertEqual(os.stat(bad).st_mode & 0o777, 0o600)
+        # the old build, once it writes its marker, is proven and never touched again
+        for _ in range(3):
+            self.systemd_start(proven)
+        self.assertEqual(set(self.starts[3:]), {"2.0-31"})
+
+    def test_a_second_rollback_adds_to_the_bad_builds(self):
+        for name in ("2.2-33",):
+            os.makedirs(os.path.join(self.paths.app_dir, name))
+        for bad_build, current_name in ((32, "2.1-32"), (33, "2.2-33")):
+            flip_symlink(os.path.join(self.paths.app_dir, "previous"), "2.0-31")
+            flip_symlink(os.path.join(self.paths.app_dir, "current"), current_name)
+            for _ in range(3):
+                self.systemd_start(lambda build: False)
+            self.assertEqual(self.cur(), "2.0-31")
+        self.assertEqual(json.loads(read_file(os.path.join(self.paths.state_dir, "bad-builds"))), {"builds": [32, 33]})
 
     def test_a_new_build_that_writes_its_marker_is_never_rolled_back(self):
         flip_symlink(os.path.join(self.paths.app_dir, "previous"), "2.0-31")

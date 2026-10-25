@@ -16,7 +16,13 @@ For one update, in this order, each step failing closed with nothing installed:
 
 The previous version's folder is kept; only versions older than it are removed (after the new daemon
 has written its ``good-<build>`` marker). If the new build then fails to start twice without that
-marker, ``rollback.py`` flips ``current`` back (see there).
+marker, ``rollback.py`` flips ``current`` back (see there) and records the build in
+``~/.local/state/pixelswitch/bad-builds``. A build that failed its own self-check is recorded there
+too. The updater never installs a recorded build again, and still installs any later, higher one.
+
+The transport the updater is given must be ``Transport(follow_redirects=True)``: GitHub answers a
+release download with redirects (api.py: at most 5, https only, GitHub release hosts only, never an
+Authorization header). The transport that carries tokens never follows one, so the two are separate.
 
 In test mode (spec 5.7) the release URL and the public key come from ``PIXELSWITCH_TEST_RELEASE_BASE``
 and ``PIXELSWITCH_TEST_PUBLIC_KEY``, the scheduled check is off unless a test release base is given,
@@ -24,6 +30,7 @@ and the restart is never run: a scratch run must not touch ``systemctl --user``.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -32,7 +39,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Iterable
 
 from . import fsio
 from .api import Transport, TransportError
@@ -47,10 +54,14 @@ from .version import VersionInfo
 FIRST_CHECK_DELAY = 120.0
 CHECK_INTERVAL = 6 * 3600.0
 FEED_TIMEOUT = 30.0
-DOWNLOAD_TIMEOUT = 120.0
+DOWNLOAD_TIMEOUT = 30.0  # per socket operation; the stop flag is polled between reads
 SELF_CHECK_TIMEOUT = 60.0
 IDLE_WAIT_LIMIT = 30 * 60.0
 SERVICE_NAME = "pixelswitch.service"
+BAD_BUILDS_NAME = "bad-builds"  # in the state folder: {"builds": [32, ...]}; rollback.py writes the same file
+MAX_BAD_BUILDS = 50
+STAGING_NAME = re.compile(r"\.update-([0-9]+)-[0-9]+\Z")
+STOP_JOIN_SECONDS = 5.0
 VERSION_DIR = re.compile(r"([0-9]{1,6}\.[0-9]{1,6})-([0-9]{1,9})\Z")
 SELF_CHECK_LINE = re.compile(r"pixelswitchd ([0-9]+\.[0-9]+) \(build ([0-9]+)\)")
 
@@ -120,9 +131,37 @@ def strip_group_other_write(root: str) -> None:
                 os.chmod(path, mode & ~0o022)
 
 
-def prune_old_versions(app_dir: str, log: CategoryLog | None = None) -> list[str]:
-    """Deletes version folders OLDER than the previous version; keeps ``current`` and ``previous``
-    (and anything newer than either). Returns the names removed."""
+def bad_builds_path(paths: Paths) -> str:
+    return os.path.join(paths.state_dir, BAD_BUILDS_NAME)
+
+
+def read_bad_builds(paths: Paths) -> set[int]:
+    """The builds that were rolled back or failed their self-check. An unreadable file means none
+    (fail open: the rollback script still protects the next start)."""
+    try:
+        text = fsio.read_text(bad_builds_path(paths), limit=64 * 1024)
+        value = json.loads(text) if text else {}
+    except (OSError, ValueError, RecursionError):
+        return set()
+    builds = value.get("builds") if isinstance(value, dict) else None
+    if not isinstance(builds, list):
+        return set()
+    return {b for b in builds if isinstance(b, int) and not isinstance(b, bool) and b >= 0}
+
+
+def record_bad_build(paths: Paths, build: int) -> None:
+    """Remembers ``build`` as bad (0600, atomic). Never raises."""
+    try:
+        builds = sorted(read_bad_builds(paths) | {int(build)})[-MAX_BAD_BUILDS:]
+        fsio.atomic_write(bad_builds_path(paths), json.dumps({"builds": builds}) + "\n")
+    except OSError:
+        pass
+
+
+def prune_old_versions(app_dir: str, log: CategoryLog | None = None, bad_builds: Iterable[int] = ()) -> list[str]:
+    """Deletes version folders OLDER than the previous version, and the folders of ``bad_builds``;
+    keeps ``current`` and ``previous`` (and anything newer than either). Returns the names removed."""
+    bad = set(bad_builds)
     keep: set[str] = set()
     builds: list[int] = []
     for link in ("current", "previous"):
@@ -142,7 +181,9 @@ def prune_old_versions(app_dir: str, log: CategoryLog | None = None) -> list[str
     for name in names:
         parsed = parse_version_dir(name)
         path = os.path.join(app_dir, name)
-        if parsed is None or name in keep or parsed[1] >= floor or os.path.islink(path) or not os.path.isdir(path):
+        if parsed is None or name in keep or os.path.islink(path) or not os.path.isdir(path):
+            continue
+        if parsed[1] >= floor and parsed[1] not in bad:
             continue
         shutil.rmtree(path, ignore_errors=True)
         removed.append(name)
@@ -193,21 +234,48 @@ class Updater:
         self._manual = False
         self._thread: threading.Thread | None = None
         self._busy = threading.Lock()
+        self._bad_logged: set[int] = set()
 
     # -- the schedule ------------------------------------------------------------------------------------------
 
     def start(self) -> None:
         if self._thread is not None:
             return
+        self.remove_stale_staging()
         self._thread = threading.Thread(target=self._loop, name="updater", daemon=True)
         self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = STOP_JOIN_SECONDS) -> None:
+        """Ends the schedule and abandons a download or self-check in progress (both poll this flag)."""
         self._stop.set()
         self._wake.set()
         thread = self._thread
         if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=5.0)
+            thread.join(timeout=max(0.0, timeout))
+
+    def remove_stale_staging(self) -> list[str]:
+        """Removes every ``.update-<pid>-<time>`` folder in the data folder that another process left
+        (a daemon killed mid-download, mid-extract or mid-self-check). Only one daemon runs per HOME
+        (the flock), so a folder of any other pid is stale. A symlink is never followed."""
+        removed: list[str] = []
+        try:
+            names = os.listdir(self.paths.data_dir)
+        except OSError:
+            return removed
+        for name in names:
+            match = STAGING_NAME.match(name)
+            path = os.path.join(self.paths.data_dir, name)
+            if match is None or int(match.group(1)) == os.getpid():
+                continue
+            try:
+                if os.path.islink(path) or not os.path.isdir(path):
+                    continue
+                shutil.rmtree(path, ignore_errors=True)
+            except OSError:
+                continue
+            removed.append(name)
+            self._log.info(f"[update] Removed an unfinished download left by an earlier run ({name})")
+        return removed
 
     def set_automatic(self, on: bool) -> None:
         """The setting is read when a scheduled check comes due, so nothing needs waking."""
@@ -265,13 +333,28 @@ class Updater:
                 return UpdateOutcome("none", "up to date")
             self._log.warning(f"[update] The feed was refused ({error.reason})")
             return UpdateOutcome("failed", error.reason)
+        except Exception as error:  # a malformed feed is never an exception that leaves this method
+            self._log.warning(f"[update] The feed was refused ({type(error).__name__})")
+            return UpdateOutcome("failed", "feed")
         name = version_dir_name(feed.version, feed.build)
         target = os.path.join(self.paths.app_dir, name)
+        if feed.build in read_bad_builds(self.paths):
+            self._forget_bad_build(feed.build, name, target)
+            return UpdateOutcome("none", "rolled back", feed.version, feed.build)
         if not os.path.isdir(target):
             outcome = self._download_and_unpack(feed, staging, target)
             if outcome is not None:
                 return outcome
         return self._finish(feed, target, name)
+
+    def _forget_bad_build(self, build: int, name: str, target: str) -> None:
+        """A build that was rolled back, or failed its self-check, is not installed again."""
+        if build not in self._bad_logged:
+            self._bad_logged.add(build)
+            self._log.info(f"[update] Build {build} was rolled back or failed its self-check; waiting for a newer build")
+        keep = {read_link_name(os.path.join(self.paths.app_dir, link)) for link in ("current", "previous")}
+        if name not in keep and os.path.isdir(target) and not os.path.islink(target):
+            shutil.rmtree(target, ignore_errors=True)
 
     def _download_and_unpack(self, feed, staging: str, target: str) -> UpdateOutcome | None:
         try:
@@ -280,8 +363,11 @@ class Updater:
             self._log.info(f"[update] Downloading version {feed.version} (build {feed.build})")
             try:
                 status, written, exceeded = self._transport.download(feed.url, tarball, limit=feed.size,
-                                                                     timeout=DOWNLOAD_TIMEOUT)
+                                                                     timeout=DOWNLOAD_TIMEOUT,
+                                                                     should_stop=self._stop.is_set)
             except TransportError:
+                if self._stop.is_set():
+                    return UpdateOutcome("none", "stopping")
                 self._log.info("[update] The download failed; will try again at the next check")
                 return UpdateOutcome("none", "download failed")
             if status == 404:
@@ -290,9 +376,9 @@ class Updater:
                 return UpdateOutcome("none", f"HTTP {status}")
             if exceeded:
                 raise UpdateError("size", "The download is larger than the feed promised.")
-            verify_download(tarball, feed, self._public_key)
+            verified = verify_download(tarball, feed, self._public_key)
             extracted = os.path.join(staging, "extracted")
-            safe_extract(tarball, extracted)
+            safe_extract(verified, extracted)  # the very bytes that were verified
             root = self._find_root(extracted)
             check_extracted_version(root, feed, self.running.build)
             strip_group_other_write(root)
@@ -319,8 +405,13 @@ class Updater:
         raise UpdateError("version-file", "The update has no VERSION file at its top.")
 
     def _finish(self, feed, target: str, name: str) -> UpdateOutcome:
-        if not self._self_check(feed, target):
+        verdict = self._self_check(feed, target)
+        if verdict == "stopped":
+            return UpdateOutcome("none", "stopping", feed.version, feed.build)  # installed on disk; the next start finishes it
+        if verdict != "ok":
             shutil.rmtree(target, ignore_errors=True)  # it is ours, and it does not start
+            if verdict == "bad":
+                record_bad_build(self.paths, feed.build)  # never install this build again
             return UpdateOutcome("failed", "self-check", feed.version, feed.build)
         deadline = self._clock() + IDLE_WAIT_LIMIT
         while not self._idle():
@@ -328,6 +419,8 @@ class Updater:
                 self._log.info("[update] Installed, but PixelSwitch stayed busy; the flip waits for the next check")
                 return UpdateOutcome("waiting", "busy", feed.version, feed.build)
             self._sleep(5.0)
+        if self._stop.is_set():
+            return UpdateOutcome("waiting", "stopping", feed.version, feed.build)
         # Flip `current` only now, immediately before the restart.
         previous = read_link_name(os.path.join(self.paths.app_dir, "current"))
         try:
@@ -341,24 +434,41 @@ class Updater:
         self._restart()
         return UpdateOutcome("installed", "", feed.version, feed.build)
 
-    def _self_check(self, feed, target: str) -> bool:
-        """``python3 -I <new>/bin/pixelswitchd --self-check``: exit 0 and the feed's version and build."""
+    def _self_check(self, feed, target: str) -> str:
+        """``python3 -I <new>/bin/pixelswitchd --self-check``: exit 0 and the feed's version and build.
+        Returns ``ok``; ``bad`` (it ran and failed, or it is not there: this build is remembered);
+        ``unrunnable`` (python could not be started or it timed out: not the build's fault, tried
+        again at the next check); or ``stopped`` (the daemon is shutting down)."""
         script = os.path.join(target, "bin", "pixelswitchd")
         if not os.path.isfile(script):
             self._log.warning("[update] The update has no bin/pixelswitchd")
-            return False
+            return "bad"
         try:
-            completed = subprocess.run([self._python, "-I", script, "--self-check"], stdin=subprocess.DEVNULL,
-                                       capture_output=True, text=True, timeout=SELF_CHECK_TIMEOUT,
-                                       env=self._self_check_env())
+            child = subprocess.Popen([self._python, "-I", script, "--self-check"], stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                     env=self._self_check_env())
         except (OSError, subprocess.SubprocessError):
             self._log.warning("[update] The update's self-check could not run")
-            return False
-        match = SELF_CHECK_LINE.search(completed.stdout)
-        if completed.returncode != 0 or match is None or match.group(1) != feed.version or int(match.group(2)) != feed.build:
-            self._log.warning(f"[update] The update's self-check failed (exit {completed.returncode})")
-            return False
-        return True
+            return "unrunnable"
+        give_up = time.monotonic() + SELF_CHECK_TIMEOUT
+        while True:
+            try:
+                stdout, _stderr = child.communicate(timeout=0.25)
+                break
+            except subprocess.TimeoutExpired:
+                stopped = self._stop.is_set()
+                if stopped or time.monotonic() >= give_up:
+                    child.kill()
+                    child.communicate()
+                    if stopped:
+                        return "stopped"
+                    self._log.warning("[update] The update's self-check timed out")
+                    return "unrunnable"
+        match = SELF_CHECK_LINE.search(stdout)
+        if child.returncode != 0 or match is None or match.group(1) != feed.version or int(match.group(2)) != feed.build:
+            self._log.warning(f"[update] The update's self-check failed (exit {child.returncode})")
+            return "bad"
+        return "ok"
 
     @staticmethod
     def _self_check_env() -> dict[str, str]:

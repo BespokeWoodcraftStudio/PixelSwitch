@@ -15,13 +15,15 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 import unittest
 import uuid
 
-from pixelswitch import fsio, paths as paths_module, testmode
+from pixelswitch import daemon as daemon_module, fsio, paths as paths_module, testmode
 from pixelswitch.client import ControlClient
 
+from . import network_guard
 from .lb_support import Rig, read_file, tmpdir, wait_for
 from .mock_api import R, fabricated
 
@@ -30,10 +32,33 @@ CODE = "import sys; sys.path.insert(0, %r); from pixelswitch.daemon import main;
 
 
 def scratch_root(case) -> str:
-    path = os.path.join(testmode.scratch_root(), "ut-" + uuid.uuid4().hex[:10])
+    """A fresh folder under the REAL home's ``~/.cache/pixelswitch-dev/`` (spec 5.7: the test-mode daemon
+    refuses any other HOME, and ``testmode.scratch_root()`` reads the password database, so overriding
+    $HOME does not move it). The parent is made 0700 when this run creates it."""
+    parent = testmode.scratch_root()
+    if not os.path.isdir(parent):
+        os.makedirs(parent, mode=0o700, exist_ok=True)
+        os.chmod(parent, 0o700)
+    path = os.path.join(parent, "ut-" + uuid.uuid4().hex[:10])
     os.makedirs(path, mode=0o700)
     case.addCleanup(shutil.rmtree, path, True)
     return path
+
+
+def guarded_environment(case) -> dict:
+    """Environment entries that load the test network guard into a daemon subprocess; the test fails at
+    cleanup if the daemon tried to reach anthropic.com, claude.com or github.com."""
+    directory = network_guard.make_child_dir()
+    case.addCleanup(shutil.rmtree, directory, True)
+    entries = network_guard.child_environment(directory)
+
+    def check():
+        found = network_guard.read_child_log(entries[network_guard.ENV_LOG])
+        if found:
+            raise AssertionError(f"the daemon under test tried to reach a production host: {found}")
+
+    case.addCleanup(check)
+    return entries
 
 
 class Proc:
@@ -44,6 +69,7 @@ class Proc:
             "PATH": "/usr/bin:/bin", "HOME": rig.home, "XDG_RUNTIME_DIR": os.path.join(rig.tmp, "run"),
             "PIXELSWITCH_TEST_MODE": "1", "PIXELSWITCH_TEST_API_BASE": rig.api.base, "PYTHONDONTWRITEBYTECODE": "1",
         }
+        self.env.update(guarded_environment(case))
         self.env.update(extra_env or {})
         os.makedirs(self.env["XDG_RUNTIME_DIR"], mode=0o700, exist_ok=True)
         self.args = list(args)
@@ -192,12 +218,41 @@ class StartRulesTests(unittest.TestCase):
         self.assertIn("systemd", done.stderr)
         self.assertFalse(os.path.exists(os.path.join(rig.home, ".local", "state")), "nothing of the daemon's was created")
 
-    def test_the_test_api_base_is_ignored_outside_test_mode(self):
-        rig = Rig(self)
-        a = rig.seed_account("a@example.invalid", active=True)
-        rig.build()
+    def test_the_test_api_base_is_ignored_outside_test_mode_in_the_daemon_that_is_built(self):
+        """No process, no socket: the daemon is built (not started) outside test mode with the test base in its
+        environment, and every URL it would use is the production one."""
+        from pixelswitch.api import ApiBases, TOKEN_URL, USAGE_URL, PROFILE_URL
+        from pixelswitch.update_check import FEED_URL, RELEASE_BASE
+
+        home = tmpdir(self)
+        env = {"PATH": "/usr/bin:/bin", "HOME": home, "XDG_RUNTIME_DIR": os.path.join(home, "run"),
+               "PIXELSWITCH_TEST_API_BASE": "http://127.0.0.1:9", "PIXELSWITCH_TEST_RELEASE_BASE": "http://127.0.0.1:9/releases",
+               "PIXELSWITCH_TEST_PUBLIC_KEY": "AAAA"}
+        paths = paths_module.Paths.from_env(env)
+        fd = daemon_module.acquire_daemon_lock(paths.daemon_lock)
+        self.addCleanup(os.close, fd)
+        daemon = daemon_module.build(env, fd, paths, threading.Event())
+        self.addCleanup(daemon.log.close)
+        self.assertFalse(daemon.test_mode)
+        bases = daemon.coordinator.service._bases
+        self.assertEqual((bases.usage, bases.profile, bases.token), (USAGE_URL, PROFILE_URL, TOKEN_URL))
+        self.assertEqual(bases, ApiBases())
+        self.assertEqual(daemon.updater._feed_url, FEED_URL)
+        self.assertEqual(daemon.updater._release_base, RELEASE_BASE)
+        self.assertNotEqual(daemon.updater._public_key, "AAAA")
+        self.assertTrue(daemon.updater._scheduled)
+        self.assertTrue(daemon.updater._transport.follow_redirects)
+        self.assertFalse(daemon.coordinator.service._http.follow_redirects, "the token transport never follows a redirect")
+        self.assertIsNot(daemon.updater._transport, daemon.coordinator.service._http)
+
+    def test_the_test_api_base_is_ignored_outside_test_mode_in_a_real_daemon_with_nothing_to_send(self):
+        """A real daemon process outside test mode. It has no account, no saved login and no Claude Code
+        login, so there is nothing it could send anywhere; the network guard is loaded into it and fails this
+        test if it opens a socket to a production host."""
+        rig = Rig(self)  # no seed_account: nothing to send
         env = {"PATH": "/usr/bin:/bin", "HOME": rig.home, "XDG_RUNTIME_DIR": os.path.join(rig.tmp, "run"),
                "PIXELSWITCH_TEST_API_BASE": rig.api.base, "PYTHONDONTWRITEBYTECODE": "1"}
+        env.update(guarded_environment(self))
         os.makedirs(env["XDG_RUNTIME_DIR"], mode=0o700)
         process = subprocess.Popen([sys.executable, "-c", CODE], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(lambda: process.poll() is None and process.kill())
@@ -205,12 +260,16 @@ class StartRulesTests(unittest.TestCase):
         self.assertTrue(wait_for(lambda: os.path.exists(socket_path), 30))
         client = ControlClient(socket_path)
         client.connect(launch=False)
-        self.assertNotIn("testMode", client.call("status.get"))
-        time.sleep(1.0)
-        self.assertEqual(rig.api.calls, [], "the base was not honoured: the daemon would have gone to the real hosts")
-        client.disconnect()
+        self.addCleanup(client.disconnect)
+        status = client.call("status.get")
+        self.assertNotIn("testMode", status)
+        self.assertEqual(status["accountCount"], 0)
+        time.sleep(0.5)
+        self.assertEqual(rig.api.calls, [], "the base was not honoured")
         process.send_signal(signal.SIGTERM)
         process.communicate(timeout=30)
+        self.assertEqual(process.returncode, 0)
+        self.assertEqual([line for line in read_file(rig.paths.log).splitlines() if "getUsageLimits" in line or "accountIdentity" in line], [])
 
 
 class RunningDaemonTests(unittest.TestCase):
@@ -309,6 +368,18 @@ class RunningDaemonTests(unittest.TestCase):
         again = Proc(self, self.rig).start()
         self.assertEqual(again.client().call("status.get")["accountCount"], 2)
 
+    def test_a_daemon_that_finds_the_socket_taken_exits_0_and_does_not_remove_it(self):
+        # A second daemon (another HOME, so the flock does not stop it) sharing the first one's runtime folder:
+        # the control server answers "already running" and the second daemon's stop must leave the socket alone.
+        other = Rig(self, root=scratch_root(self))
+        other.seed_account("c@example.invalid", active=True)
+        other.build()
+        second = Proc(self, other, extra_env={"XDG_RUNTIME_DIR": os.path.dirname(os.path.dirname(self.proc.paths.socket))}).start(wait=False)
+        code, out, err = second.finish()
+        self.assertEqual(code, 0, err)
+        self.assertTrue(os.path.exists(self.proc.paths.socket), "the running daemon's socket is still there")
+        self.assertEqual(self.proc.client().call("status.get")["accountCount"], 2, "and it still answers")
+
     def test_new_files_are_made_with_umask_077(self):
         client = self.proc.client()
         client.call("accounts.setLabel", {"account": "1", "label": "x"})
@@ -367,6 +438,173 @@ class ShutdownWorkTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         saved = json.loads(rig.backup_of(b).token)["claudeAiOauth"]
         self.assertEqual(saved["refreshToken"], new_refresh, "the rotated refresh token was saved, not lost")
+
+
+class IdleTests(unittest.TestCase):
+    """Spec 5.1 and 5.4: a switch, a sign-in, a saved-login renewal or a store write blocks the updater's restart."""
+
+    def setUp(self):
+        self.rig = Rig(self)
+        self.rig.seed_account("a@example.invalid", active=True)
+        self.coordinator = self.rig.build()
+
+    def holding(self, lock):
+        """Holds ``lock`` from another thread until the returned event is set (an RLock is re-entrant, so the
+        test thread could not make it look busy)."""
+        held, release = threading.Event(), threading.Event()
+
+        def hold():
+            with lock:
+                held.set()
+                release.wait(10)
+
+        thread = threading.Thread(target=hold, daemon=True)
+        thread.start()
+        self.assertTrue(held.wait(5))
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(release.set)
+        return release
+
+    def test_idle_when_nothing_is_going_on(self):
+        self.assertTrue(daemon_module.is_idle(self.coordinator))
+
+    def test_a_switch_a_sign_in_a_capture_a_removal_or_a_reconcile_blocks_it(self):
+        for kind in ("switch", "signin", "capture", "remove", "reconcile", "audit"):
+            self.assertTrue(self.coordinator.gate.try_begin(kind), kind)
+            self.assertFalse(daemon_module.is_idle(self.coordinator), kind)
+            self.coordinator.gate.end(kind)
+            self.assertTrue(daemon_module.is_idle(self.coordinator), kind)
+
+    def test_a_renewal_in_flight_blocks_it(self):
+        with self.coordinator._renewal_lock:
+            self.coordinator._renewals["some-account"] = object()
+        self.assertEqual(self.coordinator.renewals_in_flight(), 1)
+        self.assertFalse(daemon_module.is_idle(self.coordinator))
+        with self.coordinator._renewal_lock:
+            self.coordinator._renewals.clear()
+        self.assertTrue(daemon_module.is_idle(self.coordinator))
+
+    def test_a_write_to_the_saved_logins_the_accounts_or_the_settings_blocks_it(self):
+        for name in ("backups", "accounts_file", "settings"):
+            store = getattr(self.coordinator, name)
+            lock = store._lock
+            release = self.holding(lock)
+            self.assertFalse(daemon_module.is_idle(self.coordinator), name)
+            release.set()
+            self.assertTrue(wait_for(lambda: daemon_module.is_idle(self.coordinator), 5), name)
+
+    def test_the_updater_the_daemon_builds_waits_on_it(self):
+        home = tmpdir(self)
+        env = {"PATH": "/usr/bin:/bin", "HOME": home, "XDG_RUNTIME_DIR": os.path.join(home, "run")}
+        paths = paths_module.Paths.from_env(env)
+        fd = daemon_module.acquire_daemon_lock(paths.daemon_lock)
+        self.addCleanup(os.close, fd)
+        daemon = daemon_module.build(env, fd, paths, threading.Event())
+        self.addCleanup(daemon.log.close)
+        self.assertTrue(daemon.updater._idle())
+        self.assertTrue(daemon.coordinator.gate.try_begin("switch"))
+        self.assertFalse(daemon.updater._idle(), "a switch in progress holds the restart back")
+        daemon.coordinator.gate.end("switch")
+        self.assertTrue(daemon.updater._idle())
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+class StopBudgetTests(unittest.TestCase):
+    """SIGTERM: the whole stop fits inside TimeoutStopSec=90, and a daemon that never bound the socket does
+    not remove the one that did."""
+
+    def make(self, case_clock, *, begin_takes=0.0, finish_takes=0.0):
+        events = []
+        clock = case_clock
+
+        class Coordinator:
+            def begin_shutdown(self_inner):
+                events.append(("begin_shutdown",))
+                clock.now += begin_takes
+
+            def finish_shutdown(self_inner, timeout):
+                events.append(("finish_shutdown", timeout))
+                clock.now += min(finish_takes, timeout)
+                return finish_takes <= timeout
+
+        class Server:
+            def stop_accepting(self_inner):
+                events.append(("stop_accepting",))
+
+            def stop(self_inner):
+                events.append(("server.stop",))
+
+        class Updater:
+            def stop(self_inner, timeout=5.0):
+                events.append(("updater.stop", timeout))
+                clock.now += min(timeout, 1.0)
+
+        from pixelswitch.logfile import Log
+
+        home = tmpdir(self)
+        paths = paths_module.Paths(home, None)
+        fd = os.open(os.devnull, os.O_RDONLY)
+        daemon = daemon_module.Daemon(paths, Log(None), Coordinator(), Server(), None, Updater(), fd,
+                                      threading.Event(), None, True)
+        return daemon, events, paths
+
+    def test_the_budget_is_under_the_units_timeout(self):
+        self.assertLess(daemon_module.STOP_BUDGET_SECONDS, 90)
+        self.assertEqual(daemon_module.RENEWAL_WAIT_SECONDS, 80.0)
+        unit = read_file(os.path.join(LINUX_DIR, "packaging", "pixelswitch.service"))
+        self.assertIn("TimeoutStopSec=90", unit)
+
+    def test_the_updater_is_told_to_stop_before_the_wait_and_the_wait_is_bounded(self):
+        clock = FakeClock()
+        daemon, events, _ = self.make(clock, finish_takes=500.0)
+        began = clock()
+        daemon.stop(clock=clock)
+        names = [event[0] for event in events]
+        self.assertEqual(names, ["begin_shutdown", "updater.stop", "stop_accepting", "finish_shutdown", "updater.stop",
+                                 "server.stop"])
+        self.assertEqual(events[1], ("updater.stop", 0.0), "the flag first: no download, self-check or restart starts now")
+        self.assertEqual(events[3], ("finish_shutdown", 80.0))
+        self.assertLessEqual(clock() - began, daemon_module.STOP_BUDGET_SECONDS)
+
+    def test_a_slow_start_to_the_shutdown_shortens_the_wait_so_the_total_still_fits(self):
+        clock = FakeClock()
+        daemon, events, _ = self.make(clock, begin_takes=20.0, finish_takes=500.0)
+        began = clock()
+        daemon.stop(clock=clock)
+        finish = [event for event in events if event[0] == "finish_shutdown"][0]
+        self.assertLessEqual(finish[1], daemon_module.STOP_BUDGET_SECONDS - 20.0)
+        self.assertLessEqual(clock() - began, daemon_module.STOP_BUDGET_SECONDS)
+        self.assertLess(clock() - began, 90)
+
+    def test_an_exhausted_budget_still_stops_everything_without_waiting(self):
+        clock = FakeClock()
+        daemon, events, _ = self.make(clock, begin_takes=100.0, finish_takes=500.0)
+        daemon.stop(clock=clock)
+        self.assertIn(("finish_shutdown", 0.0), events)
+        self.assertIn(("server.stop",), events)
+
+    def test_a_daemon_whose_server_never_bound_leaves_the_running_daemons_socket_and_pointer_alone(self):
+        clock = FakeClock()
+        daemon, events, paths = self.make(clock)
+        fsio.atomic_write(paths.socket_path_file, paths.socket + "\n")
+        daemon.stop(server_started=False, clock=clock)
+        self.assertNotIn(("server.stop",), events)
+        self.assertTrue(os.path.exists(paths.socket_path_file), "the pointer belongs to the daemon that is running")
+
+    def test_a_daemon_that_bound_it_removes_its_own_pointer(self):
+        clock = FakeClock()
+        daemon, events, paths = self.make(clock)
+        fsio.atomic_write(paths.socket_path_file, paths.socket + "\n")
+        daemon.stop(clock=clock)
+        self.assertIn(("server.stop",), events)
+        self.assertFalse(os.path.exists(paths.socket_path_file))
 
 
 def parse_prefix(info):

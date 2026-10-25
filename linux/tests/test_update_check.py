@@ -57,6 +57,24 @@ class FeedParsingTests(unittest.TestCase):
             uc.parse_feed('{"pad":"' + "x" * uc.MAX_FEED_BYTES + '"}')
         self.assertEqual(caught.exception.reason, "feed")
 
+    def test_deeply_nested_json_is_an_update_error_not_a_recursion_error(self):
+        # Under MAX_FEED_BYTES (64 KiB) but deep enough to overflow json's recursion limit on Python 3.12+.
+        for text in ("[" * 16000 + "]" * 16000, '{"a":' * 12000 + "1" + "}" * 12000, "[" * 30000,
+                     (b"[" * 16000 + b"]" * 16000)):
+            with self.assertRaises(UpdateError, msg=repr(text[:10])) as caught:
+                uc.parse_feed(text)
+            self.assertEqual(caught.exception.reason, "feed")
+
+    def test_nothing_but_an_update_error_ever_comes_out_of_a_malformed_document(self):
+        hostile = ["\ud800", '{"a": "\\ud800"}', "{" * 5, '{"a":1e999999}', "-" * 100, "\x00", "[1,2", "[[[[[[",
+                   '{"version": ' + "9" * 5000 + "}", '{"build": NaN}']
+        for text in hostile:
+            try:
+                value = uc.parse_feed(text)
+            except UpdateError:
+                continue
+            self.assertIsInstance(value, dict, text)
+
 
 class ValidateFeedTests(unittest.TestCase):
     def test_a_good_feed(self):
@@ -205,8 +223,29 @@ class VerifyDownloadTests(unittest.TestCase):
     def test_it_fails_closed_when_the_verifier_cannot_say_yes(self):
         for verifier in (lambda *a, **k: False, lambda *a, **k: None):
             with self.assertRaises(UpdateError) as caught:
-                uc.verify_download(self.path, self.feed(), PUBLIC_B64, verify_file=verifier)
+                uc.verify_download(self.path, self.feed(), PUBLIC_B64, verify=verifier)
             self.assertEqual(caught.exception.reason, "signature")
+
+    def test_the_file_is_read_once_and_the_verified_bytes_are_handed_back(self):
+        seen = []
+
+        def verifier(data, signature, key):
+            seen.append(bytes(data))
+            # Swap the file on disk while the signature check runs: a second read would see this.
+            with open(self.path, "wb") as handle:
+                handle.write(b"swapped after the checks began")
+            return True
+
+        returned = uc.verify_download(self.path, self.feed(), PUBLIC_B64, verify=verifier)
+        self.assertEqual(returned, self.payload)
+        self.assertEqual(seen, [self.payload])
+
+    def test_a_symlinked_download_is_refused(self):
+        link = os.path.join(self.work, "link.tar.gz")
+        os.symlink(self.path, link)
+        with self.assertRaises(UpdateError) as caught:
+            uc.verify_download(link, self.feed(), PUBLIC_B64)
+        self.assertEqual(caught.exception.reason, "size")
 
     def test_a_missing_file_is_refused(self):
         with self.assertRaises(UpdateError):
@@ -384,6 +423,14 @@ class SafeExtractTests(unittest.TestCase):
         builder.tar.addfile(info)
         self.refused(builder)
 
+    def test_the_scan_pass_refuses_a_bad_link_before_anything_is_written(self):
+        # A regular member comes FIRST: if only the extraction filter caught the link, 'ok' would already
+        # be on disk. refused() requires the destination to be empty, so this pins the scan pass.
+        self.refused(ArchiveBuilder().file("ok", b"x").symlink("link", "/etc"))
+        self.refused(ArchiveBuilder().file("ok", b"x").symlink("link", "../outside"))
+        self.refused(ArchiveBuilder().file("ok", b"x").hardlink("hl", "../outside/x"))
+        self.refused(ArchiveBuilder().file("ok", b"x").hardlink("hl", "/etc/passwd"))
+
     def test_links_that_leave_the_tree(self):
         self.refused(ArchiveBuilder().symlink("link", "/etc"))
         self.refused(ArchiveBuilder().symlink("link", "../outside"))
@@ -393,9 +440,27 @@ class SafeExtractTests(unittest.TestCase):
         self.refused(ArchiveBuilder().hardlink("hl", "/etc/passwd"))
         self.refused(ArchiveBuilder().hardlink("hl", "../outside/x"))
 
+    def test_bytes_are_extracted_exactly_as_given(self):
+        builder = ArchiveBuilder().file("VERSION", b"version=2.0\nbuild=31\n")
+        builder.write(self.archive)
+        with open(self.archive, "rb") as handle:
+            data = handle.read()
+        os.unlink(self.archive)  # no file at all: the bytes are the only source
+        self.assertEqual(uc.safe_extract(data, self.dest), 1)
+        with open(os.path.join(self.dest, "VERSION"), "rb") as handle:
+            self.assertEqual(handle.read(), b"version=2.0\nbuild=31\n")
+
     def test_a_link_then_a_file_through_it(self):
         self.refused(ArchiveBuilder().symlink("d", "/tmp").file("d/evil", b"x"))
         self.refused(ArchiveBuilder().symlink("d", "..").file("d/evil", b"x"))
+
+    def test_a_chain_of_links_that_each_look_inside_is_refused_by_the_scan(self):
+        # 'a' -> '.' is inside; 'a/b' -> '..' looks inside from the lexical point of view ('a/..' is '.'),
+        # but 'a/b' is written THROUGH the link 'a' and points above the tree. Then 'b/escaped' follows it.
+        self.refused(ArchiveBuilder().file("ok", b"x").symlink("a", ".").symlink("a/b", "..").file("b/escaped", b"x"))
+        self.refused(ArchiveBuilder().file("ok", b"x").symlink("a", ".").file("a/new", b"x"))
+        self.refused(ArchiveBuilder().file("ok", b"x").symlink("a", ".").hardlink("hl", "a/ok"))
+        self.refused(ArchiveBuilder().file("ok", b"x").symlink("a", ".").file("a", b"x"))
 
     def test_links_that_stay_inside_are_fine(self):
         builder = (ArchiveBuilder().directory("lib").file("lib/real.py", b"x").symlink("lib/alias.py", "real.py")
