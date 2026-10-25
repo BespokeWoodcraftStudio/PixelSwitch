@@ -45,3 +45,6 @@ that file for the full entry. Start here to get up to speed on the project.
 
 ## 2026-10-16
 - [WL-2026-10-16-001](./2026-10-16.md) — 1.9: the 'API Rate Limited' banner was PixelSwitch resending refused logins; diagnosed, fixed, released and verified — _fix/done_
+
+## 2026-10-24
+- [WL-2026-10-24-001](./2026-10-24.md) — 2.0 started: recon and spec for separate session/weekly thresholds, priority numbers, Linux — _design/wip_
