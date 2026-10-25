@@ -26,9 +26,11 @@ The founder asked for it on 2026-10-24 (his words verbatim in spec section 0). *
   2026-10-25 ~06:15 UTC; service `pixelswitch.service` active; one account (ahmed@pixelventures.ai) added; auto-switch
   OFF; tray registered; log clean. Its CabDesign farm's `claude` jobs use the same login (`laptop-farm.md`), so switching
   there moves them too; the founder page says so. Uninstall: `~/.local/share/pixelswitch/install-linux.sh --uninstall`.
-- **Macs:** at release time both the founder's Mac and the Beeco Mac ran 1.9 with automatic updates on; next Sparkle
-  checks were due ~06:50 UTC (Beeco) and ~07:16 UTC (founder). Confirm with PlistBuddy (2.0) and `[init]` in
-  `~/Library/Logs/PixelSwitch-app.log` (Beeco: `ssh claadmin@100.125.33.35`).
+- **Macs: both run 2.0, installed by Sparkle on their own** (checked 2026-10-25 07:25 UTC): the founder's Mac
+  relaunched into 2.0 at 07:16:49 UTC (5 accounts), the Beeco Mac (`ssh claadmin@100.125.33.35`) at 06:50:00 UTC
+  (8 accounts). No error, warning, 401 or 429 in either log since. The Beeco Mac starts with "3 account(s) need to sign
+  in again": persisted by 1.9 before the update (1 on 2026-10-19, 2 on 2026-10-21), so not caused by 2.0; those three
+  Beeco accounts need re-signing on that Mac.
 - **Waiting on the founder:** `docs/decisions/pixelswitch-2.0-2026-10-24.html` (four choices that ship with defaults,
   three hand checks). Record his pasted answers verbatim in `docs/decisions/`, mark the page answered, and ship any
   behaviour change as 2.1.
@@ -65,7 +67,7 @@ The founder asked for it on 2026-10-24 (his words verbatim in spec section 0). *
    - fix any failure test-first and ship it as the next minor version.
 
    Regenerate the page with `python3 scripts/hand-checks/gen-hand-checks.py`, and render it with `node scripts/hand-checks/render-hand-checks.cjs <out-dir>`.
-2. **Optional, his call:** a paid graphify refresh of this repo, estimated at $3.10 to $10.43 (163 files would be sent) by `~/.claude/graphify-smart/fleet-audit.py .` on 2026-10-16. Only the free AST update has been run (latest 2026-10-16 after 1.9: 2,325 nodes, 5,271 edges).
+2. **Optional, his call:** a paid graphify refresh of this repo, now estimated at $6.75 to $21.38 (355 files would be sent, after 2.0; the free AST update ran 2026-10-25: 7,595 nodes, 17,123 edges); earlier estimate $3.10 to $10.43 (163 files) by `~/.claude/graphify-smart/fleet-audit.py .` on 2026-10-16. Only the free AST update has been run (latest 2026-10-16 after 1.9: 2,325 nodes, 5,271 edges).
 
 ## Automatic updates: proven, and 1.6 is the second run
 
