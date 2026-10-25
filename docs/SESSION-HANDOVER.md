@@ -1,45 +1,44 @@
 # PixelSwitch: session handover
 
 Read this first. Then read `docs/worklog/INDEX.md` for the full history; the newest entries are at the bottom of `docs/worklog/2026-10-16.md`.
-Last updated 2026-10-16 (PDT), after 1.9: PixelSwitch stops causing the usage 429s ("API Rate Limited") and says what is really happening.
+Last updated 2026-10-25 (PDT), after 2.0: separate session and weekly limits, priority numbers, and PixelSwitch for Linux.
 
-## 2.0 IN PROGRESS (2026-10-24): read this first
+## 2.0 (2026-10-25): read this first
 
-The founder asked for separate session and weekly auto-switch limits (example 90% / 50%), priority numbers per account
-("ahmed@gmail.com = 3, ahmed@pixelventures.ai = 1"), and a Linux version tested on his Ubuntu laptop, then a release to
-every client. Builders are Sonnet, QA is Opus. **Do not touch the PixelDirector repo** (his other session works there).
+Released **v2.0 (build 31)**, Mac and Linux, tag `v2.0`, release CI run 40167290828, published 2026-10-25T06:01:50Z.
+`scripts/verify-release.sh v2.0` passes every Mac check (Latest, feed 2.0/31, appcast length = DMG, EdDSA, notarized,
+stapled) and every Linux check (assets, versions, size, SHA-256, Ed25519, the installer's SHA-256 in the notes).
+The founder asked for it on 2026-10-24 (his words verbatim in spec section 0). **Do not touch the PixelDirector repo**
+(his other session worked there that night).
 
-- **Branch `release-2.0`** (pushed to origin; `main` is untouched until release). Contract:
-  `docs/superpowers/specs/2026-10-24-2.0-spec.md` (revision 3, decisions D1-D20). Lanes, file ownership, checks:
-  `docs/superpowers/plans/2026-10-24-2.0-lanes.md`. Recon, reviews and findings:
-  `docs/investigations/2026-10-24-linux-and-split-thresholds/`.
-- **Merged into `release-2.0`** (as of 2026-10-24 ~20:30 PDT): lanes V (150 shared cases), MA (Mac engine), MB (Mac
-  control, CLI, MCP, views, strings), FA, FB, FC (Mac fixes from three rounds of Opus review), LA (Linux pure core), LB
-  (Linux daemon; the refresh lock and two more Claude Code locks confirmed and honoured, see `linux/README.md`). Mac:
-  1326/1326 unit tests; CI branch builds pass `scripts/verify-ci-artifact.sh` (signed, notarized). Linux: 1136 tests on
-  3.14, 3.12 and the laptop; scratch-HOME integration 82/82 on the Mac and the laptop. Founder page committed:
-  `docs/decisions/pixelswitch-2.0-2026-10-24.html` (rendered 1920x1080 both themes; Copy tested). Draft
-  `RELEASE_NOTES.md` has a `LINUX_INSTALL_PLACEHOLDER` to fill from lane LC's report.
-- **Review records:** `docs/investigations/2026-10-24-linux-and-split-thresholds/review-*.json` and `rereview-*.json`.
-- **Running at that time:** lane LC (Linux CLI, MCP, tray, settings window, packaging, install.sh, CI jobs,
-  verify-release Linux checks) in `.claude/worktrees/lc-linux-faces`; Opus review of LB (four lenses); Opus re-review of
-  FC; CI run 40157939731.
-- **Queue after that:** one Linux fix lane (review-la P1s, review-lb findings, spec rev 4 D20 and 429 rules for Linux);
-  one final Mac polish lane (rereview-fb P2s: priority stepper hover-hold and stale pending step; remote-control.sh guard
-  pinned to PIXELSWITCH_CONTROL_SOCKET and the host OS; any rereview-fc findings); Opus re-reviews; CI with the Linux
-  jobs; fill the release notes; merge `release-2.0` into `main`; `echo y | ./scripts/release.sh 2.0`;
-  `scripts/verify-release.sh v2.0`; install on the laptop from the real release (auto-switch off) and read its own usage;
-  confirm the Macs pick up 2.0; worklog, handover, memory.
-- **If a lane died:** its worktree and branch hold its commits; re-brief a new lane from the lanes file, never edit the
-  conformance vectors, and run the lane's checks yourself before merging.
-- **Laptop:** `ssh ahmed@ahmed-aorus-15p-xd.tail19d9f2.ts.net` (key auth). It runs the CabDesign farm, whose `claude`
-  jobs use the same login (`laptop-farm.md`). Every test there follows spec 5.7 (scratch HOME under
-  `~/.cache/pixelswitch-dev/`, test mode, fabricated logins, no systemctl, no sudo).
+- **What 2.0 is:** Session and Weekly limits (defaults 50-100, per account 1-100), priority numbers shown as P1 (lists
+  sorted by them; "Priority (lowest number first)" strategy), weekly overflow (D19), login-safety fixes D12/D20, the CLI
+  and MCP additions (protocol stays 2), and the Linux version. Contract: `docs/superpowers/specs/2026-10-24-2.0-spec.md`
+  (revision 4, D1-D20). Lanes: `docs/superpowers/plans/2026-10-24-2.0-lanes.md`. Every review, re-review and finding:
+  `docs/investigations/2026-10-24-linux-and-split-thresholds/` (`review-*.json`, `rereview-*.json`, `final-check-*`,
+  `orchestrator-findings.md` O1-O4, `laptop-farm.md`, `evidence/` renders). Worklog WL-2026-10-24-001 and -002.
+- **Linux:** `linux/` (Python 3.12+, stdlib daemon/CLI/MCP, PyGObject tray and settings window). Design, Claude Code's
+  three locks, and how a running Claude Code notices a rewrite: `linux/README.md`. Tests:
+  `python3 -m unittest discover -s linux/tests -t linux` (1670); CI runs them on Ubuntu 24.04 and 26.04 and renders the
+  settings window (`linux-settings-renders-*` artifacts). Release assets: `pixelswitch-linux-2.0.tar.gz`,
+  `install-linux.sh` (SHA-256 31bdbeeb70388cf40da5797b881455ef0f7c1489e66ebbb4e07c5b9de03247a0), `latest-linux.json`.
+- **The founder's laptop** (`ssh ahmed@ahmed-aorus-15p-xd.tail19d9f2.ts.net`): 2.0 installed from the release on
+  2026-10-25 ~06:15 UTC; service `pixelswitch.service` active; one account (ahmed@pixelventures.ai) added; auto-switch
+  OFF; tray registered; log clean. Its CabDesign farm's `claude` jobs use the same login (`laptop-farm.md`), so switching
+  there moves them too; the founder page says so. Uninstall: `~/.local/share/pixelswitch/install-linux.sh --uninstall`.
+- **Macs:** at release time both the founder's Mac and the Beeco Mac ran 1.9 with automatic updates on; next Sparkle
+  checks were due ~06:50 UTC (Beeco) and ~07:16 UTC (founder). Confirm with PlistBuddy (2.0) and `[init]` in
+  `~/Library/Logs/PixelSwitch-app.log` (Beeco: `ssh claadmin@100.125.33.35`).
+- **Waiting on the founder:** `docs/decisions/pixelswitch-2.0-2026-10-24.html` (four choices that ship with defaults,
+  three hand checks). Record his pasted answers verbatim in `docs/decisions/`, mark the page answered, and ship any
+  behaviour change as 2.1.
+- **Tests:** Mac `bash Tests/run-unit-tests.sh` 1352/1352 (150/150 conformance, the frozen 1.9 engine oracle). This Mac
+  cannot compile SwiftUI view files: CI is the only compile proof for views (see the gotchas).
 
 ## Current state
 
-- **Released: 1.9** (build 30, tag `v1.9`, release CI run 38924948392, published 2026-10-16T15:37:20Z), verified with `scripts/verify-release.sh v1.9`: Latest, feed 1.9/30, appcast length equals the DMG, EdDSA signature verified, notarized and stapled. The two new messages are in all five shipped string tables (`plutil -p`), and "API Rate Limited" is gone. The branch build before it (run 38924140452) passed `scripts/verify-ci-artifact.sh`. The main-push build of the bump commit (run 38924944037) was cancelled as redundant, as on every release.
-- **Not yet installed anywhere** at 08:40 PDT on 2026-10-16: both Macs run 1.8 and install 1.9 by themselves within about 6 hours (or Settings → About → Check for Updates).
+- **Released: 2.0** (build 31, tag `v2.0`, run 40167290828, 2026-10-25T06:01:50Z): see the 2.0 section above. Before it, 1.9 (build 30, tag `v1.9`, run 38924948392, 2026-10-16).
+- **Installed:** the Linux laptop (2.0, 2026-10-25). The Macs install 2.0 by themselves at their next Sparkle check (see the 2.0 section).
 - **Next session, prove 1.9 on the founder's Mac** (no founder action needed; read, never ask): `/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" /Applications/PixelSwitch.app/Contents/Info.plist` gives 1.9; then count, from the `[init]` of 1.9 onwards, `grep -c 'rate-limited; parked' ~/Library/Logs/PixelSwitch-app.log` (expected 0 for a healthy set of logins) and the 401s per login per hour (the scripts in `docs/investigations/2026-10-16-usage-429/scripts/`). Any 429 on a login that had no 401 in the hour before it would be new evidence: read the investigation's "Still unknown" first.
 - **Branches:** `main` holds everything. `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only`, `no-subscription-switch`, `exhausted-switch-and-usage-errors`, `switch-at-threshold` and `fix/usage-429-dead-tokens` are fully merged and can be deleted.
 - **Tests:** `bash Tests/run-unit-tests.sh` gives 706/706. **`bash scripts/typecheck.sh` no longer works on this Mac** (since its Command Line Tools moved to Swift 6.4, by 2026-10-16): it fails on main with 4 baseline errors in `PixelSwitchApp.swift` (the SwiftUIMacros plugin is missing), and swiftc then stops, so later files are never checked. Use `bash docs/investigations/2026-10-16-usage-429/scripts/typecheck-reordered.sh .` (SwiftUI view files last; checks all 55 non-view files; the only errors on main are 5 in `SignInView.swift`), the CLI line in that investigation's build notes, and a CI branch build (`gh workflow run build.yml -R BespokeWoodcraftStudio/PixelSwitch --ref <branch>`, then `scripts/verify-ci-artifact.sh <run-id>`) as the real compile proof.
@@ -55,6 +54,7 @@ every client. Builders are Sonnet, QA is Opus. **Do not touch the PixelDirector 
 | 1.7 | Rule `exhausted`: an active account at 100% of its session or week is left for any account a point under its own threshold when none is 10 points under. Usage errors in plain words (`UsageRequestError`), the last reading kept on a 5xx or no connection, **Retry** on the card, **Status** for a 5xx. |
 | 1.8 | Auto-switch moves you **at your number** to any account at least a point under its own threshold (`AutoSwitchEngine.hysteresis` 10 → 1), on session, weekly and Fable; 1.7's `exhausted` rule removed. The founder's answer on `docs/decisions/pixelswitch-switch-point-2026-09-29.html` (answered). |
 | 1.9 | PixelSwitch **stops causing the usage 429s** ("API Rate Limited. Try again later.") and says what is really happening. `UsageRequestGuard` (pure, unit-tested) gates every usage and profile request: a token that got a 401 is never sent again until it changes, an expired one is renewed first (saved login) or left alone (live login: "Waiting for Claude Code to renew this login"), 20 minutes' rest after any 401 or 429 whatever the number of accounts, a server-refused grant is `needsReauth` (persisted, not polled, not switchable), and the park belongs to the token, so a re-sign clears the card at once. Delegated `claude auth status` refresh removed (0 recoveries in 13). Full story: `docs/investigations/2026-10-16-usage-429.md`. |
+| 2.0 | **Separate Session and Weekly limits** (defaults 50-100, per account 1-100), **priority numbers** (P1; lists sorted; "Priority (lowest number first)"), weekly overflow (when no account under its weekly limit can take you, the session limit decides), login-safety fixes (blank logins never saved or written; re-read before write; honest refreshTokenExpiresAt; removing the active account really switches; disposable-login rule; 429 recorded without an account), CLI/MCP additions (protocol stays 2, 21 methods, 20 tools, 24 keys), and **PixelSwitch for Linux** (Ubuntu 24.04/26.04). Spec `docs/superpowers/specs/2026-10-24-2.0-spec.md`. |
 
 ## Waiting on the founder
 
@@ -116,6 +116,22 @@ The founder: "on my computer, I'm getting this API rate-limited message, because
 - **Founder decisions, verbatim:** `docs/decisions/2026-09-24-remote-control-answers.md` (every answer since 2026-09-24, including the decisions NOT to do things).
 
 ## Gotchas that cost time (so the next session doesn't relearn them)
+
+- **(2.0) This Mac cannot compile SwiftUI view files** (missing SwiftUI macro plugin since its Swift 6.4 tools): the unit
+  harness and every local typecheck skip or stop before views. A lane dropped `import SwiftUI` and only CI caught it.
+  Run `gh workflow run build.yml -R BespokeWoodcraftStudio/PixelSwitch --ref <branch>` and `scripts/verify-ci-artifact.sh`
+  before any view change reaches main. Standalone view components can be rendered offscreen
+  (`Tools/screenshots/run_settings_renders.sh`), which is how the 2.0 rows were eyeballed.
+- **(2.0) Wait on CI with an exit status that follows the run's conclusion** (`gh run watch ... --exit-status`, then
+  `gh run view --json conclusion` and exit non-zero unless success). `gh run watch ...; echo` exits 0 on failure and a
+  failed build was once reported as passing.
+- **(2.0) The GitHub API quota (5,000/hour) is shared by every session on this account.** Polling every 20 s plus lanes'
+  `gh` calls exhausted it on 2026-10-24. Poll every 120 s or more; keep lanes off the GitHub API.
+- **(2.0) Lanes must not install anything on the founder's machines.** A `brew install pygobject3` pulled in python@3.15
+  and made it the default `python3` (restored with `brew unlink python@3.15; brew unlink python@3.14 && brew link
+  python@3.14`).
+- **(2.0) Ubuntu 24.04 reuses a freed inode at once and stamps directories coarsely:** any "is this still my lock"
+  check must compare exact values (statx birth time in ns, an mtime we set with a random ns part), never a tolerance.
 
 - **The repository is no longer a GitHub fork** (`gh repo view --json isFork` gives false). Every push to `main` starts a full CI build, and a tag push starts the release build by itself. `release.sh` now dispatches by hand only if no tag-push run appears within a minute. Two release builds race to upload the DMG and the appcast, and a mismatched pair breaks every update. Cancel docs-only `main` builds with `gh run cancel <id> -R BespokeWoodcraftStudio/PixelSwitch`.
 - **Branch pushes don't start CI.** Use `gh workflow run build.yml -R BespokeWoodcraftStudio/PixelSwitch --ref <branch>`.
