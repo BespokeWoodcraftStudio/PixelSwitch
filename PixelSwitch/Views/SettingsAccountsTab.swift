@@ -1,3 +1,5 @@
+import SwiftUI
+
 /// Settings → Accounts: every account in priority order.
 ///
 /// The order here IS the accounts list's order, which is the priority order
