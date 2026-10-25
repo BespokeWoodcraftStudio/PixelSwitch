@@ -36,7 +36,7 @@ sha256sum install-linux.sh   # must print INSTALLER_SHA256_PLACEHOLDER
 bash install-linux.sh
 ```
 
-Then add the account Claude Code is using now with `pixelswitch accounts add-current`, or open PixelSwitch from the top bar and choose Sign in another account. The top-bar icon shows the active account's 5-hour session use; its menu lists your accounts in priority order. Settings has the same accounts, limits and priority controls as the Mac. To remove it: `bash install-linux.sh --uninstall` (your saved logins are kept unless you add `--purge`).
+Then add the account Claude Code is using now with `pixelswitch accounts add-current`, or open PixelSwitch from the top bar and choose Sign in another account. The top-bar icon shows the active account's 5-hour session use; its menu lists your accounts in priority order. Settings has the same accounts, limits and priority controls as the Mac. To remove it: `bash ~/.local/share/pixelswitch/install-linux.sh --uninstall` (your saved logins are kept unless you add `--purge`).
 
 Not in the Linux version yet: the cost and activity dashboard, the widget, menu-bar module choices, and languages other than English.
 
