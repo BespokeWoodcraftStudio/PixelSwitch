@@ -590,6 +590,7 @@ do {
 }
 
 runAutoSwitchRulesTests()
+runConformanceTests()
 runSignInTests()
 runControlTests()
 runAutoUpdateTests()

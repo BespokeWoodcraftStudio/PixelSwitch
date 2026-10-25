@@ -43,6 +43,19 @@ struct Account: Identifiable, Codable, Hashable {
     /// default (global) threshold. Saved accounts from before this
     /// existed decode it as nil, so they behave exactly as they did.
     var switchThreshold: Double?   // 0...100; 0 = Manual only; nil = use the default (global) threshold
+    /// 2.0: this account's own limit for the 5-hour session window alone, 1–100.
+    /// nil follows the next layer (`switchThreshold`, then the global default).
+    /// Accounts saved by 1.9 decode it as nil, and a nil is never written.
+    var sessionThreshold: Double?
+    /// 2.0: the same for the 7-day weekly window (and Fable, which follows it).
+    var weeklyThreshold: Double?
+    /// 2.0: this account's priority number, 1–99; lower is tried first. nil =
+    /// none: such accounts come after every numbered one. Saved accounts from
+    /// before it existed decode it as nil.
+    var priority: Int?
+    /// 2.0: when `priority` was last set, so that among equal numbers the one
+    /// set most recently goes first (spec D2). nil = never set by the user.
+    var prioritySetAt: Date?
 
     /// Subscription type with first letter capitalized (e.g., "max" → "Max").
     var displaySubscriptionType: String? {
@@ -96,7 +109,11 @@ struct Account: Identifiable, Codable, Hashable {
         isActive: Bool = false,
         lastUsed: Date? = nil,
         customLabel: String? = nil,
-        switchThreshold: Double? = nil
+        switchThreshold: Double? = nil,
+        sessionThreshold: Double? = nil,
+        weeklyThreshold: Double? = nil,
+        priority: Int? = nil,
+        prioritySetAt: Date? = nil
     ) {
         self.id = id
         self.email = email
@@ -108,6 +125,10 @@ struct Account: Identifiable, Codable, Hashable {
         self.lastUsed = lastUsed
         self.customLabel = customLabel
         self.switchThreshold = switchThreshold
+        self.sessionThreshold = sessionThreshold
+        self.weeklyThreshold = weeklyThreshold
+        self.priority = priority
+        self.prioritySetAt = prioritySetAt
     }
 }
 
