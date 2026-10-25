@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import sys
 import unicodedata
 import uuid as _uuid
 from dataclasses import dataclass
@@ -34,6 +35,8 @@ from .engine import (
     round_half_away,
     window_value,
 )
+from .accounts import valid_priority
+from .finite import finite_number
 from .usage_model import UsageResponse, is_number
 
 # --- constants ---------------------------------------------------------------------------
@@ -91,9 +94,35 @@ def _reject_constant(name: str) -> Any:
     raise ValueError(f"{name} is not valid JSON")
 
 
+def _finite_float(text: str) -> float:
+    number = float(text)
+    if not math.isfinite(number):
+        raise ValueError("a number outside the range of a double is not valid JSON")
+    return number
+
+
+def _bounded_int(text: str) -> int:
+    number = int(text)
+    if abs(number) > sys.float_info.max:
+        raise ValueError("a number outside the range of a double is not valid JSON")
+    return number
+
+
+def _first_wins(pairs: list) -> dict:
+    """A duplicate key keeps its FIRST value, as Foundation's decoder does."""
+    out: dict = {}
+    for key, value in pairs:
+        if key not in out:
+            out[key] = value
+    return out
+
+
 def loads(text: "str | bytes | bytearray") -> Any:
-    """Decode JSON; NaN and Infinity are refused, as Foundation refuses them."""
-    return json.loads(text, parse_constant=_reject_constant)
+    """Decode JSON the way Foundation's JSONDecoder reads a request: NaN and Infinity are
+    refused, so is a number outside the range of a double (``1e999``, a 400-digit integer), and
+    a duplicate key keeps its FIRST value."""
+    return json.loads(text, parse_constant=_reject_constant, parse_float=_finite_float, parse_int=_bounded_int,
+                      object_pairs_hook=_first_wins)
 
 
 def _dump(value: Any, out: list[str]) -> None:
@@ -330,10 +359,10 @@ def failure_line(request_id: int | str | None, error: ControlError) -> str:
 
 
 def event_line(event_type: str, at: float, data: Any = None) -> str:
-    """A pushed event: a notification line with no ``id`` (control.md 1.9)."""
-    params: dict[str, Any] = {"at": iso8601_utc(at), "type": event_type}
-    if data is not None:
-        params["data"] = data
+    """A pushed event: a notification line with no ``id`` (control.md 1.9). Every event carries
+    a ``data`` object, as the Mac's does (``usageUpdated`` sends ``{}``)."""
+    params: dict[str, Any] = {"at": iso8601_utc(at), "type": event_type,
+                              "data": {} if data is None else data}
     return dumps({"jsonrpc": "2.0", "method": EVENT_NOTIFICATION_METHOD, "params": params})
 
 
@@ -492,9 +521,10 @@ def normalize_legacy_threshold(value: Any) -> float | None:
     is rounded to a whole number and must be 0-100 (0 = manual only)."""
     if value is None:
         return None
-    if not is_number(value) or not math.isfinite(float(value)):
+    number = finite_number(value)
+    if number is None:
         raise ControlError("invalidValue", THRESHOLD_RANGE_TEXT_LEGACY)
-    whole = round_half_away(float(value))
+    whole = round_half_away(number)
     if not 0 <= whole <= 100:
         raise ControlError("invalidValue", THRESHOLD_RANGE_TEXT_LEGACY)
     return whole
@@ -506,9 +536,10 @@ def normalize_window_threshold(value: Any) -> float | None:
     is ``invalidValue``; manual only is ``accounts.setThreshold`` with 0."""
     if value is None:
         return None
-    if not is_number(value) or not math.isfinite(float(value)):
+    number = finite_number(value)
+    if number is None:
         raise ControlError("invalidValue", THRESHOLD_RANGE_TEXT_WINDOW)
-    whole = round_half_away(float(value))
+    whole = round_half_away(number)
     if not 1 <= whole <= 100:
         raise ControlError("invalidValue", THRESHOLD_RANGE_TEXT_WINDOW)
     return whole
@@ -519,10 +550,8 @@ def normalize_priority(value: Any) -> int | None:
     anything else is ``invalidValue``. A JSON number such as ``3.0`` is a whole number."""
     if value is None:
         return None
-    if isinstance(value, bool) or not is_number(value):
-        raise ControlError("invalidValue", PRIORITY_RANGE_TEXT)
-    number = float(value)
-    if not math.isfinite(number) or not number.is_integer() or not 1 <= number <= 99:
+    number = finite_number(value)
+    if number is None or not number.is_integer() or not 1 <= number <= 99:
         raise ControlError("invalidValue", PRIORITY_RANGE_TEXT)
     return int(number)
 
@@ -533,7 +562,7 @@ def normalize_label(label: str | None) -> str | None:
     if label is None:
         return None
     trimmed = trim_whitespace_and_newlines(label)
-    if len(trimmed) > 100:
+    if grapheme_count(trimmed) > 100:
         raise ControlError("invalidValue", "A label can be at most 100 characters.")
     return trimmed or None
 
@@ -577,6 +606,40 @@ def trim_whitespace_and_newlines(text: str) -> str:
     return _trim(text, lambda c: _is_foundation_whitespace(c) or _is_foundation_newline(c))
 
 
+def fold_text(text: str) -> str:
+    """What ``caseInsensitiveCompare`` ignores, as one comparable key: case, canonically
+    equivalent spellings (NFC against NFD) and invisible format characters such as U+200B."""
+    kept = "".join(c for c in text if unicodedata.category(c) != "Cf")
+    return unicodedata.normalize("NFD", unicodedata.normalize("NFD", kept).casefold())
+
+
+def grapheme_count(text: str) -> int:
+    """Swift's ``String.count`` (extended grapheme clusters), approximated: a combining mark,
+    a variation selector, an emoji skin-tone modifier, a tag character and a zero-width joiner
+    (with the character it joins) belong to the cluster before them; two regional indicators
+    make one flag; CR LF is one."""
+    count = 0
+    previous = ""
+    joined = False
+    flags = 0
+    for char in text:
+        code = ord(char)
+        extends = (unicodedata.combining(char) != 0 or unicodedata.category(char) in ("Mn", "Me", "Mc")
+                   or 0xFE00 <= code <= 0xFE0F or 0xE0100 <= code <= 0xE01EF or 0x1F3FB <= code <= 0x1F3FF
+                   or 0xE0020 <= code <= 0xE007F or code == 0x200D)
+        regional = 0x1F1E6 <= code <= 0x1F1FF
+        if previous and (joined or extends or (previous == "\r" and char == "\n")):
+            pass
+        elif previous and regional and flags % 2 == 1:
+            pass
+        else:
+            count += 1
+        flags = flags + 1 if regional and not (joined or extends) else (flags if regional else 0)
+        joined = code == 0x200D
+        previous = char
+    return count
+
+
 _POSITION = re.compile(r"[+-]?[0-9]+\Z", re.ASCII)
 
 
@@ -601,11 +664,11 @@ def resolve(reference: str, accounts: Sequence[Any]) -> Any:
     ref = trim_whitespace_and_newlines(reference)
     if not ref:
         raise ControlError("invalidValue", "Name an account: its email, label, id or position.")
-    wanted = ref.casefold()
+    wanted = fold_text(ref)
     levels = (
-        lambda a: a.id.casefold() == wanted or uuid_string(a.id).casefold() == wanted,
-        lambda a: a.email.casefold() == wanted,
-        lambda a: (getattr(a, "custom_label", None) or "").casefold() == wanted,
+        lambda a: fold_text(a.id) == wanted or fold_text(uuid_string(a.id)) == wanted,
+        lambda a: fold_text(a.email) == wanted,
+        lambda a: fold_text(getattr(a, "custom_label", None) or "") == wanted,
     )
     for matches in levels:
         hits = [a for a in accounts if matches(a)]
@@ -712,7 +775,7 @@ def build_account_info(
     _put(info, "threshold", account.switch_threshold)
     _put(info, "sessionThreshold", window_value(account.session_threshold))
     _put(info, "weeklyThreshold", window_value(account.weekly_threshold))
-    _put(info, "priority", account.priority)
+    _put(info, "priority", account.priority if valid_priority(account.priority) else None)
     _put(info, "usage", usage)
     return info
 
@@ -829,13 +892,21 @@ def active_account_changed_data(account_id: str | None, email: str | None) -> di
 
 
 def auto_switched_data(
-    from_id: str, to_id: str, limit: str, trigger: str, window: str | None = None
+    from_id: str, to_id: str, limit: str, trigger: str, window: str | None = None, *, relaxed: bool
 ) -> dict:
-    """``{from, to, limit: windows|fable, trigger, window?}``; ``window`` (``session`` or
-    ``weekly``) is new in 2.0 and absent unless a window threshold fired."""
-    data: dict[str, Any] = {"from": uuid_string(from_id), "to": uuid_string(to_id), "limit": limit, "trigger": trigger}
+    """``{from, to, limit: windows|fable, trigger, relaxed, window?}`` (ControlSnapshots.autoSwitchedData,
+    ControlAPI.swift:392-401). ``window`` (``session`` or ``weekly``) is new in 2.0 and absent
+    unless a window threshold fired; ``relaxed`` is ALWAYS sent (true for a weekly-overflow
+    switch), and has no default so a caller cannot forget it."""
+    data: dict[str, Any] = {"from": uuid_string(from_id), "to": uuid_string(to_id), "limit": limit,
+                            "trigger": trigger, "relaxed": bool(relaxed)}
     _put(data, "window", window)
     return data
+
+
+def usage_updated_data() -> dict:
+    """``usageUpdated`` carries an empty data object (RemoteControlService.swift:111)."""
+    return {}
 
 
 def sign_in_changed_data(sign_in: dict) -> dict:

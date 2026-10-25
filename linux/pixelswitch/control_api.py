@@ -21,6 +21,11 @@ from .protocol import ControlError
 from .signin import Purpose
 
 
+def _gone() -> ControlError:
+    """The account disappeared between being resolved and being written (ControlAPI.swift:183-185, 207-209)."""
+    return ControlError("notFound", "That account no longer exists.")
+
+
 class ControlApi:
     def __init__(self, coordinator: Coordinator, log: Callable[[str], None] = lambda message: None) -> None:
         self._app = coordinator
@@ -104,25 +109,28 @@ class ControlApi:
         if method == "accounts.setLabel":
             target = self._resolve(p["account"])
             detail[0] = f" {protocol.uuid_string(target.id)}"
-            app.set_label(protocol.normalize_label(p["label"]), target.id)
+            if not app.set_label(protocol.normalize_label(p["label"]), target.id):
+                raise _gone()
             return {"account": app.info_for(target.id)}
         if method == "accounts.setThreshold":
             target = self._resolve(p["account"])
             detail[0] = f" {protocol.uuid_string(target.id)}"
-            app.set_threshold(protocol.normalize_legacy_threshold(p["threshold"]), target.id)
+            if not app.set_threshold(protocol.normalize_legacy_threshold(p["threshold"]), target.id):
+                raise _gone()
             return {"account": app.info_for(target.id)}
         if method == "accounts.setThresholds":
             target = self._resolve(p["account"])
             detail[0] = f" {protocol.uuid_string(target.id)}"
             values = {key: protocol.normalize_window_threshold(p[key]) if key in p else ABSENT
                       for key in ("session", "weekly")}
-            app.set_thresholds(target.id, session=values["session"], weekly=values["weekly"])
+            if not app.set_thresholds(target.id, session=values["session"], weekly=values["weekly"]):
+                raise _gone()
             return {"account": app.info_for(target.id)}
         if method == "accounts.setPriority":
             target = self._resolve(p["account"])
             detail[0] = f" {protocol.uuid_string(target.id)}"
             if not app.set_priority(target.id, protocol.normalize_priority(p["priority"])):
-                raise ControlError("invalidValue", protocol.PRIORITY_RANGE_TEXT)
+                raise _gone()
             return {"accounts": app.account_infos()}
         if method == "accounts.setOrder":
             accounts = app.accounts

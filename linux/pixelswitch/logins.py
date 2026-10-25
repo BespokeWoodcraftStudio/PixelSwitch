@@ -12,13 +12,12 @@ reads a file, and no message or exception text ever carries a token.
 from __future__ import annotations
 
 import json
-import math
 import time
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
+from .finite import finite_number
 from .protocol import trim_whitespace_and_newlines
-from .usage_model import is_number
 
 
 def _reject_constant(name: str) -> Any:
@@ -32,6 +31,10 @@ def loads_object(text: "str | bytes | bytearray | None") -> dict | None:
         return None
     try:
         value = json.loads(text, parse_constant=_reject_constant)
+        # An escaped lone surrogate (Node writes one for a broken emoji) parses here, but
+        # Foundation refuses the document and the text could not be stored as UTF-8: the same
+        # answer, "not a JSON object".
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
     except (ValueError, RecursionError):
         return None
     return value if isinstance(value, dict) else None
@@ -71,8 +74,8 @@ def login_problem(credential: "str | bytes | Mapping | None") -> str | None:
     if not isinstance(refresh, str) or trim_whitespace_and_newlines(refresh) == "":
         return "refreshToken is missing or blank"
     if "expiresAt" in oauth:
-        expires = oauth["expiresAt"]
-        if not is_number(expires) or not math.isfinite(float(expires)) or not float(expires) > 0:
+        expires = finite_number(oauth["expiresAt"])
+        if expires is None or not expires > 0:
             return "expiresAt is not a positive number"
     return None
 
@@ -129,8 +132,8 @@ def login_from_credential(credential: "str | bytes | Mapping | None") -> Login |
     expires_at: float | None = None
     if isinstance(expires, bool):
         expires_at = 1.0 if expires else 0.0
-    elif is_number(expires) and math.isfinite(float(expires)):
-        expires_at = float(expires)
+    elif (number := finite_number(expires)) is not None:
+        expires_at = number
     return Login(access, refresh_token, expires_at)
 
 
@@ -175,14 +178,44 @@ def details_belong(uuid: str | None, email: str | None, owner_uuid: str | None, 
     return False
 
 
-def same_oauth_tokens(a: "str | bytes | Mapping | None", b: "str | bytes | Mapping | None") -> bool:
-    """Spec 5.3 "re-read before write": do two credentials hold the same
-    ``claudeAiOauth.accessToken`` AND ``refreshToken``? Anything unreadable on either side
-    is a difference (so the caller does not write)."""
-    left, right = login_from_credential(a), login_from_credential(b)
-    if left is None or right is None:
+def _token_pair(credential: "str | None") -> "tuple[str | None, str | None] | None":
+    """The two tokens of a credential's ``claudeAiOauth`` as strings-or-None (a blank string is
+    a string, as in the Mac's ``TokenPair``), or None when the credential has no such object."""
+    obj = loads_object(credential)
+    oauth = obj.get("claudeAiOauth") if obj is not None else None
+    if not isinstance(oauth, dict):
+        return None
+    access, refresh = oauth.get("accessToken"), oauth.get("refreshToken")
+    return (access if isinstance(access, str) else None, refresh if isinstance(refresh, str) else None)
+
+
+def live_login_changed(saved_at_step4: "str | bytes | None", now: "str | bytes | None") -> bool:
+    """CredentialOwnership.liveLoginChanged (CredentialOwnership.swift:179-186), exactly. Whether
+    the live credential changed between the moment a switch saved the leaving login (step 4) and
+    the moment it is about to write: the ``claudeAiOauth`` access or refresh token differs. Identical
+    text, including none and none, is unchanged. After that the two tokens are compared as
+    ``String?`` values, so blank strings are equal to each other; a credential that does not
+    parse (or has no ``claudeAiOauth`` object) on one side only is a change."""
+    if isinstance(saved_at_step4, (bytes, bytearray)):
+        saved_at_step4 = bytes(saved_at_step4).decode("utf-8", "replace")
+    if isinstance(now, (bytes, bytearray)):
+        now = bytes(now).decode("utf-8", "replace")
+    if saved_at_step4 == now:
         return False
-    return left.access_token == right.access_token and left.refresh_token == right.refresh_token
+    a, b = _token_pair(saved_at_step4), _token_pair(now)
+    if a is None or b is None:
+        return True
+    return a != b
+
+
+def same_oauth_tokens(a: "str | bytes | Mapping | None", b: "str | bytes | Mapping | None") -> bool:
+    """Spec 5.3 "re-read before write": ``not live_login_changed`` (so it matches the Mac's rule:
+    none and none, equal text and equal blank tokens are the same; one unreadable side is not)."""
+    if isinstance(a, Mapping):
+        a = json.dumps(dict(a))
+    if isinstance(b, Mapping):
+        b = json.dumps(dict(b))
+    return not live_login_changed(a, b)
 
 
 # --- ClaudeCredentialMerge.swift -------------------------------------------------------------

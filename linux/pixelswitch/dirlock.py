@@ -157,7 +157,11 @@ class LockLedger:
                 else:
                     recorded = entry.get("birthtimeMs")
                     birth = birth_time_ms(lock_path)
-                    same = recorded is None or birth is None or abs(recorded - birth) < 2.0
+                    # Only when both birth times are known and equal: a freed inode is reused at once
+                    # on ext4, so the inode alone cannot tell a lock we made from one made since.
+                    # Without a birth time the leftover is left to Claude Code's own 60 s staleness rule.
+                    same = (isinstance(recorded, (int, float)) and not isinstance(recorded, bool)
+                            and birth is not None and abs(recorded - birth) < 2.0)
                     old = now - status.st_mtime > stale.get(lock_path, 60.0)
                     if not alive and same and old and stat.S_ISDIR(status.st_mode):
                         try:
@@ -194,6 +198,8 @@ class _Held:
     inode: int
     birth_ms: float | None
     since: float
+    #: The mtime this object last set with ``utime`` (the proof of ownership where no birth time exists).
+    last_touch: float
 
 
 class DirLock:
@@ -242,6 +248,25 @@ class DirLock:
         except OSError:
             return None
 
+    def remaining(self) -> float | None:
+        """Seconds of ``max_hold`` left (never below 0), or None when this lock has no limit or is not held."""
+        held = self._held
+        if held is None or self.max_hold is None:
+            return None
+        return max(0.0, self.max_hold - (self._clock() - held.since))
+
+    def _is_ours(self, status: os.stat_result, held: _Held) -> bool:
+        """Whether the directory at our path is still the one we made. The inode alone is not enough:
+        ext4 reuses a freed inode at once, so a lock directory Claude Code recreated after taking over
+        a stale one can carry the same number. The birth time must match too; where the filesystem keeps
+        none, the directory counts as ours only if its mtime is still the one we last set."""
+        if status.st_ino != held.inode:
+            return False
+        if held.birth_ms is not None:
+            birth = birth_time_ms(self.path)
+            return birth is not None and abs(birth - held.birth_ms) < 2.0
+        return abs(status.st_mtime - held.last_touch) < 0.002
+
     def check(self) -> None:
         """Raises :class:`LockLost` if the lock was held past ``max_hold`` or was taken from us."""
         held = self._held
@@ -252,7 +277,7 @@ class DirLock:
         if self.max_hold is not None and self._clock() - held.since > self.max_hold:
             raise LockLost(f"{os.path.basename(self.path)} was held longer than {self.max_hold:.0f} s")
         try:
-            if os.lstat(self.path).st_ino != held.inode:
+            if not self._is_ours(os.lstat(self.path), held):
                 self.compromised = True
                 raise LockLost(f"{os.path.basename(self.path)} changed under us")
         except FileNotFoundError:
@@ -279,7 +304,7 @@ class DirLock:
                 pass
             raise
         birth = birth_time_ms(self.path)
-        self._held = _Held(status.st_ino, birth, now)
+        self._held = _Held(status.st_ino, birth, now, now)
         self.compromised = False
         if self._ledger is not None:
             self._ledger.add(self.path, birth)
@@ -311,7 +336,7 @@ class DirLock:
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=2.0)
         try:
-            if os.lstat(self.path).st_ino == held.inode:
+            if self._is_ours(os.lstat(self.path), held):
                 os.rmdir(self.path)
             elif self._log is not None:
                 self._log.warning(f"[lock] {os.path.basename(self.path)} was replaced while held; leaving it alone")
@@ -330,11 +355,12 @@ class DirLock:
             if held is None:
                 return
             try:
-                if os.lstat(self.path).st_ino != held.inode:
+                if not self._is_ours(os.lstat(self.path), held):
                     self.compromised = True
                     return
                 now = self._clock()
                 os.utime(self.path, (now, now))
+                held.last_touch = now
             except OSError:
                 self.compromised = True
                 return

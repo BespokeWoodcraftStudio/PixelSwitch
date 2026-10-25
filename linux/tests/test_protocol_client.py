@@ -238,7 +238,7 @@ class CallTests(ClientTestCase):
     def test_next_event_after_subscribing(self):
         def handler(request, send):
             send(p.success_line(request.id, {"subscribed": True}))
-            send(p.event_line("autoSwitched", 1_790_000_000, p.auto_switched_data("a", "b", "windows", "threshold", "weekly")))
+            send(p.event_line("autoSwitched", 1_790_000_000, p.auto_switched_data("a", "b", "windows", "threshold", "weekly", relaxed=False)))
 
         self.serve(handler)
         c = self.client()

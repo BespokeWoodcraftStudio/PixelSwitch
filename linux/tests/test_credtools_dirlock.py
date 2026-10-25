@@ -167,9 +167,13 @@ class DirLockTests(unittest.TestCase):
     def test_the_touch_thread_keeps_the_mtime_fresh(self):
         lock = self.lock(update=0.05)
         lock.try_acquire()
-        os.utime(self.path, (1.0, 1.0))
+        before = os.stat(self.path).st_mtime
         time.sleep(0.4)
-        self.assertGreater(os.stat(self.path).st_mtime, time.time() - 5)
+        # (Not set back to an old time by hand: macOS then rewrites the birth time too, which the
+        # ownership check rightly reads as a different directory.)
+        self.assertGreater(os.stat(self.path).st_mtime, before)
+        self.assertTrue(lock.held)
+        lock.check()
         lock.release()
 
     def test_check_enforces_the_hold_limit_and_detects_a_taken_lock(self):

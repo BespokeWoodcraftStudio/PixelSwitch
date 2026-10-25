@@ -160,7 +160,7 @@ class ConformanceFileTests(unittest.TestCase):
         self.assertEqual(data["drainMinimumRoom"], engine.DRAIN_MINIMUM_ROOM)
         names = [case["name"] for case in data["cases"]]
         self.assertEqual(len(names), len(set(names)), "case names are unique")
-        self.assertGreaterEqual(len(names), 1)
+        self.assertGreaterEqual(len(names), 150, "the Mac harness requires at least 150 cases too")
 
     def test_every_case_has_every_expect_field(self):
         data = load_vectors()

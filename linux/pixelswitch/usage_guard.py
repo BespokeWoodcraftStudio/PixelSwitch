@@ -32,6 +32,7 @@ from __future__ import annotations
 import enum
 import errno
 import hashlib
+import socket
 import threading
 import time
 from dataclasses import dataclass
@@ -117,6 +118,7 @@ class UsageRequestGuard:
     SHORTEST_PARK = 60.0
     DEFAULT_PARK = 120.0          # the park when the server sent no Retry-After
     REFUSED_WITHOUT_ACCOUNT_LIMIT = 64
+    RATE_LIMITED_WITHOUT_ACCOUNT_LIMIT = 64
 
     def __init__(self, needs_reauth: Iterable[Hashable] = ()) -> None:
         self._lock = threading.RLock()
@@ -124,6 +126,12 @@ class UsageRequestGuard:
         #: Tokens refused where no account was known (a 401 on the live login
         #: before its owner was proven). Oldest forgotten first.
         self._refused_without_account: list[str] = []
+        #: Tokens that got a 429 where no account was known (the live login before its owner was
+        #: proven, spec D20 revision 4): ``{fingerprint: (park_until, cooldown_until)}``, so the
+        #: hourly 429 loop of 1.9 cannot come back through a lookup that has no account to record
+        #: it against (UsageRequestGuard.swift:94-102). At most 64; ended entries are pruned and
+        #: the earliest cool-down is dropped when full.
+        self._rate_limited_without_account: dict[str, tuple[float, float]] = {}
         self.restore_needs_reauth(needs_reauth)
 
     # -- asking (:99-159) ------------------------------------------------------------
@@ -159,6 +167,13 @@ class UsageRequestGuard:
                 return parked(state.park.until)
             if state.cooldown is not None and state.cooldown.until > now:
                 return cooling_down(state.cooldown.until)
+            # A 429 this token earned while no account was known still holds.
+            unowned = self._rate_limited_without_account.get(fp)
+            if unowned is not None:
+                if unowned[0] > now:
+                    return parked(unowned[0])
+                if unowned[1] > now:
+                    return cooling_down(unowned[1])
             # A saved login that is expired or was refused is renewed first.
             if is_dead:
                 return REFRESH_FIRST
@@ -174,6 +189,9 @@ class UsageRequestGuard:
                 return False
             fp = fingerprint_of(access_token)
             if fp in self._refused_without_account:
+                return False
+            unowned = self._rate_limited_without_account.get(fp)
+            if unowned is not None and (unowned[0] > now or unowned[1] > now):
                 return False
             for state in self._states.values():
                 if state.rejected_fingerprint == fp:
@@ -219,12 +237,28 @@ class UsageRequestGuard:
             self._states[account] = state
 
     def record_rate_limited(
-        self, account: Hashable, access_token: str, retry_after: float | None, now: float | None = None
+        self, account: Hashable | None, access_token: str, retry_after: float | None, now: float | None = None
     ) -> float:
-        """:184-195. The server answered 429 for this exact token. Returns the park's end."""
+        """:184-195 and the account-less store of UsageRequestGuard.swift:203-216. The server
+        answered 429 for this exact token. Returns the park's end. With no account known
+        (``account`` None) the park and the cool-down are kept against the token's fingerprint
+        alone, so every later ``may_use`` and ``decision`` for that token refuses it until they
+        end (spec D20 revision 4)."""
         now = _now(now)
         with self._lock:
             fp = fingerprint_of(access_token)
+            if account is None:
+                park_for = min(max(self.DEFAULT_PARK if retry_after is None else retry_after, self.SHORTEST_PARK),
+                               self.LONGEST_PARK)
+                until = now + park_for
+                table = self._rate_limited_without_account
+                for key in [k for k, (park, cool) in table.items() if not (park > now or cool > now)]:
+                    del table[key]
+                if fp not in table and len(table) >= self.RATE_LIMITED_WITHOUT_ACCOUNT_LIMIT:
+                    oldest = min(table, key=lambda k: table[k][1])
+                    del table[oldest]
+                table[fp] = (until, now + self.COOLDOWN)
+                return until
             state = self._states.get(account) or _State()
             self._drop_what_is_not_about_this_token(state, fp)
             park_for = min(max(self.DEFAULT_PARK if retry_after is None else retry_after, self.SHORTEST_PARK),
@@ -430,6 +464,15 @@ ROTATION_LOST = BackupRefreshOutcome("rotationLost")
 
 STATUS_PAGE = "https://status.claude.com"
 
+def parse_retry_after(text: "str | None") -> float | None:
+    """A ``Retry-After`` value as Swift's ``Double(String)`` reads it, for the words ``inf`` and
+    ``infinity`` too (Swift gives infinity, which the park clamps to its longest). Anything else
+    is :func:`usage_model.swift_double`'s."""
+    if isinstance(text, str) and text.strip().lower() in ("inf", "+inf", "infinity", "+infinity"):
+        return float("inf")
+    return swift_double(text)
+
+
 _OFFLINE_ERRNOS = {
     errno.ENETDOWN, errno.ENETUNREACH, errno.EHOSTUNREACH,        # notConnectedToInternet
     errno.ECONNRESET, errno.ECONNABORTED, errno.EPIPE,            # networkConnectionLost
@@ -463,7 +506,7 @@ class UsageRequestError(Exception):
         if status == 401 or "token_expired" in body:
             return cls("expired")
         if status == 429:
-            return cls("rateLimited", retry_after=swift_double(retry_after))
+            return cls("rateLimited", retry_after=parse_retry_after(retry_after))
         if status == 403:
             return cls("forbidden", body=body)
         if 500 <= status <= 599:
@@ -480,7 +523,11 @@ class UsageRequestError(Exception):
         if isinstance(reason, BaseException):
             cause = reason
         number = getattr(cause, "errno", None)
-        return cls("network", offline=number in _OFFLINE_ERRNOS)
+        # A machine with no network usually fails in the resolver first: EAI_AGAIN ("Temporary
+        # failure in name resolution") is Linux's notConnectedToInternet. EAI_NONAME is a genuinely
+        # unknown host and stays "not offline".
+        offline = number in _OFFLINE_ERRNOS or (isinstance(cause, socket.gaierror) and number == socket.EAI_AGAIN)
+        return cls("network", offline=offline)
 
     @classmethod
     def decode_failure(cls, why: str = "") -> "UsageRequestError":

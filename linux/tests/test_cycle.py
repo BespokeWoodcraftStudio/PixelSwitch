@@ -289,11 +289,13 @@ class GuardInTheCycleTests(unittest.TestCase):
         self.assertEqual(app.card_errors[a.id].message, "Unexpected reply from Anthropic (HTTP 418).")
         self.assertNotIn(a.id, app.usage, "an unexpected reply clears the reading")
 
-    def test_the_card_retry_reads_one_account_through_the_guard(self):
+    def test_one_account_is_read_through_the_guard(self):
+        """The card's Retry on Linux is `usage.refresh` (the Mac has no per-account method on the wire, so
+        the dead `retry_usage` was removed, LB review usagecycle.py:419); the read it rests on is this one."""
         rig, app, a, b, c = trio(self)
-        app.retry_usage(app.account_by_id(b.id))
+        usage = app.read_usage(app.account_by_id(b.id))
+        self.assertIsNotNone(usage)
         self.assertEqual(len(rig.api.calls_to("usage", b.access)), 1)
-        self.assertIn(b.id, app.usage)
 
     def test_the_log_names_ids_never_emails_or_tokens(self):
         rig, app, a, b, c = trio(self)
@@ -466,7 +468,7 @@ class AutoSwitchTests(unittest.TestCase):
         event = rig.events_of("autoSwitched")[-1]
         self.assertEqual((event["from"], event["to"], event["limit"], event["trigger"], event["window"]),
                          (a.id, b.id, "windows", "threshold", "session"))
-        self.assertNotIn("relaxed", event)
+        self.assertIs(event["relaxed"], False)
         self.assertEqual(rig.live_credential()["claudeAiOauth"]["accessToken"], b.access, "the real files were switched")
         self.assertEqual(app.last_auto_switch.window, "session")
 
@@ -578,12 +580,28 @@ class AutoSwitchTests(unittest.TestCase):
         rig, app, a, b, c = self.build(lambda n: usage_body(95, 20, now=n), lambda n: usage_body(96, 96, now=n),
                                        lambda n: usage_body(97, 97, now=n))
         setting(app, "autoSwitch.enabled", True)
-        note = "but no account under its weekly limit can take you; staying until the session limit (90%)"
+        # Equal windows (the defaults): the active account is already AT its session limit, so the
+        # overflow sentence ("staying until the session limit") would be false. Rule 10 revision 4:
+        # the 1.9 sentence (AutoSwitchEngine.stayingPutKind; LB review, usagecycle.py:616).
+        note = "but no other account has room under its own limits; staying put"
         self.full_cycles(app, 4)
         self.assertEqual(rig.log_text().count(note), 1)
+        self.assertNotIn("staying until the session limit", rig.log_text())
         rig.api.set_usage(a.access, usage_body(98, 20, now=rig.clock.now))
         self.full_cycles(app, 2)
         self.assertEqual(rig.log_text().count(note), 2, "a changed reading is a changed note")
+
+    def test_split_limits_with_the_active_account_past_both_say_no_room(self):
+        """Limits 90 / 50 and the active account at 95% session, 60% week: it is past the relaxed
+        limits (90 / 90) too, so it is not 'staying until 90%' (AutoSwitchEngine.stayingPutKind)."""
+        rig, app, a, b, c = self.build(lambda n: usage_body(95, 60, now=n), lambda n: usage_body(96, 96, now=n),
+                                       lambda n: usage_body(97, 97, now=n))
+        setting(app, "autoSwitch.enabled", True)
+        setting(app, "autoSwitch.sessionThreshold", 90)
+        setting(app, "autoSwitch.weeklyThreshold", 50)
+        self.full_cycles(app, 2)
+        self.assertIn("but no other account has room under its own limits; staying put", rig.log_text())
+        self.assertNotIn("staying until the session limit", rig.log_text())
 
     def test_a_fable_only_limit_with_nowhere_to_go_logs_the_plain_message(self):
         rig, app, a, b, c = self.build(lambda n: usage_body(10, 10, fable=95, now=n),

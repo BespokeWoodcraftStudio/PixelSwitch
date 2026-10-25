@@ -22,8 +22,10 @@ from .api import (
 from .credtools import applying_renewal_expiry
 from .logfile import CategoryLog
 from .logins import loads_object
-from .usage_guard import UsageRequestError, UsageRequestGuard, fingerprint_for_log, fingerprint_of
-from .usage_model import UsageDecodeError, UsageResponse, is_number, swift_double
+from .usage_guard import (
+    UsageRequestError, UsageRequestGuard, fingerprint_for_log, fingerprint_of, parse_retry_after,
+)
+from .usage_model import UsageDecodeError, UsageResponse, is_number
 
 #: ClaudeService.swift:394, the OAuth error codes that may appear in a log line.
 KNOWN_OAUTH_ERRORS = ("invalid_grant", "invalid_request", "invalid_client", "unauthorized_client",
@@ -95,8 +97,9 @@ class ClaudeService:
                          account: str | None = None) -> Identity | None:
         """The account an access token belongs to, from ``/api/oauth/profile``, or None if the
         token is expired, was refused, is cooling down, or the call fails. This is the only proof
-        of ownership. A 401 or 429 is recorded for ``account`` (None when the owner is not yet
-        known, which puts a 401'd token in the guard's account-less list)."""
+        of ownership. A 401 or a 429 is recorded for ``account``, and against the token alone when
+        ``account`` is None (the owner is not yet known): the guard keeps an account-less list for
+        each, so a lookup with no active account cannot repeat (spec D20 revision 4)."""
         if not self.guard.may_use(access_token, expires_at, self._clock()):
             self._log.info(f"[accountIdentity] Not asking: token {fingerprint_for_log(fingerprint_of(access_token))} "
                            "is expired, was refused, or is cooling down")
@@ -110,8 +113,10 @@ class ClaudeService:
         status = response.status
         if status == 401:
             self.guard.record_rejected(account, access_token, self._clock())
-        elif status == 429 and account is not None:
-            retry = swift_double(response.header("retry-after"))
+        elif status == 429:
+            # Recorded whether or not an account is known (spec D20 revision 4,
+            # ClaudeService.swift:313-318): a lookup with no active account must not be able to repeat.
+            retry = parse_retry_after(response.header("retry-after"))
             self.guard.record_rate_limited(account, access_token, retry, self._clock())
         if status != 200:
             self._log.warning(f"[accountIdentity] Profile lookup failed (HTTP {status})")

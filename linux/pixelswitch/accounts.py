@@ -17,7 +17,6 @@ seconds since 2001-01-01, and nothing in the core reads it.
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -28,7 +27,7 @@ from .engine import (
     split_single_threshold,
     window_value,
 )
-from .usage_model import is_number
+from .finite import finite_number
 
 PRIORITY_RANGE = (1, 99)
 
@@ -69,10 +68,7 @@ def _opt_str(obj: Mapping[str, Any], key: str) -> str | None:
 
 
 def _opt_num(obj: Mapping[str, Any], key: str) -> float | None:
-    value = obj.get(key)
-    if is_number(value) and math.isfinite(float(value)):
-        return float(value)
-    return None
+    return finite_number(obj.get(key))
 
 
 def _opt_int(obj: Mapping[str, Any], key: str) -> int | None:
@@ -212,7 +208,8 @@ def sorted_by_priority(accounts: Iterable[Account], last_set: Mapping[str, int] 
     items = list(accounts)
 
     def key(account: Account) -> tuple:
-        if account.priority is None:
+        # A stored number outside 1-99 counts as none (AccountOrder.validPriority).
+        if not valid_priority(account.priority):
             return (1, 0, 0)
         order = (last_set or {}).get(account.id, account.priority_set_order)
         return (0, account.priority, -(order if order is not None else -1))
@@ -229,12 +226,16 @@ def setting_priority(accounts: Sequence[Account], account_id: str, priority: int
     """The accounts with ``account_id`` given ``priority`` (None clears it), re-sorted.
 
     None for an unknown id or a value outside 1-99 other than None. Setting a number
-    stamps it as the most recently set; clearing drops the stamp.
+    stamps it as the most recently set; clearing drops the stamp. Setting the number an
+    account already has changes nothing, not even its recency (AccountOrder.swift:53).
     """
     if priority is not None and not valid_priority(priority):
         return None
-    if not any(a.id == account_id for a in accounts):
+    current = next((a for a in accounts if a.id == account_id), None)
+    if current is None:
         return None
+    if current.priority == priority:
+        return sorted_by_priority(accounts)
     stamp = next_priority_set_order(accounts) if priority is not None else None
     changed = [
         replace(a, priority=priority, priority_set_order=stamp) if a.id == account_id else a for a in accounts
@@ -245,7 +246,8 @@ def setting_priority(accounts: Sequence[Account], account_id: str, priority: int
 def numbered_in_order(accounts: Iterable[Account]) -> list[Account]:
     """Every account numbered 1...N in the given order (a whole-list reorder or a drag
     replaces typed numbers). Set-order stamps are dropped: no number is shared."""
-    return [replace(a, priority=index, priority_set_order=None) for index, a in enumerate(accounts, start=1)]
+    return [replace(a, priority=min(index, PRIORITY_RANGE[1]), priority_set_order=None)
+            for index, a in enumerate(accounts, start=1)]
 
 
 # --- order (AccountOrder.swift) ----------------------------------------------------------
@@ -286,13 +288,18 @@ def moving(items: Sequence[Any], from_offsets: Iterable[int], to_offset: int) ->
     return kept[:insert_at] + moved + kept[insert_at:]
 
 
+def fallback_order(remaining: Sequence[Account]) -> list[Account]:
+    """AccountOrder.fallbackOrder (AccountOrder.swift:109-113): where to go when the active
+    account is removed, best first: the accounts that are not Manual only in priority order,
+    then the Manual only ones. The caller tries them in turn until a switch succeeds (D20)."""
+    ordered = sorted_by_priority(remaining)
+    return [a for a in ordered if not a.manual_only] + [a for a in ordered if a.manual_only]
+
+
 def fallback(remaining: Sequence[Account]) -> Account | None:
     """AccountOrder.swift:40-42 with D3: where to go when the active account is removed
     is the first account, in priority order, that is not Manual only, else the first."""
-    ordered = sorted_by_priority(remaining)
-    for account in ordered:
-        if not account.manual_only:
-            return account
+    ordered = fallback_order(remaining)
     return ordered[0] if ordered else None
 
 
@@ -356,9 +363,10 @@ def with_default_choice(account: Account, window: str) -> Account:
 def whole_threshold(value: Any) -> float | None:
     """A wire threshold number rounded half away from zero (``accounts.setThresholds``);
     None when it is not a finite number."""
-    if not is_number(value) or not math.isfinite(float(value)):
+    number = finite_number(value)
+    if number is None:
         return None
-    return round_half_away(float(value))
+    return round_half_away(number)
 
 
 def own_window_values(account: Account) -> tuple[float | None, float | None]:

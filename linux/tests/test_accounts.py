@@ -136,8 +136,12 @@ class SettingPriorityTests(unittest.TestCase):
         base = acc.setting_priority([acct("A"), acct("B"), acct("C")], "A", 2)
         base = acc.setting_priority(base, "B", 2)
         self.assertEqual(names(base), "BAC")
-        base = acc.setting_priority(base, "A", 2)               # set again: now most recent
-        self.assertEqual(names(base), "ABC")
+        # Setting the number an account already has changes nothing, not even its recency
+        # (AccountOrder.settingPriority; Tests/UnitTests/TwoWindowTests.swift:278-279).
+        again = acc.setting_priority(base, "A", 2)
+        self.assertEqual(names(again), "BAC")
+        self.assertEqual(again, base)
+        self.assertEqual({a.id: a.priority_set_order for a in again}, {a.id: a.priority_set_order for a in base})
 
     def test_clearing_drops_the_number_and_the_stamp(self):
         got = acc.setting_priority([acct("A", priority=1, set_order=4), acct("B")], "A", None)

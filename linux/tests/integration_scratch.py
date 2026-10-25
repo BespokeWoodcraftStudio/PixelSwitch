@@ -12,7 +12,8 @@ Anthropic endpoints and a stub ``claude``, with fabricated logins only, and exer
    of ``Tests/integration/remote-control.sh`` that do not need the CLI;
 3. the weekly-overflow auto-switch (session 90 / weekly 50, every account past its weekly limit);
 4. priority order under the Priority strategy;
-5. a clean SIGTERM each time, nothing left running, the real home untouched.
+5. removing the active account when no fallback works, then a switch with no active account (spec D20 revision 4);
+6. a clean SIGTERM each time, nothing left running, the real home untouched.
 
 It refuses to run unless this file lives under ``~/.cache/pixelswitch-dev/`` (copy ``linux/``,
 ``Tests/`` and ``project.yml`` there first), because every rule of spec 5.7 depends on it:
@@ -137,14 +138,24 @@ class Daemon:
         self.process: subprocess.Popen | None = None
         self.client: ControlClient | None = None
         self.events: ControlClient | None = None
+        #: The last lines the daemon wrote to stderr when it exited before answering (the reason, e.g. a
+        #: socket path longer than 107 bytes), so "the daemon starts" fails with a cause, not a bare FAIL.
+        self.start_failure = ""
 
     def start(self) -> bool:
         assert not any(k in self.env for k in SCRUBBED_NAMES) and not any(k.startswith(SCRUBBED_PREFIXES) for k in self.env)
         self.process = subprocess.Popen([sys.executable, "-c", CODE], env=self.env, stdin=subprocess.DEVNULL,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if not wait_for(lambda: self._answers() or self.process.poll() is not None, 40):
+            self.start_failure = "the daemon did not answer within 40 s"
             return False
         if self.process.poll() is not None:
+            try:
+                _, err = self.process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                err = ""
+            lines = [line for line in (err or "").splitlines() if line.strip()]
+            self.start_failure = f"exit {self.process.returncode}: " + " | ".join(lines[-3:])
             return False
         self.client = ControlClient(self.paths.socket)
         self.client.connect(launch=False)
@@ -239,6 +250,23 @@ def no_stray_files(rig: Rig) -> bool:
 # -- the phases -------------------------------------------------------------------------------------------------------------
 
 
+def _can_take_lock(path: str) -> bool:
+    """Whether ``path`` can be flock'd exclusively and without waiting, as the next daemon would."""
+    import fcntl
+
+    try:
+        descriptor = os.open(path, os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(descriptor)
+
+
 def phase_add_current(work: str) -> None:
     print("\n== 1. add-current, then a clean SIGTERM ==")
     rig = Rig(None, keep_log=False, root=os.path.join(work, "p1"))
@@ -247,7 +275,8 @@ def phase_add_current(work: str) -> None:
     rig.write_live(a)
     daemon = Daemon(rig, os.path.join(rig.tmp, "xdg"))
     try:
-        if not check("the daemon starts", daemon.start()):
+        started = daemon.start()
+        if not check("the daemon starts", started, daemon.start_failure):
             return
         status = daemon.call("status.get")
         check("status.get says testMode true, first of all", status.get("testMode") is True, str(status))
@@ -273,7 +302,8 @@ def phase_add_current(work: str) -> None:
         code, err = daemon.stop()
         check("SIGTERM: exit 0", code == 0, err)
         check("SIGTERM: the socket and socket-path are gone", not os.path.exists(daemon.paths.socket) and not os.path.exists(daemon.paths.socket_path_file))
-        check("SIGTERM: the lock is released and nothing is left running", daemon.process.poll() is not None)
+        check("SIGTERM: nothing is left running", daemon.process.poll() is not None)
+        check("SIGTERM: daemon.lock is released (a new flock succeeds)", _can_take_lock(daemon.paths.daemon_lock))
     finally:
         daemon.kill()
         rig.close()
@@ -294,7 +324,8 @@ def phase_main(work: str) -> None:
     rig.api.add_account(c_access, c.uuid, c.email, usage_body(35, 35, now=now))
     daemon = Daemon(rig, os.path.join(rig.tmp, "xdg"))
     try:
-        if not check("the daemon starts with four accounts", daemon.start()):
+        started = daemon.start()
+        if not check("the daemon starts with four accounts", started, daemon.start_failure):
             return
         check("status first: testMode true", daemon.call("status.get").get("testMode") is True)
         events = daemon.subscribe()
@@ -404,10 +435,15 @@ def phase_main(work: str) -> None:
         daemon.call("settings.set", {"key": "autoSwitch.drainWithinHours", "value": original})
         check("remote-control.sh 3: a setting changes and is put back",
               now_value == target and daemon.call("settings.get", {"key": "autoSwitch.drainWithinHours"})["settings"]["autoSwitch.drainWithinHours"] == original)
-        low = daemon.call("settings.get", {"key": "menuBar.lowRemainingWarningThreshold"})["settings"]["menuBar.lowRemainingWarningThreshold"]
-        daemon.call("settings.set", {"key": "menuBar.lowRemainingWarningThreshold", "value": 35})
-        daemon.call("settings.set", {"key": "menuBar.lowRemainingWarningThreshold", "value": low})
-        check("remote-control.sh 3: a menu bar setting round-trips", True)
+        key = "menuBar.lowRemainingWarningThreshold"
+        low = daemon.call("settings.get", {"key": key})["settings"][key]
+        wanted = 35 if low != 35 else 30
+        daemon.call("settings.set", {"key": key, "value": wanted})
+        after_set = daemon.call("settings.get", {"key": key})["settings"][key]
+        daemon.call("settings.set", {"key": key, "value": low})
+        after_restore = daemon.call("settings.get", {"key": key})["settings"][key]
+        check("remote-control.sh 3: a menu bar setting round-trips (read back after the set and after the restore)",
+              after_set == wanted and after_restore == low, f"set {wanted} read {after_set}; restore {low} read {after_restore}")
         error = daemon.error_of("settings.set", {"key": "refreshInterval", "value": 7})
         check("remote-control.sh 3: refreshInterval 7 is invalidValue (CLI exit 2)", error is not None and error.kind == "invalidValue")
         watcher = daemon.subscribe()
@@ -468,7 +504,8 @@ def phase_overflow(work: str) -> None:
     fsio.atomic_write(rig.paths.settings, json.dumps({"claudeBinaryPathPreference": rig.stub}))
     daemon = Daemon(rig, os.path.join(rig.tmp, "xdg"))
     try:
-        if not check("the daemon starts", daemon.start()):
+        started = daemon.start()
+        if not check("the daemon starts", started, daemon.start_failure):
             return
         check("status first: testMode true", daemon.call("status.get").get("testMode") is True)
         daemon.call("settings.set", {"key": "autoSwitch.sessionThreshold", "value": 90})
@@ -508,7 +545,8 @@ def phase_priority(work: str) -> None:
     fsio.atomic_write(rig.paths.settings, json.dumps({"claudeBinaryPathPreference": rig.stub}))
     daemon = Daemon(rig, os.path.join(rig.tmp, "xdg"))
     try:
-        if not check("the daemon starts", daemon.start()):
+        started = daemon.start()
+        if not check("the daemon starts", started, daemon.start_failure):
             return
         check("status first: testMode true", daemon.call("status.get").get("testMode") is True)
         ordered = daemon.call("accounts.setPriority", {"account": "carol@example.invalid", "priority": 1})["accounts"]
@@ -533,6 +571,57 @@ def phase_priority(work: str) -> None:
             return
         check("alice left her limit for carol (P1) even though bob (P3) has more room",
               (events[0]["data"]["from"], events[0]["data"]["to"]) == (a.id, c.id))
+        check("an ordinary switch still carries relaxed: false (the Mac always sends it)",
+              events[0]["data"].get("relaxed") is False, str(events[0]["data"]))
+        code, err = daemon.stop()
+        check("SIGTERM: exit 0", code == 0, err)
+    finally:
+        daemon.kill()
+        rig.close()
+
+
+def phase_removal(work: str) -> None:
+    print("\n== 5. removing the active account when no fallback works, then switching (spec D20 revision 4) ==")
+    rig = Rig(None, keep_log=False, root=os.path.join(work, "p5"))
+    now = time.time()
+    a = rig.seed_account("alice@example.invalid", active=True, usage=usage_body(10, 10, now=now))
+    b = rig.seed_account("bob@example.invalid", usage=usage_body(20, 20, now=now))
+    c = rig.seed_account("carol@example.invalid", usage=usage_body(30, 30, now=now))
+    write_accounts(rig)
+    fsio.atomic_write(rig.paths.settings, json.dumps({"claudeBinaryPathPreference": rig.stub}))
+    good = read_json(rig.paths.backups)
+    broken = {key: value for key, value in good.items() if key == a.id}   # bob's and carol's saved logins are gone
+    fsio.atomic_write(rig.paths.backups, json.dumps(broken))
+    daemon = Daemon(rig, os.path.join(rig.tmp, "xdg"))
+    try:
+        started = daemon.start()
+        if not check("the daemon starts", started, daemon.start_failure):
+            return
+        check("status first: testMode true", daemon.call("status.get").get("testMode") is True)
+        watcher = daemon.subscribe()
+        daemon.call("usage.refresh")                       # the API proves the live login is alice's
+        daemon.call("accounts.remove", {"account": "alice@example.invalid"})
+        check("no fallback worked, so no account is active",
+              wait_for(lambda: daemon.call("status.get").get("activeAccountEmail") is None, 60))
+        events = [e for e in read_events(watcher, 3) if e["type"] == "error"]
+        check("the last failure is shown as an error event",
+              bool(events) and events[-1]["data"]["message"].startswith("No stored credentials for"), str(events))
+        remaining = daemon.call("accounts.list")["accounts"]
+        check("two accounts remain and none is active", len(remaining) == 2 and not any(x["isActive"] for x in remaining))
+        record = os.path.join(rig.paths.state_dir, "removed-logins.json")
+        check("the removed account's login is remembered as fingerprints only, in a 0600 file",
+              os.path.exists(record) and mode(record) == 0o600 and a.refresh not in open(record).read()
+              and a.access not in open(record).read() and len(read_json(record)) >= 1)
+        restored = read_json(rig.paths.backups)
+        restored[b.id] = good[b.id]
+        fsio.atomic_write(rig.paths.backups, json.dumps(restored))   # bob's saved login is back
+        switched = daemon.error_of("accounts.switch", {"account": "bob@example.invalid"})
+        check("a switch with no active account is allowed (the live login is the removed account's) and succeeds",
+              switched is None, str(switched))
+        check("bob is active and Claude Code holds bob's login",
+              daemon.call("status.get").get("activeAccountEmail") == b.email
+              and rig.live_credential()["claudeAiOauth"]["accessToken"] == b.access)
+        check("the record of removed logins is cleared by the switch", not os.path.exists(record))
         code, err = daemon.stop()
         check("SIGTERM: exit 0", code == 0, err)
     finally:
@@ -564,7 +653,7 @@ def main(argv=None) -> int:
     print(f"scratch run under {work}")
 
     try:
-        for phase in (phase_add_current, phase_main, phase_overflow, phase_priority):
+        for phase in (phase_add_current, phase_main, phase_overflow, phase_priority, phase_removal):
             try:
                 phase(work)
             except Exception as error:  # a crash in a phase is a failure, and the next phase still runs

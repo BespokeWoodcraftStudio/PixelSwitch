@@ -9,7 +9,7 @@ import unittest
 
 from pixelswitch import claude_cli, fsio
 from pixelswitch.claude_login import RENEWING_MESSAGE
-from pixelswitch.coordinator import ActionError, BUSY_MESSAGE, LIVE_CHANGED_MESSAGE
+from pixelswitch.coordinator import ActionError, BUSY_MESSAGE, LIVE_CHANGED_MESSAGE, LIVE_NOT_SAVED_MESSAGE
 from pixelswitch.stores import BackupStore
 
 from .lb_support import Rig, credential_text, read_file, read_json
@@ -99,14 +99,18 @@ class SwitchTests(unittest.TestCase):
         self.assertEqual(app.active_account().id, b.id)
         self.assertEqual(rig.live_credential()["claudeAiOauth"]["accessToken"], b.access)
 
-    def test_no_active_account_is_a_quiet_failure(self):
+    def test_an_empty_account_list_is_a_quiet_failure(self):
+        """D20 revision 4: only an empty list refuses with the old sentence (the disposal cases for
+        'accounts but none active' are in test_fl1_switch.py)."""
+        from pixelswitch.accounts import Account
+
         rig = Rig(self)
-        b = rig.seed_account("b@example.invalid")
         app = rig.build()
         with self.assertRaises(ActionError) as raised:
-            app.perform_switch(app.account_by_id(b.id))
+            app.perform_switch(Account(id="GONE", email="gone@example.invalid"))
         self.assertTrue(raised.exception.silent)
-        self.assertIn("nothing to switch from", raised.exception.message)
+        self.assertEqual(raised.exception.message, "No account is active yet, so there is nothing to switch from. "
+                                                   "Add the current account first.")
 
     def test_an_unproven_live_owner_skips_the_snapshot_but_the_switch_goes_on(self):
         rig = Rig(self)
@@ -337,28 +341,82 @@ class ReReadBeforeWriteTests(unittest.TestCase):
         backup_before = rig.backup_of(a).token
         with self.assertRaises(ActionError) as raised:
             app.perform_switch(app.account_by_id(b.id))
-        self.assertEqual(raised.exception.message, LIVE_CHANGED_MESSAGE)
+        # The renewed login could not be proved the owner's, so it could not be saved for its owner
+        # (LiveLoginBackup.afterRetry: notSaved(unproven)): its own sentence, not "still changing".
+        self.assertEqual(raised.exception.message, LIVE_NOT_SAVED_MESSAGE)
         self.assertEqual(rig.live_credential()["claudeAiOauth"]["accessToken"], new_access, "the live login is untouched")
         self.assertEqual(rig.backup_of(a).token, backup_before)
         self.assertEqual(rig.live_config()["oauthAccount"], a.oauth_account)
 
+    def rotate_after_the_snapshot(self, rig, app, seed, fresh_text):
+        """Claude Code renews the live login right after the leaving login's snapshot was saved: the next
+        read is the re-read inside Claude Code's .storage-write lock, immediately before the write
+        (spec 5.3). Counting reads would aim at step 4's read instead (the mis-targeted test)."""
+        real_save = app.backups.save
+        fired = []
+
+        def save_then_rotate(*args, **kw):
+            result = real_save(*args, **kw)
+            if not fired:
+                fired.append(1)
+                rig.write_live(seed, fresh_text() if callable(fresh_text) else fresh_text)
+            return result
+
+        app.backups.save = save_then_rotate
+        return fired
+
     def test_a_change_between_the_snapshot_and_the_write_is_caught_by_the_reread(self):
         rig, app, a, b = two_accounts(self)
         text, new_access = self.rotate_live(rig, a)
-        reads = []
-        real_read = app.login.read_credential
+        fired = self.rotate_after_the_snapshot(rig, app, a, text)
+        locks = []
+        real = app.login.refresh_lock
 
-        def read_and_rotate():
-            reads.append(1)
-            if len(reads) == 2:  # the second read is the re-read right before the write: it already differs
-                rig.write_live(a, text)
-            return real_read()
+        def counting(*args, **kwargs):
+            locks.append(1)
+            return real(*args, **kwargs)
 
-        app.login.read_credential = read_and_rotate
+        app.login.refresh_lock = counting
         app.perform_switch(app.account_by_id(b.id))
+        self.assertEqual(fired, [1])
         self.assertEqual(rig.live_credential()["claudeAiOauth"]["accessToken"], b.access)
         self.assertEqual(json.loads(rig.backup_of(a).token)["claudeAiOauth"]["accessToken"], new_access,
                          "the retry backed the newest login up before writing")
+        self.assertEqual(len(rig.api.calls_to("profile", new_access)), 1, "the renewed login was proved exactly once")
+        self.assertEqual(len(locks), 2, "the refresh lock was taken, left for the proof, then taken again")
+
+    def test_a_change_after_the_snapshot_that_cannot_be_proved_writes_nothing(self):
+        rig, app, a, b = two_accounts(self)
+        text, new_access = self.rotate_live(rig, a, prove=False)  # the API cannot vouch for the new token
+        self.rotate_after_the_snapshot(rig, app, a, text)
+        config = read_file(rig.paths.claude_json)
+        with self.assertRaises(ActionError) as raised:
+            app.perform_switch(app.account_by_id(b.id))
+        self.assertEqual(raised.exception.message, LIVE_NOT_SAVED_MESSAGE)
+        self.assertEqual(rig.live_credential()["claudeAiOauth"]["accessToken"], new_access, "the live login is untouched")
+        self.assertEqual(read_file(rig.paths.claude_json), config)
+
+    def test_a_login_that_changes_after_every_snapshot_is_never_overwritten(self):
+        rig, app, a, b = two_accounts(self)
+
+        def fresh():
+            access = fabricated("oat01")
+            return credential_text(access, fabricated("ort01"))
+
+        real_save = app.backups.save
+
+        def save_then_rotate(*args, **kw):
+            result = real_save(*args, **kw)
+            rig.write_live(a, fresh())  # every time: a token the API cannot prove
+            return result
+
+        app.backups.save = save_then_rotate
+        config = read_file(rig.paths.claude_json)
+        with self.assertRaises(ActionError) as raised:
+            app.perform_switch(app.account_by_id(b.id))
+        self.assertIn(raised.exception.message, (LIVE_CHANGED_MESSAGE, LIVE_NOT_SAVED_MESSAGE))
+        self.assertNotEqual(rig.live_credential()["claudeAiOauth"]["accessToken"], b.access)
+        self.assertEqual(read_file(rig.paths.claude_json), config)
 
     def test_a_login_that_keeps_changing_aborts(self):
         rig, app, a, b = two_accounts(self)
@@ -407,13 +465,13 @@ class RefreshLockOnSwitchTests(unittest.TestCase):
             held.setdefault("snapshot", os.path.isdir(lock))
             return real_save(*args, **kw)
 
-        def write_cred(text):
+        def write_cred(text, *args, **kw):
             held["credential"] = os.path.isdir(lock)
-            return real_write_cred(text)
+            return real_write_cred(text, *args, **kw)
 
-        def write_acct(account):
+        def write_acct(account, *args, **kw):
             held["identity"] = os.path.isdir(lock)
-            return real_write_acct(account)
+            return real_write_acct(account, *args, **kw)
 
         app.backups.save, app.login.write_credential, app.login.write_oauth_account = save, write_cred, write_acct
         app.perform_switch(app.account_by_id(b.id))
@@ -502,7 +560,8 @@ class FailureHandlingTests(unittest.TestCase):
         claude_cli.STATUS_TIMEOUT = 0.5
         self.addCleanup(setattr, claude_cli, "STATUS_TIMEOUT", original)
         real = app.login.write_oauth_account
-        app.login.write_oauth_account = lambda account: (real(dict(account, emailAddress="other@example.invalid")), True)[1]
+        app.login.write_oauth_account = lambda account, **kw: (
+            real(dict(account, emailAddress="other@example.invalid"), **kw), True)[1]
         with self.assertRaises(ActionError) as raised:
             app.perform_switch(app.account_by_id(b.id))
         self.assertEqual(raised.exception.message, "Account switch verification failed")
