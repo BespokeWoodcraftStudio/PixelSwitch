@@ -22,6 +22,8 @@ swiftc -swift-version 6 \
   PixelSwitch/Services/AutoSwitchEngine.swift \
   Tests/UnitTests/AutoSwitchRulesTests.swift \
   Tests/UnitTests/ConformanceTests.swift \
+  Tests/UnitTests/TwoWindowTests.swift \
+  Tests/UnitTests/LoginSafetyTests.swift \
   PixelSwitch/Services/SignInOutputParser.swift \
   PixelSwitch/Services/L10n.swift \
   PixelSwitch/Services/SignInProcess.swift \
