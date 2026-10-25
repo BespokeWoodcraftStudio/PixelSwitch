@@ -15,13 +15,27 @@
 # the command-line tool installed (Settings → Claude CLI → Install), or
 # PIXELSWITCH_CLI pointing at it.
 #
-# On Linux it runs ONLY against a scratch daemon (spec 5.7): the daemon must
-# say `testMode: true` in its first status reply, or the script stops before
-# it changes anything. It also never lets the CLI start the real service
-# (PIXELSWITCH_NO_LAUNCH=1).
+# On a Linux HOST it runs ONLY against a scratch daemon (spec 5.7), and fails
+# closed:
+#   - PIXELSWITCH_CONTROL_SOCKET must be set to the scratch daemon's socket. The
+#     Linux client tries only that socket when it is set, so no later call can
+#     fall back to the real daemon's socket if the scratch one stops answering.
+#   - The first status reply must say `platform: linux` and `testMode: true`.
+#     A failed status, a missing platform or a reply that cannot be read all
+#     stop the script before it changes anything.
+# It also never lets the CLI start the real service (PIXELSWITCH_NO_LAUNCH=1).
+# A Mac run is unaffected.
 set -uo pipefail
 
-[ "$(uname -s)" = "Linux" ] && export PIXELSWITCH_NO_LAUNCH=1
+HOST_IS_LINUX=0
+if [ "$(uname -s)" = "Linux" ]; then
+    HOST_IS_LINUX=1
+    export PIXELSWITCH_NO_LAUNCH=1
+    if [ -z "${PIXELSWITCH_CONTROL_SOCKET:-}" ]; then
+        echo "Refusing: on Linux, set PIXELSWITCH_CONTROL_SOCKET to the scratch daemon's socket, so no call can reach the real daemon (spec 5.7)."
+        exit 2
+    fi
+fi
 
 CLI="${PIXELSWITCH_CLI:-$HOME/.local/bin/pixelswitch}"
 WORK=$(mktemp -d)
@@ -52,15 +66,23 @@ trap restore EXIT
 
 # 1. Status and protocol
 if status=$("$CLI" --json status); then
-    # The Mac app sends no `platform`, so a Mac run goes straight on. `field` prints Python's True.
-    if [ "$(echo "$status" | field platform)" = "linux" ] && [ "$(echo "$status" | field testMode)" != "True" ]; then
+    # The Mac app (2.0) sends platform "macos" and no testMode, so a Mac run goes
+    # straight on. `field` prints Python's True, and "" when it cannot read a value.
+    platform=$(echo "$status" | field platform 2>/dev/null)
+    testmode=$(echo "$status" | field testMode 2>/dev/null)
+    if [ "$HOST_IS_LINUX" = "1" ]; then
+        if [ "$platform" != "linux" ] || [ "$testmode" != "True" ]; then
+            echo "Refusing: this Linux PixelSwitch did not report platform linux with testMode true (spec 5.7). Run this only against a scratch daemon."
+            exit 2
+        fi
+    elif [ "$platform" = "linux" ] && [ "$testmode" != "True" ]; then
         echo "Refusing: this Linux PixelSwitch is not in test mode (spec 5.7). Run this only against a scratch daemon."
         exit 2
     fi
     [ "$(echo "$status" | field protocolVersion)" = "2" ] && ok "status answers, protocol 2" || bad "status protocol" "$status"
 else
     code=$?
-    if [ "$(uname -s)" = "Linux" ]; then
+    if [ "$HOST_IS_LINUX" = "1" ]; then
         echo "Refusing: no scratch PixelSwitch answered status (exit $code), and this script will not guess on Linux (spec 5.7)."
         exit 2
     fi

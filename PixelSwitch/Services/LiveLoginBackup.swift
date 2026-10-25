@@ -107,6 +107,33 @@ enum LiveLoginBackup {
         return .proceed
     }
 
+    /// The live credential a switch with no active account judged disposable
+    /// (`LiveLoginDisposal`, spec D20 revision 4) before it went ahead. `credential`
+    /// is nil when that read returned nothing: a nil judged read is still a
+    /// judgment, and any real login that shows up afterwards was never judged.
+    struct JudgedLogin: Equatable, Sendable {
+        let credential: String?
+    }
+
+    /// Binds the no-active-account decision to the login it judged. With no proven
+    /// owner nothing is compared against a saved login, so without this the login
+    /// that gets overwritten could be one that was never judged: the decision
+    /// would stand after a failed first read (`nothingToLose`), or after Claude
+    /// Code or the user replaced the login while the target was being checked.
+    /// Returns `.stillChanging` (nothing written) when the login step 1 looked at,
+    /// or the one read just before the write, differs from the judged one; the
+    /// next attempt decides again. A nil judged read against a real login counts
+    /// as changed. `judged` is nil for every other switch (an owner is proven, or
+    /// an account is believed active), which keeps 1.9's rules as they were.
+    static func afterJudgedLogin(judged: JudgedLogin?, seen: String?, liveNow: String?) -> Abort? {
+        guard let judged else { return nil }
+        if CredentialOwnership.liveLoginChanged(savedAtStep4: judged.credential, now: seen)
+            || CredentialOwnership.liveLoginChanged(savedAtStep4: judged.credential, now: liveNow) {
+            return .stillChanging
+        }
+        return nil
+    }
+
     /// How step 1 knows the login it is about to save is still the owner's.
     enum FreshLoginProof: Equatable, Sendable {
         /// The fresh login is the same grant as the one the API already proved

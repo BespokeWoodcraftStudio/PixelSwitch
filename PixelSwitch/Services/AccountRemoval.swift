@@ -213,8 +213,9 @@ enum LiveLoginDisposal {
 
 /// The refresh tokens of removed accounts, remembered as fingerprints so a later
 /// switch can tell that the live login is a removed account's and disposable
-/// (spec D20 revision 4). Only a fingerprint is kept, never a token. Cleared by
-/// the next successful switch or add.
+/// (spec D20 revision 4). Only a fingerprint is kept, never a token, and only for
+/// logins provably the removed account's (`fingerprintsToRecord`). Cleared when an
+/// account is added, signed in, adopted as the active one, or switched to.
 enum RemovedLogins {
     /// The most fingerprints kept (a handful of removals, two or three logins each).
     static let limit = 16
@@ -225,6 +226,41 @@ enum RemovedLogins {
         credentials.compactMap { credential in
             credential.flatMap { CredentialOwnership.login(fromCredential: $0) }?.refreshToken.map(TokenFingerprint.of)
         }
+    }
+
+    /// A live login the API proved belongs to one account, kept by that token's
+    /// refresh-token fingerprint (never the token). Kept in memory from the last
+    /// proven owner lookup, so a removal can tell a live login that really was the
+    /// removed account's from one that only was BELIEVED to be.
+    struct ProvenLiveLogin: Equatable {
+        let accountId: UUID
+        let refreshFingerprint: String
+    }
+
+    /// The proof for `credential` being `owner`'s; nil if it has no refresh token.
+    static func proof(owner: UUID, credential: String?) -> ProvenLiveLogin? {
+        guard let refresh = credential.flatMap({ CredentialOwnership.login(fromCredential: $0) })?.refreshToken else { return nil }
+        return ProvenLiveLogin(accountId: owner, refreshFingerprint: TokenFingerprint.of(refresh))
+    }
+
+    /// What to remember when `removedAccount` is removed (spec D20 revision 4):
+    /// only logins that are provably its own. Its saved login's refresh token
+    /// always. The live login's only when it is the same grant as that saved
+    /// login, or the API proved it is the removed account's (`proof`). Belief that
+    /// the account was active is not proof: until the next lookup the live login
+    /// can be another account's (one signed in by hand), and recording it as the
+    /// removed account's would let a later switch discard it. An unproven live
+    /// login is left out, so the switch refuses it; Claude Code renewing it lets
+    /// the API name its owner and the switch go ahead.
+    static func fingerprintsToRecord(removedAccount: UUID, savedCredential: String?, liveCredential: String?, proof: ProvenLiveLogin?) -> [String] {
+        var recorded = fingerprints(ofCredentials: [savedCredential])
+        guard let live = liveCredential.flatMap({ CredentialOwnership.login(fromCredential: $0) }), let refresh = live.refreshToken else { return recorded }
+        let sameGrantAsSaved = savedCredential.flatMap { CredentialOwnership.login(fromCredential: $0) }
+            .map { CredentialOwnership.sameGrant($0, live) } ?? false
+        let fingerprint = TokenFingerprint.of(refresh)
+        let provenRemovedAccounts = proof.map { $0.accountId == removedAccount && $0.refreshFingerprint == fingerprint } ?? false
+        if sameGrantAsSaved || provenRemovedAccounts, !recorded.contains(fingerprint) { recorded.append(fingerprint) }
+        return recorded
     }
 
     /// `existing` plus `new`, without repeats, oldest dropped past `limit`.
