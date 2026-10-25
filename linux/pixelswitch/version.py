@@ -27,6 +27,8 @@ class VersionUnavailable(Exception):
 
 @dataclass(frozen=True)
 class VersionInfo:
+    """A version string (``2.0``) and its build number (``31``)."""
+
     version: str
     build: int
 
@@ -111,8 +113,10 @@ def read_version(package_dir: str | None = None) -> VersionInfo:
 
 
 def version() -> str:
+    """The running version string."""
     return read_version().version
 
 
 def build() -> int:
+    """The running build number."""
     return read_version().build

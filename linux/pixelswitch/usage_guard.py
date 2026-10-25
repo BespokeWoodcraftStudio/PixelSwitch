@@ -273,6 +273,7 @@ class UsageRequestGuard:
     # -- needsReauth, persisted by the caller (:235-262) -----------------------------
 
     def is_needs_reauth(self, account: Hashable) -> bool:
+        """:237-240."""
         with self._lock:
             state = self._states.get(account)
             return state is not None and state.needs_reauth
@@ -292,6 +293,7 @@ class UsageRequestGuard:
                 self._states[account] = state
 
     def last_auth_failure(self, account: Hashable) -> float | None:
+        """:258-262. When the account last got a 401, if it has."""
         with self._lock:
             state = self._states.get(account)
             return state.last_auth_failure if state is not None else None
@@ -355,6 +357,7 @@ RESIGN = UsageNotice("resign")
 
 
 def paused(until: float) -> UsageNotice:
+    """:292. The card says it paused the reading until a clock time (Claude Code is not affected)."""
     return UsageNotice("paused", until)
 
 
@@ -406,10 +409,12 @@ class BackupRefreshOutcome:
 
 
 def refreshed(credential: str) -> BackupRefreshOutcome:
+    """:334. New credential JSON, persisted to the store."""
     return BackupRefreshOutcome("refreshed", credential)
 
 
 def belongs_to_another_account(email: str) -> BackupRefreshOutcome:
+    """:355. The renewed login belongs to the named other account; the backup was removed."""
     return BackupRefreshOutcome("belongsToAnotherAccount", email)
 
 
@@ -479,6 +484,7 @@ class UsageRequestError(Exception):
 
     @classmethod
     def decode_failure(cls, why: str = "") -> "UsageRequestError":
+        """UsageRequestError.swift:12-13, ``decode``: a 200 whose body could not be read as usage."""
         return cls("decode", body=why)
 
     # behaviour ------------------------------------------------------------------
@@ -496,6 +502,7 @@ class UsageRequestError(Exception):
 
     @property
     def offers_status_page(self) -> bool:
+        """UsageRequestError.swift:68-71. Whether the card links to Anthropic's status page."""
         return self.kind == "server"
 
     def message(self, now: float | None = None) -> str:

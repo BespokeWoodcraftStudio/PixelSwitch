@@ -132,6 +132,7 @@ class UsageWindow:
 
     @property
     def resets_at_date(self) -> float | None:
+        """:157-164."""
         return parse_iso8601(self.resets_at)
 
     @classmethod
@@ -175,6 +176,7 @@ class UsageLimit:
 
     @property
     def percent_left(self) -> float | None:
+        """:107-109. Percent of the allowance still unused, 0 to 100."""
         if self.percent is None:
             return None
         return min(max(100 - self.percent, 0), 100)
@@ -220,6 +222,8 @@ class UsageLimit:
 
 @dataclass(frozen=True)
 class ExtraUsage:
+    """:231-243."""
+
     is_enabled: bool | None = None
     monthly_limit: float | None = None
     used_credits: float | None = None

@@ -16,7 +16,7 @@ from __future__ import annotations
 import enum
 import math
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Sequence
 
 from .usage_model import (
     FABLE_MODEL_NAME,
@@ -177,6 +177,8 @@ class Rule:
 
 @dataclass(frozen=True)
 class LeaveAt:
+    """Where auto-switch moves the user OFF an account while it is active (2.2 ``leaveAt``)."""
+
     session: float
     weekly: float
 
@@ -294,14 +296,17 @@ def reading(window: UsageWindow | None, now: float, require_known_window: bool =
 
 
 def session_reading(usage: UsageResponse | None, now: float, require_known_window: bool = False) -> float | None:
+    """The 5-hour window's reading under the expiry rule (:232-238 on ``usage.fiveHour``)."""
     return reading(usage.five_hour, now, require_known_window) if usage is not None else None
 
 
 def weekly_reading(usage: UsageResponse | None, now: float, require_known_window: bool = False) -> float | None:
+    """The 7-day window's reading under the expiry rule (:232-238 on ``usage.sevenDay``)."""
     return reading(usage.seven_day, now, require_known_window) if usage is not None else None
 
 
 def fable_window(usage: UsageResponse | None) -> UsageWindow | None:
+    """The Fable allowance as a window (:112-115, :148): the ``limits[]`` entry named "Fable"."""
     if usage is None:
         return None
     limit = usage.model_weekly_limit(FABLE_MODEL_NAME)
@@ -491,7 +496,7 @@ def ranked_targets(
     now: float,
     relaxed: bool = False,
 ) -> list[Any]:
-    """Rank the accounts worth switching to for one limit and rule, best first.
+    """Rank the accounts worth switching to for one limit and rule, best first (:363-437).
 
     The result is a list of *proposals*: it is computed from whatever samples the
     caller holds, which round-robin polling can leave several cycles old. The
@@ -565,7 +570,7 @@ class Plan:
 def fired_window(
     usage: UsageResponse | None, leave: LeaveAt, now: float, require_known_window: bool
 ) -> str | None:
-    """Rule 1. ``"session"`` if ``s >= leave.session``, else ``"weekly"`` if
+    """2.3 rule 1 (replaces the single ``activeUtil >= activeThreshold`` of :323-325). ``"session"`` if ``s >= leave.session``, else ``"weekly"`` if
     ``w >= leave.weekly``, else None. A missing window cannot trigger."""
     s = session_reading(usage, now, require_known_window)
     if s is not None and s >= leave.session:
@@ -595,6 +600,7 @@ def _plan_once(
     relaxed: bool,
 ) -> Plan | None:
     def ranked(limit: Limit, trigger: Trigger, active_weekly_reset: float | None) -> list[Any]:
+        """:363-437 with this plan's arguments."""
         return ranked_targets(
             active=active, candidates=candidates, usage_by_account=usage_by_account,
             is_switchable=is_switchable, is_unusable=is_unusable, rule_of=rule_of,
@@ -718,6 +724,3 @@ def plan(
         return None
     return _plan_once(relaxed=True, **common)
 
-
-def ids_of(accounts: Iterable[Any]) -> list[Any]:
-    return [account.id for account in accounts]
