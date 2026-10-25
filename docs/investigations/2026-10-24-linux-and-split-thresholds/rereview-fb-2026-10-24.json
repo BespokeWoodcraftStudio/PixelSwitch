@@ -1,0 +1,83 @@
+{
+ "priorFindings": [
+  {
+   "finding": "P1 (protocol) CLIRunner.defaultWords printed the base threshold when the two window defaults were equal but differed from the base",
+   "closed": true,
+   "note": "PixelSwitchCLI/CLIRunner.swift:299-304 now returns the windows' shared value when both are sent, and falls back to the base only for a 1.9 app that sends neither. New checks with 98/95/95 and 90/80/80 pass (they expect 'default 95%' and 'default 80%')."
+  },
+  {
+   "finding": "P1 (protocol) remote-control.sh shipped with no testMode guard (spec 5.7 rule 2)",
+   "closed": true,
+   "note": "Tests/integration/remote-control.sh:24 exports PIXELSWITCH_NO_LAUNCH=1 on Linux. Lines 56-59 refuse a Linux daemon that does not report testMode True, and lines 62-66 exit 2 when status fails on Linux. The stated scenario (the client falls back to the real daemon on the first call) is closed. A narrower fail-open path remains and is reported as a new P2."
+  },
+  {
+   "finding": "P1 (tests) defaultWords showed the base when the windows were equal (duplicate from the tests lens)",
+   "closed": true,
+   "note": "Same fix as above. CLIOutput.defaultWords(movedInfo) == \"95%\" and the old-app and split cases are pinned in ControlSplitTests."
+  },
+  {
+   "finding": "P1 (tests) the 'references: \"3\" is the position' test ran when no account had priority 3",
+   "closed": true,
+   "note": "The test now gives alice priority 3, asserts she is not in row 3, and asserts that switch \"3\" picks app.accounts[2] and not alice. The resolver mutation the finding describes would now fail it."
+  },
+  {
+   "finding": "P1 (tests) the get_usage and start_sign_in account descriptions lacked 'never a priority number', and the test checked only four tools",
+   "closed": true,
+   "note": "MCPServer.swift:62 and :72 now carry the phrase. The test builds its tool list from every schema with an account property (at least 8 tools) and names get_usage and start_sign_in explicitly."
+  },
+  {
+   "finding": "P1 (tests) the settings.get reads of the three threshold keys were untested (spec 2.1: with only the base 98 stored, both new keys read 98)",
+   "closed": true,
+   "note": "The reads moved into SettingKey.autoSwitchThresholdValue (SettingsCatalog.swift:161-179), which the harness compiles, and SettingsStore.swift:32-33 calls it. Tests cover nothing stored (90/90/90), only base 98 (98/98/98), one own window, and a stored 0 counting as unset."
+  },
+  {
+   "finding": "P1 (tests) remote-control.sh had no testMode check and a stale 'Needs PixelSwitch 1.2' header",
+   "closed": true,
+   "note": "The guard is in (see above). The header at lines 14-16 now says 2.0 or later (20 MCP tools), and lines 18-21 document the Linux rule."
+  },
+  {
+   "finding": "P2 (protocol) the UserDefaults.didChangeNotification pipeline in the @MainActor ControlEventHub had no hop to main (a Swift 6 isolation trap on a background write)",
+   "closed": true,
+   "note": "RemoteControlService.swift:135-142 now applies .receive(on: DispatchQueue.main) before map, prepend and sink. No other hub pipeline is fed off main: the $-publishers come from the @MainActor AppState, and follow() already hops to main."
+  },
+  {
+   "finding": "P2 (ui-strings) the same event-hub threading risk (duplicate)",
+   "closed": true,
+   "note": "Same fix as above."
+  },
+  {
+   "finding": "P2 accessibility: the steppers and menus had no accessible names, and the Session and Weekly pop-ups were read the same",
+   "closed": true,
+   "note": "SettingsAccountRow.swift:216-225 and :273-283 give each Menu and Stepper an accessibilityLabel that names the account ('Priority for %@', 'Session limit for %@', 'Weekly limit for %@') and an accessibilityValue equal to the shown text. The captions are accessibilityHidden. All three keys are in all five tables with exactly one %@."
+  },
+  {
+   "finding": "P2 column widths: the fixed 164 pt Session and Weekly columns overflowed in German and French",
+   "closed": true,
+   "note": "WindowColumnMetrics (SettingsAccountRow.swift:40-62) measures the widest label from the in-app language's table. A scratch copy measured en 168, de 193, fr 178, ja 175 and zh-Hans 164 pt. The committed de-light and fr-dark renders, which include a 100%/100%/P99 row, show no overlap."
+  },
+  {
+   "finding": "P2 priority stepper: every click saved and re-sorted, so the next click could land on another account",
+   "closed": true,
+   "note": "Closed for the scenario the finding gave (rapid clicks): steps are held in row State and saved once after a 0.8 s pause, or on disappear. A slower click rhythm (0.8 s or more between clicks) still re-sorts between clicks, and a pending step can overwrite a newer drag or CLI/MCP write. Both are reported as a new P2."
+  }
+ ],
+ "findings": [
+  {
+   "severity": "P2",
+   "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Views/SettingsAccountRow.swift",
+   "line": 231,
+   "problem": "The 0.8 s commit only covers clicks less than 0.8 s apart. After the pause, commitPriority calls appState.setPriority, which re-sorts the list (AccountOrder.settingPriority puts the most recently set account first among equal numbers). The row can therefore still move away from a pointer that has not moved. A pending step can also save a stale value: shownPriority prefers pendingPriority over the saved number, so a change made underneath it during the pause is overwritten when the pending number is saved. Such a change can be a drag (moveAccounts numbers every account from 1) or a CLI/MCP accounts.setPriority. There is no data loss or double save: commitPriority checks for nil and clears it, and .task and .onDisappear both run on main.",
+   "failure_scenario": "A is P1, B is P2, C is P3, and the user clicks A's up arrow about once a second, reading the number each time. Click 1 saves A as P2 after 0.8 s, and A stays first. Click 2 saves A as P3, and the list becomes B, A, C. Click 3 lands on B's stepper, and B becomes P3. This is the old finding's failure at a deliberate pace instead of a fast one. Second case: the user steps A from P3 to P4, then drags C to the top within 0.8 s. The drag renumbers every account from 1, then A's pending P4 is saved over the drag's number and A jumps away from where the drag left it.",
+   "fix": "Hold the save while the pointer is over the row, and drop a pending step when the saved number changes underneath it. Add `private let hoverStorage = State<Bool>(initialValue: false)` with a nonmutating accessor `hovering`, as pendingStorage does. On the row's HStack add `.onHover { inside in hovering = inside; if !inside { commitPriority() } }`. In the task, after the sleep, add `guard !Task.isCancelled, !hovering else { return }`, so a pointer user's step is saved when the pointer leaves the row or the row disappears. Keyboard and VoiceOver users never hover, so they keep the 0.8 s pause. Add `.onChange(of: priority) { _, _ in pendingPriority = nil }` so a newer drag or remote write wins over a step still waiting. The row's own save already sets the pending step to nil before priority changes."
+  },
+  {
+   "severity": "P2",
+   "file": "/Users/ahamade/Documents/GitHub/PixelSwitch/Tests/integration/remote-control.sh",
+   "line": 56,
+   "problem": "The Linux guard can still let a run through in two ways. (a) It relies on the platform the daemon reports, not on the host. On a Linux host, a status reply with no `platform`, or one `field` cannot parse (field prints \"\"), skips the testMode check, so spec 5.7 rule 2 ('checks testMode: true first') is not applied. (b) It checks only the first status reply. Every later \"$CLI\" call resolves the socket again, and the Linux client's list always ends with the real daemon's socket (linux/pixelswitch/client.py socket_candidates on lane LB: `/run/user/<uid>/pixelswitch/control.sock`, unless PIXELSWITCH_CONTROL_SOCKET is set). If the scratch daemon stops answering after step 1, steps 3-5 and the `restore` trap act on the live daemon. Also, the comment at line 55 ('The Mac app sends no `platform`') is wrong: the 2.0 Mac app sends platform \"macos\", and ControlSplitTests asserts it.",
+   "failure_scenario": "After the real 2.0 install on the founder's laptop, LC or a 2.1 lane runs the script against a scratch daemon that answers status with testMode true and then exits (a crash, or the harness's own cleanup). Step 3 then writes autoSwitch.drainWithinHours on the live daemon. The restore trap writes the scratch daemon's original values for drainWithinHours and lowRemainingWarningThreshold into it, which leaves a lasting change. Step 4 runs a live usage.refresh with the CabDesign farm's login, and step 5 starts a real `claude auth login` next to the farm. Spec 5.7 exists to prevent exactly this.",
+   "fix": "Pin the socket on Linux, so no call can fall back, and key the check on the host as well as on what the daemon reports. At line 24 replace the one-liner with:\n```bash\nif [ \"$(uname -s)\" = \"Linux\" ]; then\n    export PIXELSWITCH_NO_LAUNCH=1\n    export PIXELSWITCH_CONTROL_SOCKET=\"${PIXELSWITCH_CONTROL_SOCKET:-${XDG_RUNTIME_DIR:-/nonexistent}/pixelswitch/control.sock}\"\n    case \"$PIXELSWITCH_CONTROL_SOCKET\" in */pixelswitch-dev/*) ;; *) echo \"Refusing: on Linux the socket must be a scratch one under pixelswitch-dev (spec 5.7).\"; exit 2;; esac\nfi\n```\nThe client tries only PIXELSWITCH_CONTROL_SOCKET when it is set (client.py docstring, item 1). At line 56 use `if { [ \"$(uname -s)\" = \"Linux\" ] || [ \"$(echo \"$status\" | field platform)\" = \"linux\" ]; } && [ \"$(echo \"$status\" | field testMode)\" != \"True\" ]; then`, and change the line-55 comment to 'The Mac app reports platform macos and no testMode'."
+  }
+ ],
+ "verdict": "STAFF REVIEW: PASS (no P0 or P1). All 7 prior P1s and the 5 named P2s are closed. There are 2 new P2s: the priority stepper can still move a row between slower clicks, and the remote-control.sh guard can still let a run through on Linux in two ways.\n\nChecks run on PixelSwitch release-2.0 at b0da510, a clean tree that contains 742c407:\n- `bash Tests/run-unit-tests.sh`: exit 0, 1281 passed, 0 failed.\n- `swiftc -swift-version 6 -typecheck PixelSwitchCLI/*.swift PixelSwitch/Control/ControlProtocol.swift`: exit 0.\n\nThe pixelventures gate (`node tests/gate.mjs`) does not cover this repository, so it was not the gate here. I also typechecked SettingsAccountRow.swift with the render tool's file list (`-typecheck`, macOS 14 target, exit 0), so every symbol and import it uses exists. SettingsAccountsTab.swift needs AppState, so I read it line by line: it imports SwiftUI, and numbers.relaxedArriveWeekly and arriveAt.weekly exist (AutoSwitchEngine.swift:926-927).\n\nNote on the diff itself: `git diff 3c2d677 742c407` appears to roll the spec back from revision 4 to 3 and delete rereview-fa-2026-10-24.json. That is only because 742c407 branched from 1d7c5fc. The merge b0da510 keeps revision 4 and the file, so it is not a defect.\n\n**Priority stepper (pause, then save):**\n- A pending step is not lost when the window closes: .onDisappear saves it. If the Settings scene keeps the view alive, the task saves after 0.8 s. A step is lost only if the app quits within 0.8 s of the last click.\n- A re-sort does not lose it. ForEach is keyed by account.id, so the row's state survives a move, and a row that is torn down saves first in onDisappear.\n- A removed account's pending save calls setPriority with an unknown id, which returns false. It logs a misleading 'Refused' line but does not crash.\n- It cannot save twice: commitPriority checks for nil and clears it, and everything runs on main.\n- It can save a stale value over a drag or a CLI/MCP write made during the pause. That is in the new P2.\n- The hand-written State is sound. On this SDK `@State` really is a macro (SwiftUIMacros.StateMacro; a scratch typecheck fails without the plugin). State is still a DynamicProperty property wrapper that SwiftUI finds by its position in the struct, so `let pendingStorage = State<Int?>(...)` is picked up the same way.\n- VoiceOver adjusting works: the Stepper keeps its increment and decrement actions, and the spoken value follows the pending number. Whether VoiceOver focus follows the row after the re-sort cannot be checked without running the app.\n\n**WindowColumnMetrics:**\n- It does run on every body evaluation of every row; the 'Measured once per row' comment overstates this. A scratch copy timed 35-87 \u00b5s per call (UserDefaults read, bundle lookup, three CoreText measurements), so it does not visibly slow the view.\n- It uses the in-app language: it reads L10n.bundle (Bundle.main when the setting is 'auto'). That is the same table the Text labels resolve under `.environment(\\.locale, currentLocale)` (PixelSwitchApp.swift:85).\n\n**remote-control.sh guard:**\n- It fails closed when status fails on Linux (exit 2).\n- It does not fail closed when `platform` is missing or the reply cannot be parsed, or when the scratch daemon stops answering after the first status reply. That is the new P2.\n\n**Strings:** 'Priority for %@', 'Session limit for %@' and 'Weekly limit for %@' are in all five tables with exactly one %@. The new help sentence has four %@ in the same order in de, fr, ja and zh-Hans. The l10n test now builds its key list from the English table and checks placeholders across every key.\n\n**1.9 compatibility:** defaultWords and orderSet still print the base and the plain table for a 1.9 app, and the old-app tests pass, so the 1.9 CLI path and the scripts are unbroken.\n\nFiles reviewed:\n- /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Views/SettingsAccountRow.swift\n- /Users/ahamade/Documents/GitHub/PixelSwitch/Tests/integration/remote-control.sh\n- /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitch/Control/RemoteControlService.swift\n- /Users/ahamade/Documents/GitHub/PixelSwitch/PixelSwitchCLI/CLIRunner.swift"
+}
