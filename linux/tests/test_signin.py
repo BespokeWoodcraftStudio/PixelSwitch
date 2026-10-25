@@ -7,7 +7,6 @@ import json
 import os
 import stat
 import subprocess
-import sys
 import threading
 import time
 import unittest
@@ -19,7 +18,7 @@ from pixelswitch.logfile import Log
 from pixelswitch.signin import Launch, Purpose, SignInSession
 
 from . import stub_claude
-from .lb_support import read_file, read_json, tmpdir, wait_for
+from .lb_support import read_file, tmpdir, wait_for
 
 MANUAL = ("https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code"
           "&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_key+user%3Aprofile"

@@ -12,7 +12,6 @@ import unittest
 
 from pixelswitch import fsio
 from pixelswitch import settings_catalog as catalog
-from pixelswitch.usage_guard import UsageRequestGuard
 from pixelswitch.stores import BackupStore
 
 from .lb_support import Rig, credential_text, read_file, read_json, wait_for

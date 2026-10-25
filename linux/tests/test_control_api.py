@@ -10,8 +10,8 @@ import unittest
 from pixelswitch import protocol, settings_catalog as catalog
 from pixelswitch.control_api import ControlApi
 
-from .lb_support import Rig, read_json, wait_for
-from .mock_api import R, usage_body
+from .lb_support import Rig
+from .mock_api import usage_body
 
 
 class Api:

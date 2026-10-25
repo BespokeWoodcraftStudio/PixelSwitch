@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 import threading
-import time
 import unittest
 
 from pixelswitch import claude_cli, fsio
@@ -14,8 +12,8 @@ from pixelswitch.claude_login import RENEWING_MESSAGE
 from pixelswitch.coordinator import ActionError, BUSY_MESSAGE, LIVE_CHANGED_MESSAGE
 from pixelswitch.stores import BackupStore
 
-from .lb_support import Rig, credential_text, read_file, read_json, wait_for
-from .mock_api import R, fabricated, usage_body
+from .lb_support import Rig, credential_text, read_file, read_json
+from .mock_api import R, fabricated
 
 
 def two_accounts(case, **kw):

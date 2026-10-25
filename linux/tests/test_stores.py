@@ -11,7 +11,6 @@ import os
 import stat
 import unittest
 
-from pixelswitch.accounts import Account
 from pixelswitch.logfile import Log
 from pixelswitch.stores import AccountsFile, BackupStore, NeedsReauthFile, SettingsFile
 

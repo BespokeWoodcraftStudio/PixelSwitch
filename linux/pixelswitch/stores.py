@@ -242,6 +242,14 @@ class BackupStore:
                 return None
             return dict(load.backups)
 
+    def is_idle(self) -> bool:
+        """False while a read or write of the store is in progress (the updater restarts the daemon
+        only when no store write is running)."""
+        if self._lock.acquire(blocking=False):
+            self._lock.release()
+            return True
+        return False
+
     def readable(self) -> tuple[bool, str]:
         """For ``--self-check``: whether the store can be read, with the reason when it cannot."""
         with self._lock:

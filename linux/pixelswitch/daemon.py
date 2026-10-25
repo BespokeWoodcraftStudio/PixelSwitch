@@ -253,7 +253,8 @@ def build(env: Mapping[str, str], lock_fd: int, paths, shutdown: threading.Event
         updater_kwargs["public_key"] = public_key
 
     def idle() -> bool:
-        return not coordinator.gate.busy and coordinator.renewals_in_flight() == 0
+        """No switch, sign-in, saved-login renewal or store write is in progress (spec 5.4)."""
+        return (not coordinator.gate.busy and coordinator.renewals_in_flight() == 0 and backups.is_idle())
 
     def restart() -> None:
         if test_mode:

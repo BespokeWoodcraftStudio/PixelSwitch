@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import threading
-import time
 import unittest
 
 from pixelswitch import fsio
@@ -14,8 +13,8 @@ from pixelswitch.coordinator import ActionError, BUSY_MESSAGE
 from pixelswitch.protocol import ControlError
 from pixelswitch.stores import BackupStore
 
-from .lb_support import Rig, credential_text, read_file, read_json, wait_for
-from .mock_api import R, fabricated, usage_body
+from .lb_support import Rig, credential_text, read_json, wait_for
+from .mock_api import R, fabricated
 
 
 class AddCurrentTests(unittest.TestCase):
@@ -515,3 +514,42 @@ class SettersAndEventsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NeedsReauthAnnouncementTests(unittest.TestCase):
+    def test_a_flag_set_or_cleared_is_an_accounts_change_because_is_switchable_changed(self):
+        rig = Rig(self)
+        rig.seed_account("a@example.invalid", active=True)
+        b = rig.seed_account("b@example.invalid")
+        app = rig.build()
+        before = len(rig.events_of("accountsChanged"))
+        app.flag_needs_reauth(app.account_by_id(b.id))
+        events = rig.events_of("accountsChanged")
+        self.assertEqual(len(events), before + 1)
+        info = [x for x in events[-1]["accounts"] if x["email"] == "b@example.invalid"][0]
+        self.assertFalse(info["isSwitchable"])
+        app.persist_needs_reauth()
+        self.assertEqual(len(rig.events_of("accountsChanged")), before + 1, "unchanged: not announced again")
+        app.guard.credential_changed(b.id, None)
+        app.persist_needs_reauth()
+        self.assertEqual(len(rig.events_of("accountsChanged")), before + 2)
+
+    def test_the_backup_store_says_when_it_is_idle(self):
+        rig = Rig(self)
+        rig.seed_account("a@example.invalid", active=True)
+        app = rig.build()
+        self.assertTrue(app.backups.is_idle())
+        entered, release = threading.Event(), threading.Event()
+
+        def hold():
+            with app.backups._lock:
+                entered.set()
+                release.wait(10)
+
+        thread = threading.Thread(target=hold)
+        thread.start()
+        self.assertTrue(entered.wait(5))
+        self.assertFalse(app.backups.is_idle())
+        release.set()
+        thread.join(5)
+        self.assertTrue(app.backups.is_idle())

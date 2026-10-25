@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 import shutil
 import stat
 import tempfile
@@ -18,7 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from pixelswitch import fsio
-from pixelswitch.accounts import Account, dump_accounts, sorted_by_priority
+from pixelswitch.accounts import Account, sorted_by_priority
 from pixelswitch.api import ApiBases, Transport
 from pixelswitch.claude_cli import ClaudeCli
 from pixelswitch.claude_login import ClaudeLogin

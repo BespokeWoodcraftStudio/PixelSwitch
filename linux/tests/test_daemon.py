@@ -22,7 +22,7 @@ import uuid
 from pixelswitch import fsio, paths as paths_module, testmode
 from pixelswitch.client import ControlClient
 
-from .lb_support import Rig, read_file, read_json, tmpdir, wait_for
+from .lb_support import Rig, read_file, tmpdir, wait_for
 from .mock_api import R, fabricated
 
 LINUX_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

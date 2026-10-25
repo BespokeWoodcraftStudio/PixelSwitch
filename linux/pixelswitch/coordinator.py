@@ -144,7 +144,6 @@ class Coordinator(UsageMixin):
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
         signin_parent: str | None = None,
-        post_switch_pause: float = 0.0,
     ) -> None:
         self.paths = paths
         self._log_root = log
@@ -164,7 +163,6 @@ class Coordinator(UsageMixin):
         self.sleep = sleep
         self.gate = MutationGate()
         self.signin_parent = signin_parent or os.path.join(paths.state_dir, "signin")
-        self._post_switch_pause = post_switch_pause
         self._state_lock = threading.RLock()
         self._renewal_lock = threading.Lock()
         self._renewals: dict[str, _Renewal] = {}
@@ -180,6 +178,7 @@ class Coordinator(UsageMixin):
         self.on_quit: Callable[[], None] = lambda: None
         self.on_check_for_updates: Callable[[], None] = lambda: None
         self._init_usage_state()
+        self._announced_needs_reauth: set[str] = set()
         self._accounts: list[Account] = []
         self._active: Account | None = None
         self._last_active_id: str | None = None
@@ -492,14 +491,21 @@ class Coordinator(UsageMixin):
         self._show_resign(account, MESSAGE_BELONGED if belonged_to_another else None)
 
     def persist_needs_reauth(self) -> None:
+        current = {str(item) for item in self.guard.needs_reauth_accounts}
+        if current == self._announced_needs_reauth:
+            return
+        self._announced_needs_reauth = current
         try:
-            self.needs_file.save({str(item) for item in self.guard.needs_reauth_accounts})
+            self.needs_file.save(current)
         except OSError as error:
             self.log.error(f"[needsReauth] Could not save the needs-reauth file ({type(error).__name__})")
+        # `isSwitchable` is part of AccountInfo, so a flag set or cleared is an accounts change.
+        self.emit_accounts_changed()
 
     def _restore_needs_reauth(self) -> None:
         ids = self.needs_file.load()
         known = {i for i in ids if any(a.id == i for a in self._accounts)}
+        self._announced_needs_reauth = set(known)
         for account_id in known:
             # Tie the flag to the dead token the account holds now, so any other token clears it.
             backup = self.backups.get(account_id)
