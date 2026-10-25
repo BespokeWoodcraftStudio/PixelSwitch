@@ -1,0 +1,100 @@
+[
+ {
+  "lens": "install-release",
+  "review": {
+   "priorFindings": [
+    {
+     "finding": "LC#0 P1 linux/install.sh:88 - every delete used a bare rm, so a guard rm first on PATH (the laptop's login shell) could stop an uninstall or reinstall halfway",
+     "closed": true,
+     "note": "install.sh:33 and build-release.sh:28 define rm() { /bin/rm \"$@\"; } right after set -euo pipefail, and the find in build-release.sh:105 calls /bin/rm. test_the_scripts_work_when_a_guard_script_shadows_rm puts a refusing rm first on PATH and runs four things: a fresh install, the same build again, a newer build, and --uninstall --purge. All succeed, nothing is left behind, and the guard is never called."
+    },
+    {
+     "finding": "LC#13 P1 linux/pixelswitch/gui/settings_accounts.py:207 - the Remove confirmation said Claude Code's login is not touched even when removing the active account switches Claude Code",
+     "closed": true,
+     "note": "settings_accounts.py:206-211 now takes its body from model.remove_body (model.py:258-267). When the account is active and others remain, the dialog says PixelSwitch will switch Claude Code and that this changes the account every Claude Code on the computer uses. Pinned by test_gui_model test_the_remove_text_depends_on_whether_claude_code_will_be_switched and by test_gui_widgets test_the_remove_text_tells_the_truth_about_the_active_account."
+    },
+    {
+     "finding": "LC#26 P1 linux/tests/test_packaging.py:524 - the never-calls-sudo test whitelisted every 'sudo apt install'",
+     "closed": true,
+     "note": "sudo_outside_messages checks each occurrence and accepts sudo only inside a die/warn/say string. The test proves it can fail, including on '  sudo apt install -y python3-gi' and on 'command -v gi || sudo apt install ...'. It is also checked at run time: make_shims puts failing sudo and pkexec stand-ins first on PATH for every InstallTests and DownloadPathTests run, and each test's cleanup asserts the marker file is absent."
+    },
+    {
+     "finding": "LC#27 P1 linux/tests/test_packaging.py:366 - no test ran install.sh's download path (feed, size, SHA-256, signature, VERSION vs feed)",
+     "closed": true,
+     "note": "DownloadPathTests (test_packaging.py:986-1098) drive the real feed path through a local 127.0.0.1 server and a throwaway key, using the test-mode hooks with HOME under the real ~/.cache/pixelswitch-dev. They cover: a good install with the 'verified:' label, a wrong SHA, size +1 and -1, a signature by another key, a bad feed (foreign url host, wrong url version, 60 MB, version 2.0.1, build as a string, bad sha, short signature), a VERSION that differs from the feed both ways, and the new downgrade refusal with same-build repair. Every refusal asserts that no launcher was installed. All 66 packaging tests ran here with no skips."
+    },
+    {
+     "finding": "Re-review FL1/FL2 P1 linux/pixelswitch/coordinator.py:1610 - _write_identity called held.check() after the credential write, leaving B's login under A's identity with no rollback",
+     "closed": true,
+     "note": "coordinator.py:1642-1653 no longer checks the hold limit. It waits up to max(held.remaining(), POST_WRITE_GRACE_SECONDS), and if the identity write fails it rolls the credential back inside .storage-write before raising. test_fl4_final.py:49-67 covers three cases: the identity is still written when the 10 s ran out during the credential write; a failed identity write puts the previous login back; and a hold that ran out before the write still writes nothing."
+    },
+    {
+     "finding": "Re-review FL1/FL2 P1 linux/tests/network_guard.py:134 - clear() erased every earlier violation, so 32 of 45 test modules were effectively unguarded",
+     "closed": true,
+     "note": "The guard self-test now records into network_guard.scoped(), a per-thread private list, and asserts the run-wide list is exactly as it was before (test_network_guard.py:37-49). A subprocess test proves a violation recorded earlier still fails the run, and that the self-test's own refusals are not reported. Another test checks that a violation from another thread is not swallowed by a scope."
+    },
+    {
+     "finding": "Orchestrator O1 (assigned FL4) linux/pixelswitch/dirlock.py - a lock removed and re-made within 2 ms passed the ownership tolerance on Ubuntu 24.04",
+     "closed": true,
+     "note": "dirlock._is_ours (dirlock.py:336-356) now decides on exact values: the inode, birth_ns compared with ==, and st_mtime_ns compared with == against the mtime PixelSwitch set and read back. The read-back also closes the re-review P2 about filesystems with whole-second timestamps. Deterministic tests with the same inode and a time 1 ms away are at test_fl1_locks_server.py:89-155. Not verifiable here: whether the merged head is green on the ubuntu-24.04 runner (no GitHub API)."
+    },
+    {
+     "finding": "Orchestrator O2 (assigned FL3) linux/pixelswitch/gui - an account on split defaults (90/50) showed the equal-windows help sentence",
+     "closed": true,
+     "note": "model.limit_help (model.py:276-304) judges an account that follows the defaults by the defaults in the same snapshot. Pinned by test_gui_model.py:92-100: a stale effective value under (90, 50) still gets the two-window sentence, and (90, 90) gets the one-limit sentence."
+    }
+   ],
+   "findings": [],
+   "verdict": "No new P0 or P1 from the install and release lens. All 8 in-scope items are closed: 4 P1s from review LC, the 2 re-review P1s, and orchestrator rows O1 and O2. Each closure is pinned by a test that ran here.\n\nSuite: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s linux/tests -t linux` on this Mac (Python 3.14.7) ran 1670 tests, OK, 2 skipped, exit 0. test_packaging alone ran 66 of 66 with no skips, so the GNU-tar build tests, the OpenSSL 3 download-path tests and the release.sh tests all executed.\n\nWhat was checked:\n- **install.sh.** The rm function is defined before any delete. main() is called on the last line: a cut-off script is a syntax error or never calls main. The kept installer copy comes from the signed tarball, and a test proves the copy in the tarball is byte-identical to the published install-linux.sh. The downgrade refusal runs before the download and allows the same build as a repair. Unpacking uses Python's tarfile data filter after a name pre-check, and the chmods use find -type f/d, which never follows a link. --from copies the file into the 0700 work folder, then verifies, lists and extracts only that copy. The PIXELSWITCH_TEST_* hooks need PIXELSWITCH_TEST_MODE=1, HOME under the real ~/.cache/pixelswitch-dev, and no INVOCATION_ID; outside test mode the release base is ignored and curl stays --proto =https (pinned). The only hooks honoured outside test mode are PIXELSWITCH_INSTALL_SKIP_CHECKS and the --from key and openssl hooks, which already existed before FL3 and need the user's own environment. The dependency checks are unchanged and now tested per typelib.\n- **build-release.sh.** The key file is created in the parent shell, so the EXIT trap removes it after a SIGTERM and after a refusal (pinned). Only the tarball is signed, and the installer is inside it.\n- **Installer hash.** RELEASE_NOTES.md carries 31bdbeeb70388cf40da5797b881455ef0f7c1489e66ebbb4e07c5b9de03247a0. That is the hash of linux/install.sh run through the same awk (the output is byte-identical to linux/install.sh, which has no non-ASCII bytes). release.sh computes it from the same transform before the bump, which touches only project.yml. CI hashes the linux-package artifact, and verify-release.sh hashes the downloaded asset and checks the release body. All four agree, so the gate can neither block this release nor pass a wrong installer. test_the_repository_notes_hold_no_placeholder_once_a_release_is_cut keeps the notes tied to install.sh.\n- **build.yml.** linux-test and linux-package hold contents: read; linux-publish alone holds contents: write and needs build, linux-test and linux-package. The notes-hash step exits 1 before any upload. I ran the skip gate's exact grep against real unittest -v output in a scratch probe: it fails on a GUI skip and a docstring-test skip and lets the birth-time skip pass. No skip reason contains a quote that would escape it, and HAVE_SNI, HAVE_GI and HAVE_DISPLAY are all satisfied by the packages the step installs.\n\nNot verified (GitHub API forbidden): whether d89b43a has run green on both ubuntu-24.04 and ubuntu-26.04. Pushes to release-2.0 trigger no workflow. Before running release.sh, confirm the main-branch run after the merge is green on both Ubuntu legs with no skips other than birth-time ones. linux-publish now needs linux-test, while the macOS job publishes the release on its own. A red or flaky Linux leg on the tag would leave the latest release without Linux assets, so the README one-liner returns 404 until the failed jobs are re-run.\n\nNon-blocking notes, not findings:\n- linux-publish's error says \"fix the notes and re-run this job\", but a re-run reads the same tag's RELEASE_NOTES.md. Only a tag made outside release.sh can reach that step.\n- install.sh's test-mode host refusal parses the URL more loosely than testmode.check_url (a query string, fragment or trailing dot gets past it). This is reachable only in test mode.\n- The updater never refreshes ~/.local/share/pixelswitch/install-linux.sh, so after auto-updates the kept copy is the first-installed one. That is harmless for 2.0, whose uninstall file list has not changed.\n\nNothing in the repo was edited, created or committed. The checkout is clean, the scratch probe was deleted, ~/.cache/pixelswitch-dev is empty and no test processes remain."
+  }
+ },
+ {
+  "lens": "switch-locks-updater",
+  "review": {
+   "priorFindings": [
+    {
+     "finding": "rereview-fl1-fl2 switch-path P1 coordinator.py:1610: held.check() in _write_identity ran after .credentials.json was written, so a credential write that crossed the 10 s hold skipped both the identity write and the rollback",
+     "closed": true,
+     "note": "_write_identity (coordinator.py:1642-1653) no longer checks the hold. The config-lock wait and the rollback's .storage-write wait use _finish_budget = max(held.remaining(), POST_WRITE_GRACE_SECONDS=2.0). The only held.check() left on the write path runs in _write_credential_locked, before write_credential, so LockLost now always means nothing was written. CredentialWrittenThenHoldRanOutTests cover three cases: the identity is written, the login is rolled back when the config lock is busy, and a hold that ran out before the write writes nothing. Grace check: in the worst case the refresh lock is held about 10 s + 2 s + 2 s plus I/O, and the touch thread refreshes it every 5 s. That is far below Claude Code's 60 s takeover limit (the same goes for the 15 s and 10 s limits of the two write locks). It can be longer than Claude Code's own ~4-8 s wait (5 tries, 1-2 s apart), but the 10 s cap already was. That only delays a renewal; no refresh token is rotated."
+    },
+    {
+     "finding": "rereview-fl1-fl2 updater P1 tests/network_guard.py:134: clear() erased every violation recorded earlier in the run (false pass for 32 of 45 modules)",
+     "closed": true,
+     "note": "clear() is gone and nothing in linux/ erases the violations list any more (grep). The self-test records into a per-thread recorder (network_guard.scoped(), lines 68-101) and asserts the run-wide list is unchanged. New subprocess tests show that a violation recorded before the guard test still exits 1, and that a violation from another thread made inside a scope is not swallowed. No test patches socket, getproxies or set_tunnel around the guard."
+    },
+    {
+     "finding": "Orchestrator O1: dirlock ownership used 2 ms tolerances, so on Ubuntu 24.04 a lock re-made right away (inode reused) passed as ours, and release could remove Claude Code's lock",
+     "closed": true,
+     "note": "Closed in the code. _is_ours (dirlock.py:336-356) needs an exact inode match, the statx birth time in whole ns compared with == when it is not a whole second, and st_mtime_ns == the value read back (fstat through the same fd) after _stamp set a random sub-ms ns part with futimens. _stamp opens the directory with O_DIRECTORY|O_NOFOLLOW and checks the inode before it touches anything, so a replaced directory is never stamped. Every check, touch and release runs under one RLock, so the touch thread's mtime update cannot race a check or the rmdir. reap compares birthtimeNs exactly. Unknown counts as not ours. Tests cover the same inode with the birth time \u00b11 ns or 1 ms away, the same inode and birth time with a re-made mtime, whole-second filesystems (judged as they read the time back, logged once), and an unreadable mtime. Not verified here: the ubuntu-24.04 CI result at d89b43a, because GitHub was off-limits."
+    },
+    {
+     "finding": "review-lc P1 linux/install.sh:88: every delete calls a bare rm, which the laptop's login-shell rm guard can refuse halfway through uninstall or update",
+     "closed": true,
+     "note": "install.sh:33 defines rm() { /bin/rm \"$@\"; } right after set -euo pipefail. A shell function wins over a PATH lookup, so every rm call in the script uses /bin/rm. test_the_scripts_work_when_a_guard_script_shadows_rm puts a refusing rm first on PATH and runs a fresh install, a reinstall and an update."
+    },
+    {
+     "finding": "review-lc P1 linux/pixelswitch/gui/settings_accounts.py:207: the Remove confirmation always said Claude Code's own login is not touched, even when removing the active account switches Claude Code",
+     "closed": true,
+     "note": "_remove_clicked (settings_accounts.py:206-212) now uses model.remove_body (model.py:258-267). For the active account while others remain, the dialog says PixelSwitch will switch Claude Code to the next account by priority. Otherwise it keeps the old sentence."
+    },
+    {
+     "finding": "review-lc P1 linux/tests/test_packaging.py:524: the never-calls-sudo regex's lookahead could not catch an executed 'sudo apt install'",
+     "closed": true,
+     "note": "sudo_outside_messages (test_packaging.py:696-706) checks each occurrence: sudo is allowed only inside the open quoted text of a die, warn or say call. test_the_script_never_calls_sudo also shows the check can fail on four executed forms, including 'warn \"x\"; sudo apt install y' and 'command -v gi || sudo apt install ...'."
+    },
+    {
+     "finding": "review-lc P1 linux/tests/test_packaging.py:366: no test ran install.sh's download path (feed, size, SHA-256, signature, VERSION)",
+     "closed": true,
+     "note": "DownloadPathTests (test_packaging.py:986+) runs the real script against a local release server through the test-mode hooks, with a throwaway Ed25519 key. It covers a good install, a wrong SHA-256, size+1 and size-1, a signature by another key, malformed feeds (url, folder, size, version, build, sha, signature), a VERSION that differs from the feed, an older release over a newer install, and a release server on a claude host. A sudo shim fails the test if sudo is ever called."
+    },
+    {
+     "finding": "Orchestrator O2: an account following split defaults (90/50) showed the equal-windows help sentence",
+     "closed": true,
+     "note": "limit_help (gui/model.py:276-305) works out each window through _leave_value. An account that follows a default takes that window's default from the same snapshot (defaults_of reads defaultSessionThreshold/defaultWeeklyThreshold, which protocol.py:797-798 sends). It no longer takes an effective value read separately, so split defaults get the two-window sentence."
+    }
+   ],
+   "findings": [],
+   "verdict": "No new P0 or P1. All 8 P0/P1 items in scope are closed: the 2 P1s in rereview-fl1-fl2, review-lc's 4 P1s, and orchestrator rows O1 and O2. O1 is closed in the code; its Ubuntu 24.04 CI result was not checked here, because GitHub was off-limits.\n\nSuite: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s linux/tests -t linux` ran 1670 tests, OK (skipped=2), exit 0, on Python 3.14.7. HEAD moved from d89b43a to e43a102 during the review. Only RELEASE_NOTES.md and docs/decisions/pixelswitch-2.0-2026-10-24.html changed, nothing under linux/.\n\nAnswers to the FL4 lens:\n\n1. **Post-write grace.** A switch now ends finished or rolled back, apart from cases that are not new:\n   - the rollback's 2 s wait for `.storage-write` times out;\n   - the CLI check fails after both files are written.\n\n   The grace adds at most about 4 s on top of the 10 s cap. The touch threads keep every lock fresh, so no lock comes near its stale limit (60/15/10 s).\n\n2. **Dirlock ownership.**\n   - **Removing a lock it did not create:** PixelSwitch cannot do this unless it is frozen for at least 60 s. The two already-known gaps remain (a pause between lstat and rmdir; a takeover with a reused inode during a touch on a filesystem with no birth time), and both need that freeze.\n   - **Own locks:** on whole-second filesystems they are judged at the granularity the filesystem reads back, so they are released. Nothing else changes a lock directory's mtime. Claude Code's contenders only stat it, and the owner record sits beside the directory, not in it.\n   - **Owner record:** `lockBirthtimeMs` uses the same float formula as Node, so it is bit-identical.\n\n3. **Self-check classification.**\n   - **Good build marked bad:** only for exception names not on the list (RecursionError, MemoryError, a name a later build renames). That is narrower than before, when every failure was bad.\n   - **Broken build retried:** a build whose import raises ValueError or OSError (for example a dataclass with a mutable default) counts as \"unrunnable\". It is downloaded again and fails every 6 h, but it is never installed and no login is touched. Not a P1.\n\n4. **Flip lock and stop.** Closes the two-fsync gap. A few milliseconds remain between SIGTERM reaching the daemon and `updater.stop(0.0)` raising the flag: on_signal logs, then sets shutdown, then the main loop wakes, then begin_shutdown runs. A restart asked for in that window can still replace the user's running stop job. This is the same P2, narrowed. Setting the updater flag inside on_signal would shrink the window further.\n\n5. **api.py.** No byte of a 3xx body is read on any followed hop. A refused hop closes the response. HTTPErrors carry the capped body. A 3xx that is not followed (no Location) still goes through the bounded `MAX_BODY_BYTES` read.\n\n6. **Network guard.**\n   - **False pass:** none found. getproxies returns {} and proxies are stripped, so every request reaches the socket checks. set_tunnel refuses blocked hosts, and scoped() captures only its own thread.\n   - **False failure (not a false pass, test infrastructure only, so not listed as a finding):** getproxies treats any environment variable ending in `_proxy` that `install()` does not strip as a violation. That includes NO_PROXY/no_proxy, FTP_PROXY and npm_config_proxy; on macOS a system proxy counts too. A clean run then exits 1. Probe: `NO_PROXY=localhost,127.0.0.1 python3 -m unittest tests.test_api_redirects` printed OK, then 'TEST NETWORK GUARD ... proxy('no')', exit 1. A CI runner or developer machine with NO_PROXY set would go red with a misleading message. Fix: ignore the 'no' key, or strip every `*_proxy` name.\n\nHousekeeping: my one `python3 -I` probe ignored PYTHONDONTWRITEBYTECODE and wrote linux/tests/__pycache__/{__init__,network_guard}.cpython-314.pyc (gitignored). I removed both files and that directory. git status is clean, nothing was edited or committed, no network was used, and no processes were left behind. Probe output is in /private/tmp/claude-501/-Users-ahamade-Documents-GitHub-pixelventures/71ac74c8-b531-4cc7-b4e9-8d6524a2e9e6/scratchpad/fl4probe/ and the suite log is /private/tmp/claude-501/-Users-ahamade-Documents-GitHub-pixelventures/71ac74c8-b531-4cc7-b4e9-8d6524a2e9e6/scratchpad/fl4final-suite.log."
+  }
+ }
+]
