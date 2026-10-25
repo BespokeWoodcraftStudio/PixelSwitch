@@ -322,6 +322,8 @@ final class AppState: ObservableObject {
         }
 
         accounts.append(account)
+        sortAccountsByPriority()
+        UserDefaults.standard.removeObject(forKey: removedLastAccountKey)
         saveAccounts()
         log.info("[addAccount] Account saved. Total accounts: \(self.accounts.count)")
         return account
@@ -550,6 +552,8 @@ final class AppState: ObservableObject {
                 accounts[i].isActive = false
             }
             accounts.append(account)
+            sortAccountsByPriority()
+            UserDefaults.standard.removeObject(forKey: removedLastAccountKey)
             activeAccount = account
             // A login is a deliberate account choice; grant it the same
             // auto-switch grace period a manual switch gets.
@@ -676,42 +680,152 @@ final class AppState: ObservableObject {
         log.info("[updateAccountLabel] Set label for \(account.email): \(trimmed ?? "nil")")
     }
 
-    // MARK: - Per-account threshold and priority order
+    // MARK: - Per-account thresholds and priority order
 
-    /// The rule value auto-switch uses for `account`: its own when set (0 =
-    /// Manual only, which the engine interprets), else the default from
-    /// Settings → General. Read from `accounts` by id, so a
-    /// stale copy (such as `activeAccount` held across an await) still gets
-    /// the value saved most recently.
-    func effectiveSwitchThreshold(for account: Account) -> Double {
+    /// The two global defaults as auto-switch reads them now (spec 2.2).
+    var windowDefaults: AutoSwitchEngine.WindowPair { AutoSwitchSettings.defaultPair }
+
+    /// `account`'s resolved rule: session and weekly limits, or Manual only.
+    /// Read from `accounts` by id, so a stale copy (such as `activeAccount` held
+    /// across an await) still gets the values saved most recently.
+    func windowRule(for account: Account) -> AutoSwitchEngine.WindowRule {
         let stored = accounts.first(where: { $0.id == account.id }) ?? account
-        return AutoSwitchSettings.effectiveThreshold(own: stored.switchThreshold,
-                                                     defaultThreshold: AutoSwitchSettings.defaultThreshold)
+        return AutoSwitchSettings.rule(for: stored, defaults: windowDefaults)
     }
 
-    /// Sets `account`'s own threshold, a whole number within 0–100 (0 = Manual
-    /// only); nil (or a value that is not a number) clears it back to the
-    /// default. Saves.
+    /// Where auto-switch moves the user off `account`, per window.
+    func leaveAt(for account: Account) -> AutoSwitchEngine.WindowPair {
+        AutoSwitchSettings.leaveAtPair(rule: windowRule(for: account), defaults: windowDefaults)
+    }
+
+    /// The single rule value the 1.9 callers (Views, Control) still read: 0 for
+    /// Manual only, else the lower of the account's two window limits. With
+    /// equal windows this is exactly what it always was. Callers move to
+    /// `windowRule(for:)` and `leaveAt(for:)`.
+    func effectiveSwitchThreshold(for account: Account) -> Double {
+        let rule = windowRule(for: account)
+        return rule.manualOnly ? AutoSwitchSettings.manualOnlyThreshold : min(rule.session, rule.weekly)
+    }
+
+    /// The three stored values a threshold write can change (D8's no-op check
+    /// compares all three, so a legacy write clears window values even when
+    /// the both-windows value is unchanged).
+    private func thresholdTriple(_ account: Account) -> [Double?] {
+        [account.switchThreshold, account.sessionThreshold, account.weeklyThreshold]
+    }
+
+    /// Stores `updated`'s three threshold values on the account at `index`, if
+    /// any differ. Saves. Does not re-evaluate auto-switch (by decision,
+    /// docs/decisions/2026-09-24-remote-control-answers.md:142).
+    @discardableResult
+    private func commitThresholds(_ updated: Account, at index: Int, described: String) -> Bool {
+        guard thresholdTriple(accounts[index]) != thresholdTriple(updated) else { return false }
+        accounts[index].switchThreshold = updated.switchThreshold
+        accounts[index].sessionThreshold = updated.sessionThreshold
+        accounts[index].weeklyThreshold = updated.weeklyThreshold
+        if accounts[index].isActive {
+            activeAccount = accounts[index]
+        }
+        saveAccounts()
+        log.info("[thresholds] \(accounts[index].id): \(described)")
+        return true
+    }
+
+    private func describe(_ account: Account) -> String {
+        func percent(_ value: Double?) -> String { value.map { String(format: "%.0f%%", $0) } ?? "default" }
+        if AutoSwitchSettings.isManualOnly(own: account.switchThreshold) { return "manual only" }
+        if account.sessionThreshold == nil, account.weeklyThreshold == nil { return percent(account.switchThreshold) }
+        return "session \(percent(account.sessionThreshold ?? account.switchThreshold)), weekly \(percent(account.weeklyThreshold ?? account.switchThreshold))"
+    }
+
+    /// Sets `account`'s own threshold for BOTH windows, a whole number within
+    /// 0–100 (0 = Manual only); nil (or a value that is not a number) clears it
+    /// back to the default. The legacy write (D8): it also clears the account's
+    /// window values, even when the both-windows value is unchanged. Saves.
     func setSwitchThreshold(_ threshold: Double?, for account: Account) {
         guard let index = accounts.firstIndex(where: { $0.id == account.id }) else {
             log.warning("[setSwitchThreshold] No account \(account.id)")
             return
         }
-        let value = AutoSwitchSettings.normalizedAccountThreshold(threshold)
-        guard accounts[index].switchThreshold != value else { return }
-        accounts[index].switchThreshold = value
-        if accounts[index].isActive {
-            activeAccount = accounts[index]
-        }
-        saveAccounts()
-        let described = value == AutoSwitchSettings.manualOnlyThreshold ? "manual only" : (value.map { String(format: "%.0f%%", $0) } ?? "default")
-        log.info("[setSwitchThreshold] \(account.id): \(described)")
+        let updated = AutoSwitchSettings.applyingBothWindows(threshold, to: accounts[index])
+        commitThresholds(updated, at: index, described: describe(updated))
     }
 
-    /// Puts the accounts list in the order `orderedIds` gives. That order is
-    /// the priority "My order" follows and the order every list shows.
-    /// Returns false, and changes nothing, unless `orderedIds` names every
-    /// current account exactly once.
+    /// Sets one or both of `account`'s window thresholds (spec 2.1). `.leave`
+    /// leaves a window alone, `.clear` makes it follow its default, `.set` gives
+    /// it its own whole number 1–100. Applies the split of the both-windows
+    /// value and the Manual only rules. False, and nothing changed, for an
+    /// unknown account or a `.set` value outside 1–100 once rounded.
+    @discardableResult
+    func setWindowThresholds(session: AutoSwitchSettings.WindowEdit = .leave, weekly: AutoSwitchSettings.WindowEdit = .leave,
+                             for account: Account) -> Bool {
+        guard let index = accounts.firstIndex(where: { $0.id == account.id }) else {
+            log.warning("[setWindowThresholds] No account \(account.id)")
+            return false
+        }
+        guard let updated = AutoSwitchSettings.applyingWindowEdits(to: accounts[index], session: session, weekly: weekly) else {
+            log.warning("[setWindowThresholds] Refused for \(account.id): a threshold must be 1–100")
+            return false
+        }
+        commitThresholds(updated, at: index, described: describe(updated))
+        return true
+    }
+
+    /// Settings only (spec 2.4): "Default" chosen in one window's menu. On a
+    /// Manual only account it clears Manual only and both windows follow their
+    /// defaults (1.9's Default); on any other it makes that window follow its
+    /// default. The control API's null leaves Manual only alone and does not call this.
+    func chooseDefaultThreshold(_ window: AutoSwitchEngine.Window, for account: Account) {
+        guard let index = accounts.firstIndex(where: { $0.id == account.id }) else { return }
+        if AutoSwitchSettings.isManualOnly(own: accounts[index].switchThreshold) {
+            commitThresholds(AutoSwitchSettings.clearingManualOnly(accounts[index]), at: index, described: "default (manual only cleared)")
+        } else {
+            setWindowThresholds(session: window == .session ? .clear : .leave,
+                                weekly: window == .weekly ? .clear : .leave, for: account)
+        }
+    }
+
+    /// Writes one global window default (Settings → General, `autoSwitch.sessionThreshold`
+    /// and `.weeklyThreshold`): a whole number within 50–100, or nil to follow
+    /// the base default again.
+    @discardableResult
+    func setDefaultWindowThreshold(_ window: AutoSwitchEngine.Window, to value: Double?) -> Bool {
+        let written = AutoSwitchSettings.setDefaultThreshold(window, to: value)
+        if written { log.info("[thresholds] Default \(window.rawValue) threshold: \(value.map { String(format: "%.0f%%", $0) } ?? "follows the base")") }
+        return written
+    }
+
+    /// Writes the base default (`autoSwitch.threshold`), 50–100, and removes both
+    /// window defaults, so a legacy "both" write is never held back by an old
+    /// window value (D8).
+    @discardableResult
+    func setBaseThreshold(_ value: Double) -> Bool {
+        let written = AutoSwitchSettings.setBaseThreshold(value)
+        if written { log.info("[thresholds] Base default threshold: \(String(format: "%.0f%%", value)); window defaults cleared") }
+        return written
+    }
+
+    /// Sets `account`'s priority number (1–99; nil clears it) and re-sorts the
+    /// list: among equal numbers the account set last goes first (spec D2).
+    /// False, and nothing changed, for an unknown account or a number outside 1–99.
+    @discardableResult
+    func setPriority(_ priority: Int?, for account: Account) -> Bool {
+        guard let updated = AccountOrder.settingPriority(priority, of: account.id, in: accounts) else {
+            log.warning("[setPriority] Refused for \(account.id): a priority is a whole number from 1 to 99, or none")
+            return false
+        }
+        if updated != accounts {
+            installAccounts(updated)
+            log.info("[setPriority] \(account.id): \(priority.map { "P\($0)" } ?? "none")")
+        }
+        return true
+    }
+
+    /// Puts the accounts list in the order `orderedIds` gives and numbers every
+    /// account from 1 in that order, replacing typed numbers (spec D3). That
+    /// order is the priority the Priority strategy follows and the order every
+    /// list shows. Returns false, and changes nothing, unless `orderedIds`
+    /// names every current account exactly once.
     @discardableResult
     func setAccountOrder(_ orderedIds: [UUID]) -> Bool {
         guard let reordered = AccountOrder.reordered(accounts, by: orderedIds) else {
@@ -722,21 +836,50 @@ final class AppState: ObservableObject {
         return true
     }
 
-    /// SwiftUI's `onMove` for the Settings → Accounts list. Saves.
+    /// Moves accounts as SwiftUI's `onMove` says (Settings → Accounts) and
+    /// renumbers every account from 1. Saves.
     func moveAccounts(fromOffsets source: IndexSet, toOffset destination: Int) {
         applyOrder(AccountOrder.moving(accounts, fromOffsets: source, toOffset: destination))
     }
 
     private func applyOrder(_ reordered: [Account]) {
-        guard reordered.map(\.id) != accounts.map(\.id) else { return }
-        accounts = reordered
-        // The widget lists accounts in this order too.
-        saveAccounts(refreshWidget: true)
-        log.info("[order] Accounts reordered: \(reordered.map { $0.id.uuidString.prefix(8) }.joined(separator: ", "))")
+        let numbered = AccountOrder.numberedInOrder(reordered)
+        guard numbered != accounts else { return }
+        installAccounts(numbered)
+        log.info("[order] Accounts reordered and numbered from 1: \(numbered.map { $0.id.uuidString.prefix(8) }.joined(separator: ", "))")
     }
 
+    /// Replaces the accounts list (already in the order it should have), keeps
+    /// `activeAccount` pointing at the fresh copy, and saves. The widget lists
+    /// accounts in this order too.
+    private func installAccounts(_ updated: [Account]) {
+        accounts = updated
+        if let current = activeAccount, let fresh = accounts.first(where: { $0.id == current.id }) { activeAccount = fresh }
+        saveAccounts(refreshWidget: true)
+    }
+
+    /// Keeps the list sorted by priority after anything appends to it (spec D3).
+    private func sortAccountsByPriority() {
+        let sorted = AccountOrder.sortedByPriority(accounts)
+        guard sorted.map(\.id) != accounts.map(\.id) else { return }
+        accounts = sorted
+    }
+
+    /// Set once the user removes their last account, so the next refresh does
+    /// not quietly make it again from the login Claude Code still holds (spec
+    /// D20). Cleared when any account is added. Kept across launches.
+    private let removedLastAccountKey = "ai.pixelventures.pixelswitch.removedLastAccount"
+
+    /// Removes `account` and its saved login. Removing the account Claude Code
+    /// is using also moves Claude Code to another one (spec D20, credentials
+    /// recon section 8, option A): nothing is marked active until its switch
+    /// has succeeded; if a switch fails the next account in `AccountOrder.fallbackOrder`
+    /// is tried; if none works, no account is active and the next refresh finds
+    /// out which one is live. Removing the last account leaves no active
+    /// account and does not recreate it from the live login.
     func removeAccount(_ account: Account) {
         log.info("[removeAccount] Removing account \(account.id)")
+        let wasActive = account.isActive || activeAccount?.id == account.id
         keychain.removeAccountBackup(forAccountId: account.id.uuidString)
         accounts.removeAll { $0.id == account.id }
         // Drop every per-account cache too, or a re-added account inherits the
@@ -747,16 +890,56 @@ final class AppState: ObservableObject {
         requestGuard.forget(account: account.id)
         readSoon.remove(account.id)
         persistNeedsReauth()
-        // The first remaining account that is not Manual only, else the first.
-        if account.isActive, let fallback = AccountOrder.fallback(from: accounts),
-           let index = accounts.firstIndex(where: { $0.id == fallback.id }) {
-            accounts[index].isActive = true
-            activeAccount = accounts[index]
-            log.info("[removeAccount] Removed active account, switching to \(fallback.id)")
-            Task { await switchTo(fallback) }
+        if wasActive {
+            // No remaining account is marked active until its switch succeeds
+            // (`performSwitch` marks it). `activeAccount` stays on the removed
+            // account for now: `performSwitch` needs a current account to leave,
+            // and the "already live" shortcut must not see the target as current.
+            for i in accounts.indices { accounts[i].isActive = false }
+            let fallbacks = AccountOrder.fallbackOrder(from: accounts)
+            if fallbacks.isEmpty {
+                activeAccount = nil
+                UserDefaults.standard.set(true, forKey: removedLastAccountKey)
+                log.info("[removeAccount] Removed the last account; no account is active")
+            } else {
+                log.info("[removeAccount] Removed active account; switching to the first of \(fallbacks.count) remaining")
+                Task { await switchAfterRemoval(of: account, candidates: fallbacks.map(\.id)) }
+            }
         }
-        saveAccounts()
+        saveAccounts(refreshWidget: true)
         log.info("[removeAccount] Done. Remaining accounts: \(self.accounts.count)")
+    }
+
+    /// Switches Claude Code to the first of `candidates` that works. A busy
+    /// switch or sign-in is waited out (a few seconds); any other failure moves
+    /// on to the next candidate. When none works, no account is active.
+    private func switchAfterRemoval(of removed: Account, candidates: [UUID]) async {
+        for id in candidates {
+            guard let target = accounts.first(where: { $0.id == id }) else { continue }
+            var attempts = 0
+            while true {
+                do {
+                    try await performSwitch(to: target)
+                    // Success, or "already live" (which adopts the account).
+                    if activeAccount?.id == target.id { return }
+                    break
+                } catch let error as ActionError where error.kind == .busy && attempts < 5 {
+                    attempts += 1
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    continue
+                } catch {
+                    log.warning("[removeAccount] Switch to \(id) after removing \(removed.id) failed; trying the next account")
+                    break
+                }
+            }
+        }
+        // Only if nothing else made another account active meanwhile.
+        if activeAccount?.id == removed.id {
+            activeAccount = nil
+            for i in accounts.indices { accounts[i].isActive = false }
+            saveAccounts()
+            log.warning("[removeAccount] No remaining account could be switched to; no account is active")
+        }
     }
 
     /// The popover's Switch and double-click, and auto-switch.
@@ -943,7 +1126,15 @@ final class AppState: ObservableObject {
         case .storeUnavailable:
             return .failure(SwitchProblem(message: String(localized: "Credential storage is temporarily unavailable. Try again shortly.", bundle: L10n.bundle)))
         }
-        guard var login = CredentialOwnership.login(fromCredential: backup.token) else { return .success(backup) }
+        // Spec D12: a saved login that is not a usable login is never written to
+        // Claude Code's live store; it fails with the re-sign message instead.
+        if let reason = LoginGate.targetProblem(backupToken: backup.token) {
+            log.error("[switchTo] ABORT: \(account.id)'s saved login is not a usable login (\(reason))")
+            return .failure(SwitchProblem(message: String(localized: "The saved login for \(account.email) has expired and could not be renewed. Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)))
+        }
+        guard var login = CredentialOwnership.login(fromCredential: backup.token) else {
+            return .failure(SwitchProblem(message: String(localized: "The saved login for \(account.email) has expired and could not be renewed. Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle)))
+        }
 
         let notRenewable = SwitchProblem(message: String(localized: "The saved login for \(account.email) has expired and could not be renewed. Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle))
         var identity: ClaudeService.AccountIdentity?
@@ -1113,11 +1304,13 @@ final class AppState: ObservableObject {
     /// backup token and not be flagged expired (an expired backup would fail the
     /// switch verification, or silently swap in a dead session).
     func isSwitchable(_ account: Account) -> Bool {
-        guard keychain.getAccountBackup(forAccountId: account.id.uuidString) != nil else { return false }
-        // The server refused its refresh grant: switching would write a dead login.
-        if requestGuard.isNeedsReauth(account.id) { return false }
-        if let error = accountUsageErrors[account.id], error.isExpired { return false }
-        return true
+        // The backup must exist and be a usable login (spec D12: a blank token or
+        // a missing claudeAiOauth would sign Claude Code out), the server must not
+        // have refused its refresh grant, and its card must not say it expired.
+        LoginGate.isSwitchable(
+            backupToken: keychain.getAccountBackup(forAccountId: account.id.uuidString)?.token,
+            needsReauth: requestGuard.isNeedsReauth(account.id),
+            cardSaysLoginExpired: accountUsageErrors[account.id]?.isExpired == true)
     }
 
     /// Whether the account's last usage request was refused for want of an
@@ -1131,8 +1324,8 @@ final class AppState: ObservableObject {
     /// Evaluate whether auto-switch should move the user, and if so where.
     /// Called after every completed refresh. Safe to call repeatedly.
     ///
-    /// Two rules can fire (`AutoSwitchEngine.plan`): the active account
-    /// reaching ITS OWN threshold on a watched limit (session/weekly, then
+    /// Two rules can fire (`AutoSwitchEngine.planWindowed`): the active account
+    /// reaching ITS OWN limit on a watched window (session or weekly, then
     /// Fable), or, with "Resets soonest" and early switching on, another
     /// account's weekly quota about to reset unused. Candidates are ordered by
     /// the user's strategy.
@@ -1164,15 +1357,16 @@ final class AppState: ObservableObject {
         let drainEarly = AutoSwitchSettings.drainEarly
         let drainWithin = AutoSwitchSettings.drainWithinHours * 3600
         let watchFable = autoSwitchOnFable
-        guard let plan = AutoSwitchEngine.plan(
+        let defaults = windowDefaults
+        guard let plan = AutoSwitchEngine.planWindowed(
             active: active,
             candidates: candidates,
             usageByAccount: accountUsage,
             isSwitchable: { [unowned self] in self.isSwitchable($0) },
             isUnusable: { [unowned self] in self.hasNoSubscription($0) },
             activeSampledThisCycle: activeSampledThisCycle,
-            threshold: { [unowned self] in self.effectiveSwitchThreshold(for: $0) },
-            defaultThreshold: AutoSwitchSettings.defaultThreshold,
+            rule: { [unowned self] in self.windowRule(for: $0) },
+            defaults: defaults,
             hysteresisPct: AutoSwitchEngine.hysteresis,
             watchFable: watchFable,
             strategy: strategy,
@@ -1189,6 +1383,7 @@ final class AppState: ObservableObject {
         lastStayingPutNote = nil
         let limit = plan.limit
         let trigger = plan.trigger
+        let relaxed = plan.relaxed
         let ranked = plan.targets
         // The active account's weekly reset as the plan saw it. A drain target
         // must still reset before it when its fresh reading is checked.
@@ -1197,14 +1392,24 @@ final class AppState: ObservableObject {
         isEvaluatingAutoSwitch = true
         defer { isEvaluatingAutoSwitch = false }
 
-        let activeUtil = AutoSwitchEngine.utilization(accountUsage[active.id], limit: limit) ?? -1
-        let activeRule = effectiveSwitchThreshold(for: active)
-        let activeThreshold = AutoSwitchSettings.leaveAtThreshold(rule: activeRule, defaultThreshold: AutoSwitchSettings.defaultThreshold)
-        let manualNote = activeRule == AutoSwitchSettings.manualOnlyThreshold ? ", manual only: left at the default" : ""
+        let activeRule = windowRule(for: active)
+        let leave = AutoSwitchSettings.leaveAtPair(rule: relaxed ? activeRule.relaxed : activeRule,
+                                                   defaults: relaxed ? defaults.relaxed : defaults)
+        let manualNote = activeRule.manualOnly ? ", manual only: left at the default" : ""
+        let relaxedNote = relaxed ? "; no account under its weekly limit can take you, so the session limit decides" : ""
         if trigger == .noSubscription {
-            log.info("[autoSwitch] Rule \(trigger.rawValue), strategy \(strategy.rawValue): active \(active.id) has no active subscription; \(ranked.count) candidate(s)")
+            log.info("[autoSwitch] Rule \(trigger.rawValue), strategy \(strategy.rawValue): active \(active.id) has no active subscription; \(ranked.count) candidate(s)\(relaxedNote)")
         } else {
-            log.info("[autoSwitch] Rule \(trigger.rawValue), strategy \(strategy.rawValue): active \(active.id) at \(String(format: "%.0f", activeUtil))% on \(limit.rawValue) (its threshold \(String(format: "%.0f", activeThreshold))%\(manualNote)); \(ranked.count) candidate(s)")
+            let activeUtil: Double
+            let onWhat: String
+            if let window = plan.window {
+                activeUtil = AutoSwitchEngine.windowUtilization(accountUsage[active.id], window: window, requireKnownWindow: !activeSampledThisCycle) ?? -1
+                onWhat = "\(limit.rawValue) (\(window.rawValue) window)"
+            } else {
+                activeUtil = AutoSwitchEngine.utilization(accountUsage[active.id], limit: limit) ?? -1
+                onWhat = limit.rawValue
+            }
+            log.info("[autoSwitch] Rule \(trigger.rawValue), strategy \(strategy.rawValue): active \(active.id) at \(String(format: "%.0f", activeUtil))% on \(onWhat) (\(Self.limitsText(leave))\(manualNote)); \(ranked.count) candidate(s)\(relaxedNote)")
         }
 
         // At most ONE fresh verification request per evaluation. Later ranked
@@ -1227,20 +1432,22 @@ final class AppState: ObservableObject {
                 continue
             }
 
-            // The same rule, with the same per-account threshold, that ranked it.
-            let targetThreshold = effectiveSwitchThreshold(for: target)
-            guard let verifiedUtil = AutoSwitchEngine.eligibleUtilization(
-                usage, limit: limit, trigger: trigger,
-                threshold: targetThreshold, hysteresisPct: AutoSwitchEngine.hysteresis,
+            // The same rule, with the same per-account limits and in the same
+            // mode (strict or relaxed), that ranked it.
+            let targetRule = windowRule(for: target)
+            guard let verified = AutoSwitchEngine.eligibleWindowed(
+                usage, limit: limit, trigger: trigger, rule: targetRule, relaxed: relaxed,
+                hysteresisPct: AutoSwitchEngine.hysteresis,
                 activeWeeklyReset: activeWeeklyReset, drainWithin: drainWithin, watchFable: watchFable
             ) else {
-                if targetThreshold == AutoSwitchSettings.manualOnlyThreshold {
+                if targetRule.manualOnly {
                     log.info("[autoSwitch] Candidate \(target.id) is manual only now; trying next")
                     continue
                 }
                 let onLimit = AutoSwitchEngine.utilization(usage, limit: limit).map { String(format: "%.0f%%", $0) } ?? "no reading"
                 let onWindows = AutoSwitchEngine.bindingUtilization(usage).map { String(format: "%.0f%%", $0) } ?? "no reading"
-                log.info("[autoSwitch] Candidate \(target.id) failed verification for \(trigger.rawValue) (\(limit.rawValue) \(onLimit), windows \(onWindows), its threshold \(String(format: "%.0f", targetThreshold))%); trying next")
+                let targetLeave = AutoSwitchSettings.leaveAtPair(rule: relaxed ? targetRule.relaxed : targetRule, defaults: defaults)
+                log.info("[autoSwitch] Candidate \(target.id) failed verification for \(trigger.rawValue) (\(limit.rawValue) \(onLimit), windows \(onWindows), \(Self.limitsText(targetLeave, prefix: "its")))\(relaxed ? " in the weekly overflow pass" : ""); trying next")
                 continue
             }
 
@@ -1253,14 +1460,16 @@ final class AppState: ObservableObject {
                 return
             }
 
-            log.info("[autoSwitch] Switching to \(target.id) by rule \(trigger.rawValue) on \(limit.rawValue), verified at \(String(format: "%.0f", verifiedUtil))%")
+            let verifiedUtil = verified.value(for: limit) ?? -1
+            log.info("[autoSwitch] Switching to \(target.id) by rule \(trigger.rawValue) on \(limit.rawValue), verified at \(String(format: "%.0f", verifiedUtil))%\(relaxedNote)")
             lastAutoSwitchAt = Date()
             // switchTo() calls refresh() -> evaluateAutoSwitch() again, but the
             // re-entrancy flag + the freshly-set cooldown make that a no-op.
             // The active account visibly changes in the menu bar as feedback.
             await switchTo(target)
             if activeAccount?.id == target.id {
-                lastAutoSwitch = AutoSwitchRecord(from: active.id, to: target.id, limit: limit, trigger: trigger, at: Date())
+                lastAutoSwitch = AutoSwitchRecord(from: active.id, to: target.id, limit: limit, trigger: trigger,
+                                                  window: plan.window, relaxed: relaxed, at: Date())
             } else {
                 log.warning("[autoSwitch] Switch to \(target.id) did not complete")
             }
@@ -1273,22 +1482,46 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Log, once per change, that the active account has reached its threshold
-    /// but no other account has room: before 1.7 this state logged nothing, so
-    /// a stuck auto-switch looked the same as one that had nothing to do.
+    /// "its threshold 98%" when both windows leave at the same number (the 1.9
+    /// wording, kept for log readers), else "its limits 90% session, 50% weekly".
+    private static func limitsText(_ pair: AutoSwitchEngine.WindowPair, prefix: String = "its") -> String {
+        if pair.session == pair.weekly { return String(format: "\(prefix) threshold %.0f%%", pair.session) }
+        return String(format: "\(prefix) limits %.0f%% session, %.0f%% weekly", pair.session, pair.weekly)
+    }
+
+    /// Log, once per change, that the active account has reached a limit but no
+    /// other account has room: before 1.7 this state logged nothing, so a stuck
+    /// auto-switch looked the same as one that had nothing to do. Names the
+    /// window. When the weekly overflow holds and even the relaxed plan found
+    /// nobody (spec 2.3 rule 10), says the account stays until the session limit.
     private func noteStayingPut(_ active: Account, sampledThisCycle: Bool, watchFable: Bool) {
-        let threshold = AutoSwitchSettings.leaveAtThreshold(rule: effectiveSwitchThreshold(for: active),
-                                                            defaultThreshold: AutoSwitchSettings.defaultThreshold)
-        let reached = (watchFable ? [AutoSwitchEngine.Limit.windows, .fable] : [.windows]).compactMap { limit -> String? in
-            guard let util = AutoSwitchEngine.utilization(accountUsage[active.id], limit: limit, requireKnownWindow: !sampledThisCycle),
-                  util >= threshold else { return nil }
-            return "\(String(format: "%.0f", util))% on \(limit.rawValue)"
+        let rule = windowRule(for: active)
+        let defaults = windowDefaults
+        let leave = AutoSwitchSettings.leaveAtPair(rule: rule, defaults: defaults)
+        let usage = accountUsage[active.id]
+        var reached: [String] = []
+        for window in AutoSwitchEngine.Window.allCases {
+            if let util = AutoSwitchEngine.windowUtilization(usage, window: window, requireKnownWindow: !sampledThisCycle),
+               util >= leave.value(for: window) {
+                reached.append("\(String(format: "%.0f", util))% on the \(window.rawValue) window")
+            }
+        }
+        if watchFable, AutoSwitchEngine.fableReached(usage, leaveAt: leave, requireKnownWindow: !sampledThisCycle),
+           let fable = AutoSwitchEngine.utilization(usage, limit: .fable, requireKnownWindow: !sampledThisCycle) {
+            reached.append("\(String(format: "%.0f", fable))% on fable")
         }
         guard !reached.isEmpty else {
             lastStayingPutNote = nil
             return
         }
-        let note = "[autoSwitch] Active \(active.id) at \(reached.joined(separator: ", ")) (its threshold \(String(format: "%.0f", threshold))%), but no other account has room under its own threshold; staying put"
+        let overflow = AutoSwitchEngine.overflowHolds(activeUnusable: false, activeUsage: usage, activeRule: rule, defaults: defaults,
+                                                      activeSampledThisCycle: sampledThisCycle)
+        let note: String
+        if overflow {
+            note = "[autoSwitch] Active \(active.id) at \(reached.joined(separator: ", ")) (\(Self.limitsText(leave))), but no account under its weekly limit can take you; staying until the session limit (\(String(format: "%.0f", leave.session))%)"
+        } else {
+            note = "[autoSwitch] Active \(active.id) at \(reached.joined(separator: ", ")) (\(Self.limitsText(leave))), but no other account has room under its own limits; staying put"
+        }
         if note != lastStayingPutNote {
             log.info(note)
             lastStayingPutNote = note
@@ -1599,6 +1832,14 @@ final class AppState: ObservableObject {
             return .storeUnavailable
         }
 
+        // A saved login that is not a usable login (spec D12) has nothing to
+        // renew with: the account must sign in again. Said before the store probe
+        // below, which now refuses to save such a login.
+        if let reason = CredentialOwnership.unusableReason(credential: backup.token) {
+            log.warning("[refreshBackup] \(account.id)'s saved login is not a usable login (\(reason)); it must sign in again")
+            return .grantRejected
+        }
+
         // Never spend a refresh token that is not provably this account's own.
         // If the same grant is live or saved under another account, refreshing
         // it here rotates that account's refresh token and can sign its running
@@ -1663,6 +1904,17 @@ final class AppState: ObservableObject {
         // for Claude Code) is never a target, and its card says why.
         var pollable: [Account] = []
         for account in accounts {
+            // Spec D12: a saved login that is not a usable login is never asked
+            // about; its card says to sign in again and it is not switchable.
+            if !account.isActive, let backup = keychain.getAccountBackup(forAccountId: account.id.uuidString),
+               !CredentialOwnership.isUsableLogin(credential: backup.token) {
+                if requestGuard.isNeedsReauth(account.id) {
+                    showNotice(.needsReauth, for: account)
+                } else {
+                    flagNeedsReauth(account)
+                }
+                continue
+            }
             guard let login = usageLogin(for: account) else {
                 if requestGuard.isNeedsReauth(account.id) {
                     showNotice(.needsReauth, for: account)
@@ -1827,7 +2079,9 @@ final class AppState: ObservableObject {
             UserDefaults.standard.removeObject(forKey: "migratedFromCCSwitcher")
             log.info("[loadAccounts] Current key is populated; removed the redundant legacy key")
         }
-        accounts = decoded
+        // Always kept sorted by priority (spec D3), so a list saved by 1.9, or
+        // one edited elsewhere, comes up in priority order.
+        accounts = AccountOrder.sortedByPriority(decoded)
         activeAccount = accounts.first(where: \.isActive)
         log.info("[loadAccounts] Loaded \(decoded.count) accounts\(cameFromLegacyKey ? " from the legacy key" : "")")
         // Write them under the current key straight away, so the fallback is
@@ -1867,7 +2121,7 @@ final class AppState: ObservableObject {
             activeAccount = accounts[index]
             saveAccounts()
             log.info("[updateActiveAccount] Matched existing account at index \(index)")
-        } else if accounts.isEmpty {
+        } else if accounts.isEmpty, !UserDefaults.standard.bool(forKey: removedLastAccountKey) {
             let account = Account(
                 email: email,
                 displayName: status.orgName ?? email,
@@ -1892,5 +2146,9 @@ final class AppState: ObservableObject {
 struct AutoSwitchRecord: Equatable, Sendable {
     let from: UUID; let to: UUID
     let limit: AutoSwitchEngine.Limit; let trigger: AutoSwitchEngine.Trigger
+    /// Which window fired (only for a threshold on `.windows`), 2.0.
+    let window: AutoSwitchEngine.Window?
+    /// Made by the weekly overflow pass (spec 2.3 rule 9), 2.0.
+    let relaxed: Bool
     let at: Date
 }

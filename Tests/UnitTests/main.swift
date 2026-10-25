@@ -590,6 +590,9 @@ do {
 }
 
 runAutoSwitchRulesTests()
+runConformanceTests()
+runTwoWindowTests()
+runLoginSafetyTests()
 runSignInTests()
 runControlTests()
 runAutoUpdateTests()
