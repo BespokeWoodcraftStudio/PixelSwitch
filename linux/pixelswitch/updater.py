@@ -64,6 +64,17 @@ STAGING_NAME = re.compile(r"\.update-([0-9]+)-[0-9]+\Z")
 STOP_JOIN_SECONDS = 5.0
 VERSION_DIR = re.compile(r"([0-9]{1,6}\.[0-9]{1,6})-([0-9]{1,9})\Z")
 SELF_CHECK_LINE = re.compile(r"pixelswitchd ([0-9]+\.[0-9]+) \(build ([0-9]+)\)")
+#: What ``pixelswitchd --self-check`` prints on stderr when it fails (daemon.self_check): the error's type name.
+SELF_CHECK_FAILURE = re.compile(r"pixelswitchd self-check failed: ([A-Za-z_][A-Za-z0-9_.]*):")
+#: Self-check failures that say something about the USER'S machine or files, not about the build: a settings,
+#: accounts or saved-logins file that cannot be read or parsed right now (a hand edit, a full disk, a
+#: permission change), or a test-mode setup problem. Such a build is tried again at the next check. A failed
+#: import, a missing or mismatched VERSION, or a crash (anything not named here) is the build's own.
+SELF_CHECK_ENVIRONMENT_ERRORS = frozenset({
+    "ValueError", "JSONDecodeError", "UnicodeDecodeError", "OSError", "PermissionError", "FileNotFoundError",
+    "IsADirectoryError", "NotADirectoryError", "BlockingIOError", "TimeoutError", "AccountsFormatError",
+    "FileSafetyError", "TestModeError",
+})
 
 
 @dataclass(frozen=True)
@@ -234,6 +245,10 @@ class Updater:
         self._manual = False
         self._thread: threading.Thread | None = None
         self._busy = threading.Lock()
+        #: Held from the last stop check through the restart request, and by :meth:`stop` after it raises the
+        #: flag: a stop lands either before the flip (nothing is restarted) or after the restart was asked for.
+        self._flip_lock = threading.Lock()
+        self._flip_thread: int | None = None
         self._bad_logged: set[int] = set()
 
     # -- the schedule ------------------------------------------------------------------------------------------
@@ -249,6 +264,10 @@ class Updater:
         """Ends the schedule and abandons a download or self-check in progress (both poll this flag)."""
         self._stop.set()
         self._wake.set()
+        # Wait out a flip-and-restart that is already under way (a few milliseconds: two symlink replaces
+        # and the request to systemd), so the caller goes on only once no new restart can still be asked for.
+        if self._flip_thread != threading.get_ident() and self._flip_lock.acquire(timeout=max(0.0, timeout)):
+            self._flip_lock.release()
         thread = self._thread
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=max(0.0, timeout))
@@ -419,6 +438,16 @@ class Updater:
                 self._log.info("[update] Installed, but PixelSwitch stayed busy; the flip waits for the next check")
                 return UpdateOutcome("waiting", "busy", feed.version, feed.build)
             self._sleep(5.0)
+        with self._flip_lock:
+            self._flip_thread = threading.get_ident()
+            try:
+                return self._flip_and_restart(feed, name)
+            finally:
+                self._flip_thread = None
+
+    def _flip_and_restart(self, feed, name: str) -> UpdateOutcome:
+        """The last stop check, the flip of ``previous`` and ``current`` and the restart request, all under
+        ``_flip_lock`` (the caller holds it)."""
         if self._stop.is_set():
             return UpdateOutcome("waiting", "stopping", feed.version, feed.build)
         # Flip `current` only now, immediately before the restart.
@@ -430,6 +459,12 @@ class Updater:
         except OSError as error:
             self._log.error(f"[update] Could not point current at the new version ({type(error).__name__})")
             return UpdateOutcome("failed", "flip", feed.version, feed.build)
+        if self._stop.is_set():
+            # A stop arrived while `current` was being flipped: the daemon is going down on the user's (or the
+            # uninstaller's) word, and a restart now would undo it. The new version runs at the next start.
+            self._log.info(f"[update] Version {feed.version} (build {feed.build}) is current; not restarting, "
+                           "PixelSwitch is being stopped")
+            return UpdateOutcome("waiting", "stopping", feed.version, feed.build)
         self._log.info(f"[update] Version {feed.version} (build {feed.build}) is current; restarting")
         self._restart()
         return UpdateOutcome("installed", "", feed.version, feed.build)
@@ -438,7 +473,12 @@ class Updater:
         """``python3 -I <new>/bin/pixelswitchd --self-check``: exit 0 and the feed's version and build.
         Returns ``ok``; ``bad`` (it ran and failed, or it is not there: this build is remembered);
         ``unrunnable`` (python could not be started or it timed out: not the build's fault, tried
-        again at the next check); or ``stopped`` (the daemon is shutting down)."""
+        again at the next check); or ``stopped`` (the daemon is shutting down).
+
+        Only a failure that is the BUILD's fault is ``bad``, because that is remembered for good: a child
+        killed by a signal (the OOM killer on a loaded machine), a timeout, and a self-check that failed
+        because the user's own settings, accounts or saved-logins file could not be read right now are
+        ``unrunnable``, and the build gets another chance at the next check."""
         script = os.path.join(target, "bin", "pixelswitchd")
         if not os.path.isfile(script):
             self._log.warning("[update] The update has no bin/pixelswitchd")
@@ -453,7 +493,7 @@ class Updater:
         give_up = time.monotonic() + SELF_CHECK_TIMEOUT
         while True:
             try:
-                stdout, _stderr = child.communicate(timeout=0.25)
+                stdout, stderr = child.communicate(timeout=0.25)
                 break
             except subprocess.TimeoutExpired:
                 stopped = self._stop.is_set()
@@ -464,7 +504,17 @@ class Updater:
                         return "stopped"
                     self._log.warning("[update] The update's self-check timed out")
                     return "unrunnable"
+        if child.returncode < 0:
+            self._log.warning(f"[update] The update's self-check was ended by signal {-child.returncode}; "
+                              "that is not held against the build")
+            return "unrunnable"
         match = SELF_CHECK_LINE.search(stdout)
+        if child.returncode != 0:
+            failure = SELF_CHECK_FAILURE.search(stderr or "")
+            if failure is not None and failure.group(1).rsplit(".", 1)[-1] in SELF_CHECK_ENVIRONMENT_ERRORS:
+                self._log.warning(f"[update] The update's self-check could not read one of your files "
+                                  f"({failure.group(1)}); that is not held against the build")
+                return "unrunnable"
         if child.returncode != 0 or match is None or match.group(1) != feed.version or int(match.group(2)) != feed.build:
             self._log.warning(f"[update] The update's self-check failed (exit {child.returncode})")
             return "bad"

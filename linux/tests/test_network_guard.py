@@ -1,11 +1,14 @@
 """The guard that fails the whole suite if a test reaches anthropic.com, claude.com or github.com."""
 from __future__ import annotations
 
+import http.client
 import os
 import socket
 import subprocess
 import sys
 import unittest
+import urllib.request
+from unittest import mock
 
 from . import network_guard
 from .lb_support import tmpdir
@@ -31,17 +34,68 @@ class GuardTests(unittest.TestCase):
             self.assertFalse(network_guard.blocked(host), host)
 
     def test_a_connection_attempt_is_refused_and_recorded_without_any_network_traffic(self):
-        self.addCleanup(network_guard.clear)
-        before = len(network_guard.violations)
-        for attempt in (lambda: socket.create_connection(("api.anthropic.com", 443), timeout=1),
-                        lambda: socket.getaddrinfo("github.com", 443),
-                        lambda: socket.gethostbyname("claude.com"),
-                        lambda: self.sock().connect(("console.anthropic.com", 443)),
-                        lambda: self.sock().connect_ex(("github.com", 443))):
+        """The five deliberate refusals go into this test's OWN recorder: what other tests recorded before it
+        is neither read nor erased (review FL1/FL2 re-review: ``clear`` wiped every earlier violation)."""
+        before = list(network_guard.violations)
+        with network_guard.scoped() as mine:
+            for attempt in (lambda: socket.create_connection(("api.anthropic.com", 443), timeout=1),
+                            lambda: socket.getaddrinfo("github.com", 443),
+                            lambda: socket.gethostbyname("claude.com"),
+                            lambda: self.sock().connect(("console.anthropic.com", 443)),
+                            lambda: self.sock().connect_ex(("github.com", 443))):
+                with self.assertRaises(OSError):
+                    attempt()
+        self.assertEqual(len(mine), 5)
+        self.assertEqual(network_guard.violations, before, "the run-wide list is exactly as it was")
+
+    def test_a_violation_recorded_before_the_guard_test_still_fails_the_run(self):
+        code = ("import sys\nsys.path.insert(0, %r)\nfrom tests import network_guard\nimport socket\n"
+                "try:\n    socket.getaddrinfo('api.anthropic.com', 443)\nexcept OSError:\n    pass\n"
+                "with network_guard.scoped() as mine:\n"
+                "    for host in ('github.com', 'claude.com'):\n"
+                "        try:\n            socket.getaddrinfo(host, 443)\n        except OSError:\n            pass\n"
+                "print('own recorder holds', len(mine))\n" % LINUX_DIR)
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("own recorder holds 2", done.stdout)
+        self.assertIn("api.anthropic.com", done.stderr)
+        self.assertNotIn("getaddrinfo('github.com')", done.stderr, "the self-test's own refusals are not reported")
+
+    def test_a_violation_from_another_thread_is_not_swallowed_by_a_scope(self):
+        code = ("import sys, threading\nsys.path.insert(0, %r)\nfrom tests import network_guard\nimport socket\n"
+                "def other():\n    try:\n        socket.getaddrinfo('api.anthropic.com', 443)\n    except OSError:\n        pass\n"
+                "with network_guard.scoped():\n    worker = threading.Thread(target=other)\n    worker.start()\n    worker.join()\n"
+                % LINUX_DIR)
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 1, done.stderr)
+
+    def test_a_proxy_in_the_environment_is_removed_and_a_proxy_set_later_fails_closed(self):
+        environment = dict(os.environ, HTTPS_PROXY="http://127.0.0.1:9", https_proxy="http://127.0.0.1:9",
+                           ALL_PROXY="socks5://127.0.0.1:9", http_proxy="http://127.0.0.1:9")
+        code = ("import os, sys, urllib.request\nsys.path.insert(0, %r)\nfrom tests import network_guard\n"
+                "print(sorted(k for k in os.environ if k.lower().endswith('_proxy')))\n"
+                "print(urllib.request.ProxyHandler().proxies)\n"
+                "print(sorted(network_guard.stripped_proxy_variables))\n"
+                "os.environ['https_proxy'] = 'http://127.0.0.1:9'\n"
+                "print(urllib.request.ProxyHandler().proxies)\n" % LINUX_DIR)
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, env=environment)
+        lines = done.stdout.splitlines()
+        self.assertEqual(lines[0], "[]", "none left for this process or its children")
+        self.assertEqual(lines[1], "{}")
+        self.assertEqual(lines[2], "['ALL_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']")
+        self.assertEqual(lines[3], "{}", "a proxy configured later is never used")
+        self.assertEqual(done.returncode, 1, "and is a violation: " + done.stderr)
+        self.assertIn("proxy('https')", done.stderr)
+
+    def test_a_proxy_path_cannot_carry_a_blocked_host(self):
+        with network_guard.scoped() as mine, mock.patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:9"}):
+            self.assertEqual(urllib.request.getproxies(), {})
+            self.assertEqual(urllib.request.ProxyHandler().proxies, {})
+            connection = http.client.HTTPSConnection("127.0.0.1", 9)
             with self.assertRaises(OSError):
-                attempt()
-        self.assertEqual(len(network_guard.violations) - before, 5)
-        network_guard.clear()  # these were deliberate: the run must not fail because of them
+                connection.set_tunnel("api.anthropic.com", 443)
+            connection.set_tunnel("example.invalid", 443)
+        self.assertEqual(mine, ["proxy('https')", "proxy('https')", "set_tunnel('api.anthropic.com')"])
 
     def test_localhost_and_unix_sockets_are_not_touched(self):
         server = socket.socket()

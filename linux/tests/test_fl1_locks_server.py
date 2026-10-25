@@ -2,6 +2,7 @@
 server's subscribe ordering and socket ownership, and the control API's notFound for a vanished account."""
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -24,6 +25,14 @@ from .test_control_api import Api
 LOG = Log(None).category("test")
 
 
+def no_birth_time():
+    """A filesystem that keeps no creation time (ext4 with 128-byte inodes, ext3, some network mounts)."""
+    stack = contextlib.ExitStack()
+    stack.enter_context(mock.patch.object(dirlock, "birth_time_ns", lambda path: None))
+    stack.enter_context(mock.patch.object(dirlock, "birth_time_ms", lambda path: None))
+    return stack
+
+
 class OwnershipTests(unittest.TestCase):
     """LB review, dirlock.py:314: ext4 reuses a freed inode at once, so the inode alone is not proof."""
 
@@ -39,8 +48,8 @@ class OwnershipTests(unittest.TestCase):
         lock.try_acquire()
         if lock.birth_ms is None:
             self.skipTest("no birth time on this filesystem")
-        real = dirlock.birth_time_ms
-        with mock.patch.object(dirlock, "birth_time_ms", lambda path: real(path) + 5000):   # recreated later
+        real = dirlock.birth_time_ns
+        with mock.patch.object(dirlock, "birth_time_ns", lambda path: real(path) + 5_000_000_000):   # recreated later
             with self.assertRaises(LockLost):
                 lock.check()
             lock.release()
@@ -53,13 +62,13 @@ class OwnershipTests(unittest.TestCase):
         if lock.birth_ms is None:
             lock.release()
             self.skipTest("no birth time on this filesystem")
-        real = dirlock.birth_time_ms
-        with mock.patch.object(dirlock, "birth_time_ms", lambda path: real(path) + 5000):
+        real = dirlock.birth_time_ns
+        with mock.patch.object(dirlock, "birth_time_ns", lambda path: real(path) + 5_000_000_000):
             self.assertTrue(wait_until(lambda: lock.compromised))
         lock.release()
 
     def test_without_a_birth_time_the_mtime_we_last_set_is_the_proof(self):
-        with mock.patch.object(dirlock, "birth_time_ms", lambda path: None):
+        with no_birth_time():
             lock = self.lock()
             lock.try_acquire()
             lock.check()                                      # ours: mtime is the one we set
@@ -70,11 +79,170 @@ class OwnershipTests(unittest.TestCase):
             self.assertTrue(os.path.isdir(self.path), "not removed: it is not provably ours")
 
     def test_without_a_birth_time_our_own_directory_is_released(self):
-        with mock.patch.object(dirlock, "birth_time_ms", lambda path: None):
+        with no_birth_time():
             lock = self.lock()
             lock.try_acquire()
             lock.release()
             self.assertFalse(os.path.exists(self.path))
+
+    def test_a_birth_time_one_millisecond_away_with_the_same_inode_is_not_ours(self):
+        """CI run 40162811377 (Ubuntu 24.04): a directory removed and re-made within 2 ms kept the old inode
+        and passed the 2 ms tolerance. Ownership is exact now, so a millisecond (or a nanosecond) off is foreign."""
+        for offset in (1_000_000, 1, -1):
+            with self.subTest(offset_ns=offset):
+                lock = self.lock()
+                lock.try_acquire()
+                if lock.birth_ms is None:
+                    lock.release()
+                    self.skipTest("no birth time on this filesystem")
+                real = dirlock.birth_time_ns
+                inode = os.lstat(self.path).st_ino
+                with mock.patch.object(dirlock, "birth_time_ns", lambda path, real=real, offset=offset: real(path) + offset):
+                    self.assertEqual(os.lstat(self.path).st_ino, inode, "the same inode number")
+                    with self.assertRaises(LockLost):
+                        lock.check()
+                    self.assertTrue(lock.compromised)
+                    lock.release()
+                self.assertTrue(os.path.isdir(self.path), "release left the lock it did not create")
+                os.rmdir(self.path)
+
+    def test_a_remake_in_the_same_clock_tick_is_not_ours_even_with_the_same_inode_and_birth_time(self):
+        """Older kernels (Ubuntu 24.04's 6.8) stamp a new directory's creation time with a coarse clock, so a
+        directory re-made a millisecond after ours can carry the very same birth time as well as the same
+        inode. What differs is the mtime: ours carries a random sub-millisecond part."""
+        lock = self.lock()
+        lock.try_acquire()
+        os.rmdir(self.path)
+        os.mkdir(self.path)                                    # someone else's
+        lock._held.inode = os.lstat(self.path).st_ino          # the freed inode number was handed out again
+        if lock._held.birth_ns is None:
+            lock._held.birth_ns = 1_700_000_000_123_456_789    # and the creation time came out the same
+        same_birth = lock._held.birth_ns
+        with mock.patch.object(dirlock, "birth_time_ns", lambda path: same_birth):
+            with self.assertRaises(LockLost):
+                lock.check()
+            lock.release()
+        self.assertTrue(os.path.isdir(self.path), "not removed: it is not ours")
+
+    def test_without_a_birth_time_an_mtime_one_millisecond_away_is_not_ours(self):
+        with no_birth_time():
+            lock = self.lock()
+            lock.try_acquire()
+            lock.check()
+            ours = os.lstat(self.path).st_mtime_ns
+            os.utime(self.path, ns=(ours + 1_000_000, ours + 1_000_000))   # same inode, 1 ms later
+            with self.assertRaises(LockLost):
+                lock.check()
+            lock.release()
+            self.assertTrue(os.path.isdir(self.path), "not provably ours: left alone")
+
+    def test_the_mtime_pixelswitch_sets_carries_a_random_sub_millisecond_part(self):
+        seen = set()
+        for index in range(20):
+            path = os.path.join(self.dir, f"m{index}")
+            os.mkdir(path)
+            status, asked, exact = dirlock._stamp(path, 1_800_000_000.0)
+            self.assertEqual(asked // 1_000_000, 1_800_000_000_000)
+            self.assertGreater(asked % 1_000_000, 0)
+            seen.add(asked % 1_000_000)
+            if exact:
+                self.assertEqual(status.st_mtime_ns, asked)
+        self.assertGreater(len(seen), 1, "not a constant")
+
+    def test_a_touch_never_lands_on_a_directory_that_is_not_the_one_we_checked(self):
+        os.mkdir(self.path)
+        os.utime(self.path, ns=(5_000_000_000, 5_000_000_000))
+        self.assertIsNone(dirlock._stamp(self.path, time.time(), os.lstat(self.path).st_ino + 1))
+        self.assertEqual(os.lstat(self.path).st_mtime_ns, 5_000_000_000, "a foreign directory is not touched")
+        self.assertIsNone(dirlock._stamp(os.path.join(self.dir, "missing"), time.time()))
+
+    def test_without_a_birth_time_the_touch_loop_keeps_our_lock_ours(self):
+        with no_birth_time():
+            lock = self.lock(clock=time.time)
+            lock.update = 0.03
+            lock.try_acquire()
+            first = os.lstat(self.path).st_mtime_ns
+            self.assertTrue(wait_until(lambda: os.lstat(self.path).st_mtime_ns != first))
+            for _ in range(20):
+                lock.check()
+                time.sleep(0.01)
+            self.assertFalse(lock.compromised)
+            lock.release()
+            self.assertFalse(os.path.exists(self.path), "our own lock is removed")
+
+    def test_a_whole_second_creation_time_is_not_taken_as_proof(self):
+        whole = 1_700_000_000 * 10**9
+        with mock.patch.object(dirlock, "birth_time_ns", lambda path: whole):
+            lock = self.lock()
+            lock.try_acquire()
+            lock.check()
+            os.utime(self.path, ns=(7_000_000_001, 7_000_000_001))
+            with self.assertRaises(LockLost):
+                lock.check()   # the mtime decides, since the creation time cannot tell directories apart
+            lock.release()
+            self.assertTrue(os.path.isdir(self.path))
+
+    def test_a_filesystem_with_whole_second_times_judges_at_its_granularity_and_logs_once(self):
+        real = os.utime
+
+        def whole_seconds(target, times=None, *, ns=None, **kw):
+            if ns is None:
+                return real(target, times, **kw)
+            return real(target, ns=(ns[0] // 10**9 * 10**9, ns[1] // 10**9 * 10**9), **kw)
+
+        class Capture:
+            def __init__(self):
+                self.lines = []
+
+            def warning(self, text):
+                self.lines.append(text)
+
+        log = Capture()
+        before = dirlock._COARSE_LOGGED
+        dirlock._COARSE_LOGGED = False
+        try:
+            with no_birth_time(), mock.patch.object(os, "utime", whole_seconds):
+                for _ in range(2):
+                    lock = self.lock(log=log)
+                    self.assertTrue(lock.try_acquire())
+                    lock.check()                                # our own lock is never misjudged as foreign
+                    lock.release()
+                    self.assertFalse(os.path.exists(self.path), "and is removed on release")
+                self.assertEqual(len([line for line in log.lines if "coarser" in line]), 1, "logged once")
+                lock = self.lock(log=log)
+                lock.try_acquire()
+                whole_seconds(self.path, ns=(9 * 10**9, 9 * 10**9))   # someone else's, another second
+                with self.assertRaises(LockLost):
+                    lock.check()
+                lock.release()
+                self.assertTrue(os.path.isdir(self.path), "a foreign one is never removed")
+        finally:
+            dirlock._COARSE_LOGGED = before
+
+    def test_a_lock_whose_mtime_cannot_be_read_back_is_never_removed(self):
+        lock = self.lock()
+        with no_birth_time():
+            lock.try_acquire()
+            lock._held.mtime_ns = None
+            with self.assertRaises(LockLost):
+                lock.check()
+            lock.release()
+        self.assertTrue(os.path.isdir(self.path))
+
+    def test_reap_compares_the_birth_time_to_the_nanosecond(self):
+        ledger_path = os.path.join(self.dir, "held-locks.json")
+        ledger = LockLedger(ledger_path)
+        os.mkdir(self.path)
+        os.utime(self.path, (1.0, 1.0))
+        birth = dirlock.birth_time_ns(self.path)
+        if birth is None:
+            self.skipTest("no birth time on this filesystem")
+        for recorded, removed in ((birth + 1_000_000, 0), (birth - 1, 0), (birth, 1)):
+            with open(ledger_path, "w") as handle:
+                json.dump({self.path: {"pid": 999_999_999, "birthtimeMs": birth / 1e6, "birthtimeNs": recorded}}, handle)
+            self.assertEqual(ledger.reap(LOG, {self.path: 60.0}), removed, recorded - birth)
+            if removed == 0:
+                self.assertTrue(os.path.isdir(self.path))
 
     def test_reap_needs_both_birth_times(self):
         ledger_path = os.path.join(self.dir, "held-locks.json")
