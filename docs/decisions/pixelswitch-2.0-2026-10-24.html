@@ -146,8 +146,8 @@ var PAGE = {
   key: 'pixelswitch-2.0-2026-10-24',
   heading: 'PIXELSWITCH 2.0: FOUNDER QUESTIONS (2026-10-24)',
   eyebrow: 'PixelSwitch · 2.0 · 2026-10-24',
-  title: 'Four choices and three checks for PixelSwitch 2.0',
-  lede: '<strong>Nothing here blocks the release.</strong> 2.0 ships with the recommended answer on every card, as you asked ("once done push to production"). An answer that changes behaviour ships as 2.1. The three checks at the end are things only you can do: they need your eyes on your own screens.',
+  title: 'Four choices and four checks for PixelSwitch 2.0',
+  lede: '<strong>Nothing here blocks the release.</strong> 2.0 ships with the recommended answer on every card, as you asked ("once done push to production"). An answer that changes behaviour ships as 2.1. The four checks at the end are things only you can do: they need your eyes on your own screens.',
   questions: [
     {
       id: 'C1-return-to-priority',
@@ -240,6 +240,25 @@ var PAGE = {
         { label: 'Worked as described.', note: '' },
         { label: 'Something looked wrong (say what below).', note: '' },
         { label: 'Not tried yet.', note: '' }
+      ]
+    },
+    {
+      id: 'H4-beeco-resign',
+      title: 'On the Beeco Mac: three accounts need signing in again',
+      what: 'The Beeco Mac updated itself to 2.0 at 11:50 PM on Oct 24 and runs fine. It started with three accounts already marked "needs to sign in again"; 1.9 marked them over the past week (one on Oct 19, two by Oct 21), so 2.0 did not cause it. Until they are signed in again, auto-switch cannot move anyone to those three accounts.',
+      why: 'Those accounts are unusable for switching on that Mac until someone signs them in.',
+      nothing: 'They stay unusable for switching on the Beeco Mac; everything else keeps working.',
+      recommend: 'Re-sign them when convenient',
+      steps: [
+        'On the Beeco Mac, click the PixelSwitch icon in the menu bar.',
+        'Each of the three accounts shows "Session expired. Re-authenticate (\u21bb) to fix." Click the \u21bb button on one.',
+        'Press Open (or Copy link) and sign in to that account in the browser. The card clears by itself.',
+        'Repeat for the other two.'
+      ],
+      options: [
+        { label: 'Done.', note: '' },
+        { label: 'Something went wrong (say what below).', note: '' },
+        { label: 'Not now.', note: '' }
       ]
     },
     {
