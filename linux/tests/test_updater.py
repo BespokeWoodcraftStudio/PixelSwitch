@@ -137,9 +137,22 @@ class HappyPathTests(UpdaterCase):
         self.assertTrue(os.path.isdir(os.path.join(self.paths.app_dir, "2.0-31")))
         self.assertEqual(self.restarts, [("2.1-32",)], "the restart came after the flip")
         self.assertTrue(os.path.isfile(os.path.join(self.paths.app_dir, "2.1-32", "bin", "pixelswitchd")))
-        self.assertEqual(os.stat(os.path.join(self.paths.app_dir, "2.1-32", "bin")).st_mode & 0o022, 0)
+        for relative in ("", "bin", "bin/pixelswitchd", "pixelswitch", "VERSION"):
+            mode = os.stat(os.path.join(self.paths.app_dir, "2.1-32", relative)).st_mode
+            self.assertEqual(mode & 0o022, 0, f"{relative or '.'} is writable by group or others")
         self.assertEqual([n for n in os.listdir(self.paths.data_dir) if n.startswith(".update")], [])
         self.assertEqual(self.server.requests[0], "/releases/latest/download/latest-linux.json")
+
+    def test_the_installed_version_is_never_group_or_world_writable_whatever_the_umask(self):
+        self.server.publish(tarball(good_files()))
+        previous = os.umask(0o000)
+        try:
+            self.assertEqual(self.updater().check_and_install().kind, "installed")
+        finally:
+            os.umask(previous)
+        for directory, names, files in os.walk(os.path.join(self.paths.app_dir, "2.1-32")):
+            for name in names + files:
+                self.assertEqual(os.stat(os.path.join(directory, name)).st_mode & 0o022, 0, os.path.join(directory, name))
 
     def test_an_archive_with_one_top_level_folder_works_too(self):
         files = {f"PixelSwitch-2.1/{name}": data for name, data in good_files().items()}

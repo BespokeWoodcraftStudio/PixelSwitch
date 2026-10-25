@@ -102,6 +102,24 @@ def flip_symlink(link: str, target_name: str) -> None:
     fsio.fsync_dir(os.path.dirname(link))
 
 
+def strip_group_other_write(root: str) -> None:
+    """Removes group and other write access from everything under ``root`` (and ``root``), whatever
+    the umask of the process was: a directory the archive did not list gets its mode from the
+    umask, and an installed version must never be writable by anyone else. Symlinks are left alone."""
+    for directory, names, files in os.walk(root):
+        for name in [""] + names + files:
+            path = os.path.join(directory, name) if name else directory
+            try:
+                status = os.lstat(path)
+            except OSError:
+                continue
+            if os.path.islink(path):
+                continue
+            mode = status.st_mode & 0o7777
+            if mode & 0o022:
+                os.chmod(path, mode & ~0o022)
+
+
 def prune_old_versions(app_dir: str, log: CategoryLog | None = None) -> list[str]:
     """Deletes version folders OLDER than the previous version; keeps ``current`` and ``previous``
     (and anything newer than either). Returns the names removed."""
@@ -277,6 +295,7 @@ class Updater:
             safe_extract(tarball, extracted)
             root = self._find_root(extracted)
             check_extracted_version(root, feed, self.running.build)
+            strip_group_other_write(root)
             fsio.ensure_private_dir(self.paths.app_dir)
             os.rename(root, target)
             fsio.fsync_dir(self.paths.app_dir)

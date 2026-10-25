@@ -217,6 +217,7 @@ class RunningDaemonTests(unittest.TestCase):
 
     def test_files_modes_and_the_socket_pointer(self):
         paths = self.proc.paths
+        self.assertTrue(wait_for(lambda: os.path.exists(paths.socket_path_file), 10), "socket-path is written right after the bind")
         self.assertEqual(self.mode(paths.socket), 0o600)
         self.assertEqual(self.mode(os.path.dirname(paths.socket)), 0o700)
         self.assertEqual(read_file(paths.socket_path_file).strip(), paths.socket)

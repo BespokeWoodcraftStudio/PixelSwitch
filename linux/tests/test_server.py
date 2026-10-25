@@ -150,8 +150,12 @@ class UserCheckTests(ServerCase):
                 self.skipTest("no peer credential option on this platform")
         self.start()
         sock = self.connect()
-        sock.sendall(protocol.request_line(1, "status.get").encode() + b"\n")
-        self.assertEqual(sock.recv(100), b"", "closed without an answer")
+        try:
+            sock.sendall(protocol.request_line(1, "status.get").encode() + b"\n")
+            answer = sock.recv(100)
+        except ConnectionResetError:  # Linux resets a connection closed with unread data
+            answer = b""
+        self.assertEqual(answer, b"", "closed without an answer")
         self.assertEqual(self.handled, [])
         self.assertTrue(any("another user" in line for line in self.logs))
 
