@@ -11,7 +11,8 @@
 # install-linux.sh, latest-linux.json): present, the feed's version and build match project.yml at the
 # tag, size and SHA-256 match, the Ed25519 signature verifies against SUPublicEDKey (with the pure-Python
 # verifier in linux/pixelswitch/ed25519.py, since the Mac's /usr/bin/openssl is LibreSSL), and the
-# installer carries the same public key. `--linux-only` runs just those (it needs only gh, curl,
+# installer carries the same public key, and the release notes (the release body) carry the installer's
+# SHA-256 and no longer hold the placeholder. `--linux-only` runs just those (it needs only gh, curl,
 # python3 and git, so it also runs on a Linux machine):
 #   scripts/verify-release.sh v2.0 [--linux-only]
 # The exit status is 1 when a Linux check fails.
@@ -37,6 +38,7 @@ linux_checks() {
   gh release download "$TAG" -R $R -p latest-linux.json -p install-linux.sh -p "$TARBALL" -D "$L" --clobber || { bad "download failed"; return 1; }
   # project.yml as it was at the tag (the local checkout may have moved on).
   git show "$TAG:project.yml" > "$L/project.yml" 2>/dev/null || curl -fsSL "https://raw.githubusercontent.com/$R/$TAG/project.yml" -o "$L/project.yml" || { bad "project.yml at $TAG not readable"; return 1; }
+  gh release view "$TAG" -R $R --json body --jq .body > "$L/release-body.md" || { bad "could not read the release notes"; return 1; }
   python3 -I - "$L" "$TARBALL" "$WANT_VER" "$PWD/linux" <<'PY' || failed=1
 import base64, hashlib, json, os, re, sys
 folder, tarball, want, linux = sys.argv[1:5]
@@ -63,9 +65,16 @@ url = f"https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/download/
 good &= say(feed.get("url") == url, "the feed's url is the tag's tarball")
 signature = feed.get("signature", "")
 good &= say(ed25519.verify(data, signature, public, use_openssl=False), "the Ed25519 signature verifies against SUPublicEDKey (pure-Python verifier)")
-installer = open(os.path.join(folder, "install-linux.sh"), encoding="utf-8").read()
+installer_bytes = open(os.path.join(folder, "install-linux.sh"), "rb").read()
+installer = installer_bytes.decode("utf-8")
 good &= say(f'\nSU_PUBLIC_ED_KEY="{public}"\n' in installer, "install-linux.sh carries SUPublicEDKey")
-print(f"  install-linux.sh sha256 {hashlib.sha256(installer.encode()).hexdigest()} (it must be in the release notes)")
+installer_sha = hashlib.sha256(installer_bytes).hexdigest()
+print(f"  install-linux.sh sha256 {installer_sha}")
+body = open(os.path.join(folder, "release-body.md"), encoding="utf-8").read()
+if "INSTALLER_SHA256_PLACEHOLDER" in body:
+    good &= say(False, "the release notes still hold INSTALLER_SHA256_PLACEHOLDER instead of the installer's SHA-256")
+else:
+    good &= say(installer_sha in body.lower(), f"the release notes carry install-linux.sh's SHA-256 ({installer_sha})")
 sys.exit(0 if good else 1)
 PY
   return $failed

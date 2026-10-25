@@ -147,5 +147,67 @@ class LinkTests(DaemonTestCase):
         self.assertEqual(launches, [1])
 
 
+class WakeAndDrainTests(DaemonTestCase):
+    def test_request_snapshot_ends_a_reconnect_wait(self):
+        snaps = []
+        link = DaemonLink(lambda fn: fn(), snaps.append, env=self.env())
+        self.addCleanup(link.stop)
+        link.start()
+        self.assertTrue(wait_for(lambda: snaps and not snaps[-1].connected))
+        time.sleep(1.5)  # the first wait is 1 s, the next 2 s: it is now inside the longer one
+        self.serve({"accounts.list": {"accounts": []}})
+        started = time.monotonic()
+        link.request_snapshot()  # "Start PixelSwitch": the service is up, do not wait out the backoff
+        self.assertTrue(wait_for(lambda: any(s.connected for s in snaps), timeout=1.0))
+        self.assertLess(time.monotonic() - started, 1.0)
+
+    def test_a_call_queued_just_before_stop_is_still_sent(self):
+        daemon = self.serve({"accounts.list": {"accounts": []}, "settings.set": {"ok": True}})
+        link = DaemonLink(lambda fn: fn(), lambda s: None, env=self.env())
+        link.start()
+        link.call("settings.set", {"key": "autoSwitch.weeklyThreshold", "value": 60})
+        link.stop()  # the window is closing right after the change
+        self.assertEqual(daemon.last_params("settings.set"), {"key": "autoSwitch.weeklyThreshold", "value": 60})
+
+    def test_an_event_that_lands_while_a_read_waits_causes_another_read(self):
+        reads = []
+        box = []
+
+        def accounts(params, request):
+            reads.append(1)
+            if len(reads) == 1:
+                # The daemon pushes an event on the subscribed connection, then answers: the client skips the event.
+                for conn in box[0].connections:
+                    conn.sendall(p.event_line("settingsChanged", 9, {}).encode() + b"\n")
+                time.sleep(0.1)
+            return {"accounts": []}
+
+        box.append(self.serve({"accounts.list": accounts}))
+        snaps = []
+        link = DaemonLink(lambda fn: fn(), snaps.append, env=self.env())
+        self.addCleanup(link.stop)
+        link.start()
+        self.assertTrue(wait_for(lambda: len(snaps) >= 2))
+        self.assertGreaterEqual(len(reads), 2)  # without the counter the skipped event is lost: one read only
+
+
+class SkippedEventTests(DaemonTestCase):
+    def test_call_counts_the_events_it_skips(self):
+        box = []
+
+        def accounts(params, request):
+            for conn in box[0].connections:
+                conn.sendall(p.event_line("usageUpdated", 1, {}).encode() + b"\n")
+            return {"accounts": []}
+
+        box.append(self.serve({"accounts.list": accounts}))
+        client = ControlClient(env=self.env())
+        self.addCleanup(client.disconnect)
+        client.connect(launch=False)
+        self.assertEqual(client.skipped_events, 0)
+        client.call("accounts.list")
+        self.assertEqual(client.skipped_events, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

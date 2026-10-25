@@ -74,15 +74,22 @@ class WindowTests(unittest.TestCase):
         self.assertTrue(a.fable_row.get_visible())
         self.assertFalse(b.fable_row.get_visible())
         self.assertFalse(a.message_row.get_visible())
-        self.assertTrue(b.retry_button.get_visible() and not b.resign_button.get_visible())
-        self.assertTrue(c.resign_button.get_visible() and not c.retry_button.get_visible())
+        self.assertTrue(b.retry_button.get_visible())
+        self.assertFalse(c.retry_button.get_visible())
+        # Re-sign is on every card (the Mac's re-authenticate button is on every row), highlighted only where it is the fix
+        for card in (a, b, c):
+            self.assertTrue(card.resign_button.get_visible())
+        self.assertEqual([x.resign_button.has_css_class("suggested-action") for x in (a, b, c)], [False, False, True])
+        self.assertEqual(c.resign_button.get_label(), "↻ Re-sign")
         self.assertIn("42% used", a.session_row.get_subtitle())
         self.assertIn("resets in 3 h", a.session_row.get_subtitle())
         self.assertEqual(c.session_row.get_subtitle(), "No reading yet.")
         self.assertEqual(a.session_limit_row.get_subtitle(), "Default (90%)")
         self.assertEqual(b.weekly_limit_row.get_subtitle(), "Switch at 50%")
         self.assertEqual(c.session_limit_row.get_subtitle(), "Manual only")
-        self.assertIn("moves you to it only while it is at 89% or less.", a.help_label.get_label())
+        # A follows split defaults (session 90, weekly 50): the two-window sentence, not the equal-windows one
+        self.assertIn("at 90% of its session or 50% of its week", a.help_label.get_label())
+        self.assertNotIn("moves you to it only while it is at 89% or less.", a.help_label.get_label())
         self.assertIn("(up to 89% of its week", b.help_label.get_label())
         self.assertEqual(a.label_row.get_text(), "Personal")
         self.assertEqual(link.calls, [])  # building and showing it sent nothing, usage.refresh least of all
@@ -205,6 +212,30 @@ class WindowTests(unittest.TestCase):
         asked[0][2]()
         self.assertEqual(link.last("accounts.remove"), {"account": B})
 
+    def test_the_remove_text_tells_the_truth_about_the_active_account(self):
+        from pixelswitch.gui import settings_accounts
+
+        window, link = self.make()
+        bodies = []
+        original = settings_accounts.confirm_dialog
+        settings_accounts.confirm_dialog = lambda parent, heading, body, label, on_confirm, **kw: bodies.append(body)
+        self.addCleanup(setattr, settings_accounts, "confirm_dialog", original)
+        self.card(window, B).remove_button.emit("clicked")  # not the active one
+        self.assertIn("Claude Code's own login is not touched.", bodies[-1])
+        # The active account, with others left: Claude Code is switched to the next one, and the text says so.
+        active = self.card(window, A)
+        active.remove_button.emit("clicked")
+        self.assertIn("This is the account Claude Code is using now.", bodies[-1])
+        self.assertIn("switch Claude Code to the next account by priority", bodies[-1])
+        self.assertIn("every Claude Code on this computer uses", bodies[-1])
+        self.assertNotIn("is not touched", bodies[-1])
+        # The only account: nothing to switch to, so the first text stands.
+        snap = fx.fixture_snapshot()
+        snap.accounts = snap.accounts[:1]
+        window.apply_snapshot(snap)
+        self.card(window, A).remove_button.emit("clicked")
+        self.assertIn("is not touched", bodies[-1])
+
     def test_the_real_confirmation_dialog_builds(self):
         from pixelswitch.gui import widgets
 
@@ -320,6 +351,100 @@ class WindowTests(unittest.TestCase):
         window.apply_snapshot(model.Snapshot(connected=False, error="nothing is listening"))
         self.assertTrue(window.banner.get_revealed())
         self.assertEqual(window.about_page.daemon_row.get_subtitle(), "not running")
+
+    def test_a_daemon_restart_leaves_the_accounts_on_screen_greyed_out(self):
+        from pixelswitch.gui import model
+
+        window, link = self.make()
+        before = self.card(window, A)
+        window.apply_snapshot(model.Snapshot(connected=False, error="closed"))
+        self.assertIs(self.card(window, A), before)  # no "No Accounts" page, no rebuilt cards, no invented defaults
+        self.assertEqual(window.accounts_page._order, [A, B, C])
+        self.assertFalse(window.accounts_page.empty.get_parent() is not None)
+        self.assertFalse(window.stack.get_sensitive())
+        self.assertEqual(window.general_page.weekly_default.get_value(), 50)
+        window.apply_snapshot(fx.fixture_snapshot())
+        self.assertTrue(window.stack.get_sensitive())
+        self.assertFalse(window.banner.get_revealed())
+
+    def test_updated_n_ago_counts_up_without_a_new_snapshot(self):
+        import time as time_module
+        from pixelswitch.gui import model
+
+        now = time_module.time()
+        snap = fx.fixture_snapshot(now)
+        snap.accounts[0]["usage"]["sampledAt"] = fx.iso(now, -60)  # a fresh reading says nothing
+        window, _ = self.make(snap)
+        a = self.card(window, A)
+        self.assertNotIn("Updated", a.get_description())
+        original = model.time.time
+        model.time.time = lambda: now + 600
+        self.addCleanup(setattr, model.time, "time", original)
+        self.assertTrue(window._tick())
+        self.assertIn("Updated 11 minutes ago", a.get_description())
+
+    def test_closing_sends_a_number_typed_in_the_last_half_second(self):
+        window, link = self.make()
+        window.general_page.weekly_default.set_value(60)  # starts the 500 ms pause
+        self.assertEqual(link.calls, [])
+        window.emit("close-request")
+        self.assertEqual(link.last("settings.set"), {"key": "autoSwitch.weeklyThreshold", "value": 60})
+        window.general_page.drain_hours.set_value(12)
+        window.emit("close-request")
+        self.assertEqual(link.last("settings.set"), {"key": "autoSwitch.drainWithinHours", "value": 12})
+
+    def test_general_has_the_priority_line_under_the_strategy_and_the_overflow_sentence_under_the_defaults(self):
+        from pixelswitch.gui import model
+
+        window, link = self.make()
+        general = window.general_page
+        self.assertEqual(general.defaults_group.get_description(), model.TEXT_OVERFLOW)
+        self.assertTrue(general.priority_note.get_visible())  # the strategy is "Most room left"
+        self.assertEqual(general.priority_note.get_title(), model.TEXT_PRIORITY_NOTE)
+        self.assertIsNot(general.priority_note.get_ancestor(Adw.PreferencesGroup), general.defaults_group)
+        self.assertIs(general.priority_note.get_ancestor(Adw.PreferencesGroup), general.strategy.get_ancestor(Adw.PreferencesGroup))
+        found = []  # the button is somewhere inside the row: find it by its label
+
+        def walk(widget):
+            child = widget.get_first_child()
+            while child is not None:
+                if isinstance(child, Gtk.Button) and child.get_label() == "Use priority":
+                    found.append(child)
+                walk(child)
+                child = child.get_next_sibling()
+
+        walk(general.priority_note)
+        self.assertEqual(len(found), 1)
+        found[0].emit("clicked")
+        self.assertEqual(link.last("settings.set"), {"key": "autoSwitch.strategy", "value": "priority"})
+        snap = fx.fixture_snapshot()
+        snap.settings["autoSwitch.strategy"] = "myOrder"
+        window.apply_snapshot(snap)
+        self.assertFalse(general.priority_note.get_visible())
+
+    def test_a_number_waits_while_the_pointer_is_over_the_control_and_is_sent_when_it_leaves(self):
+        window, link = self.make()
+        b = self.card(window, B)
+        control = b.priority_control
+        control._hold_begin()  # the pointer enters
+        control.spin.set_value(7)
+        pump(control._debounce._delay + 300)  # longer than the pause
+        self.assertEqual([m for m, _ in link.calls if m == "accounts.setPriority"], [])  # held: the list must not move under it
+        self.assertTrue(control._debounce.pending)  # the pause started over
+        control._hold_end()  # the pointer leaves
+        self.assertEqual(link.last("accounts.setPriority"), {"account": B, "priority": 7})
+        limit = b.weekly_limit
+        limit._hold_begin()
+        limit.spin.set_value(66)
+        pump(limit._debounce._delay + 300)
+        self.assertEqual(link.last("accounts.setThresholds"), None)
+        limit._release()  # focus leaving sends it too
+        self.assertEqual(link.last("accounts.setThresholds"), {"account": B, "weekly": 66})
+        # Without the pointer the pause alone sends it, as before.
+        control._hold_end()
+        control.spin.set_value(8)
+        pump(control._debounce._delay + 300)
+        self.assertEqual(link.last("accounts.setPriority"), {"account": B, "priority": 8})
 
     def test_the_cards_are_rebuilt_only_when_the_accounts_change(self):
         window, _ = self.make()

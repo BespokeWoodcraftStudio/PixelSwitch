@@ -392,7 +392,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-26.04]
-    # No secrets are used here.
+    # No secrets are used here, and this job holds a read-only token: it runs apt packages and the whole test
+    # suite, so it must not be able to change a release, appcast.xml or latest.json.
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -404,11 +407,21 @@ jobs:
             python3-gi gir1.2-gtk-3.0 gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-dbusmenu-glib-0.4 \
             dbus xvfb xauth openssl
 
-      - name: Unit tests (the whole suite, on a virtual display and a private session bus)
+      - name: Unit tests (the whole suite, on a virtual display and a private session bus; a skipped test fails the job)
+        # shell: bash adds -o pipefail, so a failing suite fails this step even though its output goes through tee.
+        shell: bash
         run: |
           PYTHONDONTWRITEBYTECODE=1 dbus-run-session -- \
             xvfb-run -a -s "-screen 0 1920x1080x24" \
-            python3 -m unittest discover -s linux/tests -t linux -v
+            python3 -m unittest discover -s linux/tests -t linux -v 2>&1 | tee "$RUNNER_TEMP/unittest.log"
+          # The tests that need GTK, the tray library, OpenSSL 3 or GNU tar skip themselves where those are
+          # missing. On these runners everything is installed, so a skip means a library stopped importing (or a
+          # different python3 came first on PATH) and the tray or the settings window went untested. The only
+          # skips allowed are the lock tests on a file system that keeps no birth time.
+          if grep -E "\.\.\. skipped '" "$RUNNER_TEMP/unittest.log" | grep -v -E "birth time|keeps no birth"; then
+            echo "::error::tests were skipped in CI (listed above); every test must run on ${{ matrix.os }}"
+            exit 1
+          fi
 
       - name: Check the systemd unit
         run: |
@@ -447,6 +460,8 @@ jobs:
   linux-package:
     name: Linux package (unsigned)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     # This job never receives the signing secret: the package is unsigned and the same bytes are signed later.
     steps:
       - name: Checkout repository
@@ -467,8 +482,13 @@ jobs:
   linux-publish:
     name: Linux publish (tags only)
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    needs: [build, linux-package]
+    # linux-test is a need on purpose (spec 5.6 amendment, review LC 2026-10-24): a tag whose Linux suite is red on
+    # either Ubuntu must not be signed and published, because every Linux install updates itself to it.
+    needs: [build, linux-test, linux-package]
     runs-on: ubuntu-24.04
+    # The only Linux job with a write token: it uploads Linux assets to the release the macOS job created.
+    permissions:
+      contents: write
     concurrency:
       group: linux-assets-${{ github.ref_name }}
       cancel-in-progress: false
@@ -488,12 +508,13 @@ jobs:
           SPARKLE_EDDSA_KEY: ${{ secrets.SPARKLE_EDDSA_KEY }}
         run: bash linux/build-release.sh --sign-only --out dist-linux --signing-key env:SPARKLE_EDDSA_KEY
 
-      - name: Check the release notes carry the installer's SHA-256
+      - name: Check the release notes carry the installer's SHA-256 (fails before anything is uploaded)
         run: |
           SHA=$(sha256sum dist-linux/install-linux.sh | awk '{print $1}')
           echo "install-linux.sh sha256 $SHA"
-          if ! grep -q "$SHA" RELEASE_NOTES.md; then
-            echo "::warning::RELEASE_NOTES.md does not carry the SHA-256 of install-linux.sh ($SHA); add it to the release notes by hand."
+          if grep -q 'INSTALLER_SHA256_PLACEHOLDER' RELEASE_NOTES.md || ! grep -q "$SHA" RELEASE_NOTES.md; then
+            echo "::error::RELEASE_NOTES.md does not carry the SHA-256 of install-linux.sh ($SHA). The Linux assets were not uploaded; fix the notes and re-run this job."
+            exit 1
           fi
 
       - name: Upload the tarball and the installer first, the feed last

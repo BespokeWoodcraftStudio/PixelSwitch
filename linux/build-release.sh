@@ -7,6 +7,8 @@
 # Default: writes into DIR (default: ./dist-linux)
 #   pixelswitch-linux-<version>.tar.gz   deterministic: the same commit gives the same bytes
 #   install-linux.sh                     a copy of linux/install.sh with the public key from project.yml
+#                                        (also placed inside the tarball, so the signed release carries the
+#                                        copy that install.sh keeps for `install-linux.sh --uninstall`)
 # With --signing-key it also writes
 #   latest-linux.json                    version, build, url, size, sha256 and the Ed25519 signature
 # --sign-only does not build: it signs the tarball already in DIR (the CI publish job, which must
@@ -22,6 +24,8 @@
 # (GNU tar; on a Mac use `brew install gnu-tar`, which provides gtar). SOURCE_DATE_EPOCH defaults to
 # the commit time of HEAD (or 1 when there is no git history).
 set -euo pipefail
+# A login shell on some machines puts a guard script named rm first on PATH; deletes here go to the system's rm.
+rm() { /bin/rm "$@"; }
 export LC_ALL=C
 umask 022
 
@@ -95,13 +99,16 @@ build_tarball() {
   cp -R "$HERE/packaging" "$top/packaging"
   cp "$HERE/README.md" "$top/README.md"
   [ -f "$ROOT/NOTICE.md" ] && cp "$ROOT/NOTICE.md" "$top/NOTICE.md"
-  find "$top" \( -name __pycache__ -o -name '*.pyc' -o -name .DS_Store \) -prune -exec rm -rf {} +
+  # The published installer goes inside the tarball (write_installer ran first), so a one-line install keeps it.
+  [ -f "$OUT/install-linux.sh" ] || die "install-linux.sh must be written before the tarball"
+  cp "$OUT/install-linux.sh" "$top/install-linux.sh"
+  find "$top" \( -name __pycache__ -o -name '*.pyc' -o -name .DS_Store \) -prune -exec /bin/rm -rf {} +
   printf 'version=%s\nbuild=%s\n' "$VERSION" "$BUILD" > "$top/VERSION"
 
   # Fixed modes, whatever the umask or the checkout said.
   find "$top" -type d -exec chmod 755 {} +
   find "$top" -type f -exec chmod 644 {} +
-  chmod 755 "$top"/bin/*
+  chmod 755 "$top"/bin/* "$top/install-linux.sh"
 
   rm -f "$TARBALL"
   "$tar_cmd" --sort=name --owner=0 --group=0 --numeric-owner --format=gnu --mtime="@$epoch" \
@@ -121,14 +128,13 @@ write_installer() {
 }
 
 # -- signing --------------------------------------------------------------------------------------------------
-sign_file() {   # sign_file FILE -> base64 Ed25519 signature on stdout; the key never leaves this function
-  local file="$1" key_text rc
+sign_file() {   # sign_file FILE KEYFILE -> base64 Ed25519 signature on stdout. KEYFILE is made by the caller (so its
+                # EXIT trap removes it however this ends); the PKCS8 key is written into it and never printed.
+  local file="$1" key_file="$2" key_text rc
   case "$SIGNING_KEY" in
     env:*) local var="${SIGNING_KEY#env:}"; key_text="${!var:-}"; [ -n "$key_text" ] || die "environment variable $var is empty or unset" ;;
     *) [ -f "$SIGNING_KEY" ] || die "signing key file not found: $SIGNING_KEY"; key_text="$(cat "$SIGNING_KEY")" ;;
   esac
-  KEY_FILE="$(mktemp "${TMPDIR:-/tmp}/pixelswitch-key.XXXXXX")"
-  chmod 600 "$KEY_FILE"
   local seed_len
   seed_len="$(printf '%s' "$key_text" | tr -d '[:space:]' | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
   case "$seed_len" in
@@ -138,14 +144,12 @@ sign_file() {   # sign_file FILE -> base64 Ed25519 signature on stdout; the key 
   {
     printf '\x30\x2e\x02\x01\x00\x30\x05\x06\x03\x2b\x65\x70\x04\x22\x04\x20'   # PKCS8 prefix for an Ed25519 seed
     printf '%s' "$key_text" | tr -d '[:space:]' | base64 -d | head -c 32
-  } > "$KEY_FILE"
+  } > "$key_file"
   local openssl_bin="${OPENSSL:-openssl}"
   set +e
-  "$openssl_bin" pkeyutl -sign -rawin -keyform DER -inkey "$KEY_FILE" -in "$file" 2>/dev/null | base64 | tr -d '\n'
+  "$openssl_bin" pkeyutl -sign -rawin -keyform DER -inkey "$key_file" -in "$file" 2>/dev/null | base64 | tr -d '\n'
   rc=${PIPESTATUS[0]}
   set -e
-  rm -f "$KEY_FILE"
-  KEY_FILE=""
   [ "$rc" -eq 0 ] || die "openssl could not sign (OpenSSL 3 is needed for Ed25519; set OPENSSL to its path)"
 }
 
@@ -162,7 +166,12 @@ PY
 write_feed() {
   [ -f "$TARBALL" ] || die "no tarball at $TARBALL to sign"
   local signature size sha url
-  signature="$(sign_file "$TARBALL")"
+  # The key file is made here, in the main shell, so the EXIT trap removes it on any exit, Ctrl-C or SIGTERM included.
+  KEY_FILE="$(mktemp "${TMPDIR:-/tmp}/pixelswitch-key.XXXXXX")"
+  chmod 600 "$KEY_FILE"
+  signature="$(sign_file "$TARBALL" "$KEY_FILE")"
+  rm -f "$KEY_FILE"
+  KEY_FILE=""
   [ "$(printf '%s' "$signature" | base64 -d 2>/dev/null | wc -c | tr -d ' ')" = 64 ] || die "the signature is not 64 bytes"
   verify_with_python "$TARBALL" "$signature" || die "the signature does not verify against SUPublicEDKey in project.yml; nothing written"
   size="$(wc -c < "$TARBALL" | tr -d ' ')"
@@ -176,8 +185,8 @@ write_feed() {
 }
 
 if [ "$SIGN_ONLY" = 0 ]; then
-  build_tarball
   write_installer
+  build_tarball
 fi
 if [ -n "$SIGNING_KEY" ]; then
   write_feed

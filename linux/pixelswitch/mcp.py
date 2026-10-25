@@ -10,9 +10,12 @@ Speaks both MCP eras, exactly as the Mac server does:
 * **Legacy** (2025-11-25 and earlier): an ``initialize`` handshake, then the same ``tools/list``
   and ``tools/call``.
 
-The 20 tools, their schemas and descriptions are the Swift server's, character for character
-(``tests/test_mcp.py`` compares them with ``PixelSwitchCLI/MCPServer.swift`` when that file is
-present). A tool's ``arguments`` object is forwarded verbatim as the control call's params, so
+The 20 tools, their names, schemas and descriptions are the Swift server's, with one fixed list of
+Linux wordings (:data:`LINUX_TEXT`) applied to the text: on Linux the computer is not a "Mac", there
+is no cost block (D15), no update window opens (the check installs by itself) and there is no
+Safari. Everything else is character for character (``tests/test_mcp.py`` compares them with
+``PixelSwitchCLI/MCPServer.swift`` when that file is present, after the same substitution, so any
+other drift still fails). A tool's ``arguments`` object is forwarded verbatim as the control call's params, so
 a tool's property names ARE the control parameter names. The server writes nothing but protocol
 messages to stdout; diagnostics go to stderr.
 
@@ -39,7 +42,25 @@ META_VERSION = "io.modelcontextprotocol/protocolVersion"
 META_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
 META_SERVER_INFO = "io.modelcontextprotocol/serverInfo"
 
-INSTRUCTIONS = (
+#: The Linux wordings, applied in this order to every description and to the instructions. Each pair is a phrase
+#: of the Mac server's text that is false on Linux, and what the Linux server says instead.
+LINUX_TEXT: tuple[tuple[str, str], ...] = (
+    ("; plus this Mac's cost and activity today", ""),
+    (" (its window opens on that Mac)", "; a newer version installs by itself"),
+    ('such as "Safari"', 'such as "Firefox"'),
+    ("on the Mac this server runs on", "on the computer this server runs on"),
+    ("that Mac", "that computer"),
+)
+
+
+def linux_wording(text: str) -> str:
+    """The Mac server's text with the Linux wordings applied."""
+    for old, new in LINUX_TEXT:
+        text = text.replace(old, new)
+    return text
+
+
+INSTRUCTIONS = linux_wording(
     "Controls PixelSwitch, the Claude Code account switcher on the Mac this server runs on. "
     "list_accounts and get_usage show every account with its session, weekly and Fable usage and reset times; "
     "switch_account changes which Claude login Claude Code uses on that Mac; the set_* tools change priority, "
@@ -68,7 +89,7 @@ class Tool:
 
 
 def _prop(type_: str, description: str) -> dict:
-    return {"type": type_, "description": description}
+    return {"type": type_, "description": linux_wording(description)}
 
 
 _ACCOUNT = {"account": _prop("string", "An email, label, id or position (1, 2, …) of the account, never a priority number.")}
@@ -82,7 +103,9 @@ def _merged(base: Mapping[str, Any], extra: Mapping[str, Any]) -> dict:
 
 
 def _t(name: str, description: str, properties: Mapping[str, Any], required: tuple[str, ...], method: str, passes: bool) -> Tool:
-    return Tool(name, description, properties, required, method, passes)
+    worded = {key: ({**value, "description": linux_wording(value["description"])} if "description" in value else value)
+              for key, value in properties.items()}
+    return Tool(name, linux_wording(description), worded, required, method, passes)
 
 
 TOOLS: tuple[Tool, ...] = (

@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import io
 import os
+import select
+import subprocess
+import sys
 import time
 import unittest
 
@@ -13,7 +16,7 @@ from pixelswitch.cli import FOLLOW, CliUsageError, Command, Invocation, Output, 
 from pixelswitch.client import ControlClient
 from pixelswitch.protocol import ControlError
 
-from .lc_support import DaemonTestCase, account_payload, status_payload
+from .lc_support import LINUX_ROOT, REPO_ROOT, DaemonTestCase, account_payload, status_payload
 
 
 def cmd(line: str) -> Command | None:
@@ -154,6 +157,19 @@ class ParserTests(unittest.TestCase):
         self.assertIn("accounts priority <account> <1-99|none>", text)
         self.assertIn("<account> is an email address, a label, an id, or a position", text)
         self.assertIn("never a priority number", text)
+
+    @unittest.skipUnless(os.path.exists(os.path.join(REPO_ROOT, "PixelSwitchCLI", "CLIParser.swift")), "CLIParser.swift is not in this checkout")
+    def test_the_help_is_the_macs_help_except_the_cost_clause(self):
+        with open(os.path.join(REPO_ROOT, "PixelSwitchCLI", "CLIParser.swift"), encoding="utf-8") as handle:
+            source = handle.read()
+        start = source.index('static let helpText = """') + len('static let helpText = """')
+        body = source[start:source.index('"""', start)].strip("\n")
+        lines = [line[4:] if line.startswith("    ") else line.lstrip() for line in body.split("\n")]
+        swift = "\n".join(lines).rstrip()
+        # The one deliberate difference (D15): Linux sends no cost, so the usage line does not promise it.
+        linux = swift.replace("Session, weekly and Fable use; cost today", "Session, weekly and Fable use")
+        self.assertNotEqual(linux, swift)
+        self.assertEqual(cli.HELP_TEXT, linux)
 
 
 # --- output -------------------------------------------------------------------------------------------
@@ -582,6 +598,25 @@ class RunnerTests(RunnerTestCase):
             '{"at":"1970-01-12T13:46:40Z","data":{"x":1},"type":"usageUpdated"}',
             '{"at":"1970-01-12T13:46:41Z","data":{"from":"A","to":"B"},"type":"autoSwitched"}',
         ])
+
+    def test_watch_reaches_a_pipe_line_by_line_while_the_daemon_is_still_up(self):
+        # Python block-buffers stdout on a pipe: without the flush in _write_stdout, `ssh host pixelswitch watch` and
+        # `pixelswitch watch | jq` would show nothing until 8 KB of events piled up (Mac golden "cli: each line
+        # reaches a pipe at once"). The runner here is the real program with a real pipe, not an injected writer.
+        self.serve(events=[p.event_line("usageUpdated", 1_000_000, {"x": 1})])
+        child = subprocess.Popen([sys.executable, "-I", os.path.join(LINUX_ROOT, "bin", "pixelswitch"), "watch"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={**self.env(), "PATH": os.environ.get("PATH", "")})
+        try:
+            ready, _, _ = select.select([child.stdout], [], [], 5.0)
+            self.assertTrue(ready, "no line reached the pipe within 5 seconds while the daemon was still connected")
+            self.assertEqual(child.stdout.readline().decode().strip(), '{"at":"1970-01-12T13:46:40Z","data":{"x":1},"type":"usageUpdated"}')
+        finally:
+            child.terminate()
+            try:
+                child.wait(timeout=10)
+            finally:
+                child.stdout.close()
+                child.stderr.close()
 
     # -- the 2.0 commands against a 2.0 daemon --
 

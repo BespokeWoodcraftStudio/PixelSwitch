@@ -7,7 +7,11 @@ differences are the ones the spec names (D15 and section 5):
 
 * no "This Mac today" line in ``usage`` (the daemon sends no machine usage);
 * the daemon's optional ``warnings`` list in ``status`` is printed one line each;
-* ``update-check`` and the sign-in links say "this computer" where the Mac tool says "the Mac";
+* ``update-check`` says a newer version, if there is one, installs by itself, where the Mac tool says its
+  window opens on that Mac;
+* the sign-in link line says "On the computer running PixelSwitch" where the Mac tool says "On the Mac
+  running PixelSwitch";
+* the ``--open-in`` hint names Firefox ("like Firefox.") where the Mac tool's names Safari;
 * ``pixelswitch --version`` prints the app version.
 
 Standard library only. Output goes through ``Runner.out`` / ``Runner.err`` (unbuffered, so
@@ -60,17 +64,21 @@ _SWIFT_DOUBLE = re.compile(
     r"[+-]?(?:[0-9]+\.?[0-9]*(?:[eE][+-]?[0-9]+)?|\.[0-9]+(?:[eE][+-]?[0-9]+)?|inf|infinity|nan)\Z",
     re.IGNORECASE | re.ASCII,
 )
+_SWIFT_HEX_DOUBLE = re.compile(r"[+-]?0[xX](?:[0-9a-fA-F]+\.?[0-9a-fA-F]*|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?\Z", re.ASCII)
 _SWIFT_INT = re.compile(r"[+-]?[0-9]+\Z", re.ASCII)
 
 
 def swift_double(text: str) -> float | None:
-    """``Double(text)``: no spaces, no underscores (Python's ``float`` allows both)."""
-    if _SWIFT_DOUBLE.match(text) is None:
-        return None
+    """``Double(text)``: no spaces, no underscores (Python's ``float`` allows both); the C hex-float form
+    (``0x1E`` is 30) too, as Swift reads it."""
     try:
-        return float(text)
-    except ValueError:
+        if _SWIFT_DOUBLE.match(text) is not None:
+            return float(text)
+        if _SWIFT_HEX_DOUBLE.match(text) is not None:
+            return float.fromhex(text)
+    except (ValueError, OverflowError):
         return None
+    return None
 
 
 def swift_int(text: str) -> int | None:

@@ -97,6 +97,24 @@ if git ls-remote --tags origin "$TAG" | grep -q .; then
     die "Tag $TAG already exists on remote. Choose a different version."
 fi
 
+# The Linux installer's SHA-256 must already be in the release notes. The published install-linux.sh is
+# linux/install.sh with the SU_PUBLIC_ED_KEY line set from project.yml (linux/build-release.sh does the same
+# awk), so its hash is known before the tag. Tagging with the placeholder or a stale hash would give every
+# careful Linux user a hash that can never match.
+if [ -f linux/install.sh ]; then
+    PUBLISHED_KEY=$(grep -E '^[[:space:]]*SUPublicEDKey: ' "$PROJECT_YML" | head -1 | sed -E 's/^[^:]*:[[:space:]]*"?([^"[:space:]]+)"?.*$/\1/')
+    INSTALLER_SHA=$(awk -v key="$PUBLISHED_KEY" '/^SU_PUBLIC_ED_KEY="/ { print "SU_PUBLIC_ED_KEY=\"" key "\""; next } { print }' linux/install.sh | shasum -a 256 | awk '{print $1}')
+    [ -f RELEASE_NOTES.md ] || die "RELEASE_NOTES.md not found"
+    if grep -q 'INSTALLER_SHA256_PLACEHOLDER' RELEASE_NOTES.md; then
+        die "RELEASE_NOTES.md still holds INSTALLER_SHA256_PLACEHOLDER. Replace it with the SHA-256 of install-linux.sh: ${INSTALLER_SHA}"
+    fi
+    if ! grep -q "$INSTALLER_SHA" RELEASE_NOTES.md; then
+        die "RELEASE_NOTES.md does not carry the SHA-256 of install-linux.sh. Put this in the notes, then run this again: ${INSTALLER_SHA}"
+    fi
+    echo "  Linux installer SHA-256 is in RELEASE_NOTES.md: ${INSTALLER_SHA}"
+    echo ""
+fi
+
 read -p "Proceed? [y/N] " confirm
 [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
 

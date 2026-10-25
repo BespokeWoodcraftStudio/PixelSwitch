@@ -4,7 +4,9 @@ may never do.
 ``PIXELSWITCH_TEST_MODE=1`` switches it on. In test mode:
 
 * the daemon refuses to start unless ``HOME`` is under ``~/.cache/pixelswitch-dev/`` (the user's
-  REAL home from the password database, never ``$HOME``);
+  REAL home from the password database, never ``$HOME``) and its control socket is too (an
+  ``XDG_RUNTIME_DIR`` pointing at ``/run/user/<uid>`` would put a scratch daemon's socket where the real
+  service's lives);
 * it refuses to start under systemd (``INVOCATION_ID`` set), so test mode can never be switched
   on for the real service by a stray variable in the user manager;
 * ``PIXELSWITCH_TEST_API_BASE`` (one base URL for the usage, profile and token endpoints) is
@@ -22,7 +24,7 @@ import os
 from typing import Mapping
 from urllib.parse import urlsplit
 
-from .paths import real_home
+from .paths import Paths, real_home
 
 ENV_MODE = "PIXELSWITCH_TEST_MODE"
 ENV_API_BASE = "PIXELSWITCH_TEST_API_BASE"
@@ -65,6 +67,10 @@ def validate_start(env: Mapping[str, str], home: str, real: str | None = None) -
                             "test mode is for scratch runs only and the service refuses it.")
     if not home_is_scratch(home, real):
         raise TestModeError(f"PIXELSWITCH_TEST_MODE needs HOME under {scratch_root(real)}/, but HOME is {home}.")
+    socket = Paths(home=home, runtime_dir=env.get("XDG_RUNTIME_DIR") or None).socket
+    if not home_is_scratch(socket, real):
+        raise TestModeError(f"PIXELSWITCH_TEST_MODE needs the control socket under {scratch_root(real)}/, but it would be "
+                            f"{socket}. Point XDG_RUNTIME_DIR into the scratch folder (spec 5.7 rule 1).")
 
 
 def host_is_blocked(host: str | None) -> bool:

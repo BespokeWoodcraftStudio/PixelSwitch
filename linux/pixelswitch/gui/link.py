@@ -49,6 +49,8 @@ class DaemonLink:
         self._factory = client_factory or (lambda: ControlClient(env=env))
         self._stop = threading.Event()
         self._reread = threading.Event()
+        #: Wakes the event thread out of a reconnect wait: ``request_snapshot`` (Start PixelSwitch, a click) and ``stop``.
+        self._wake = threading.Event()
         self._calls: "queue.Queue[tuple | None]" = queue.Queue()
         self._event_client: ControlClient | None = None
         self._call_client: ControlClient | None = None
@@ -64,9 +66,14 @@ class DaemonLink:
             self._threads.append(thread)
 
     def stop(self) -> None:
+        # The sentinel queues behind every call already made, so the worker finishes those first (a setting
+        # changed just before the window closed is still sent); only then are the connections closed.
+        self._calls.put(None)
+        if self._threads:
+            self._threads[-1].join(timeout=2.0)  # the call worker is started last
         self._stop.set()
         self._reread.set()
-        self._calls.put(None)
+        self._wake.set()
         for client in (self._event_client, self._call_client):
             if client is not None:
                 client.disconnect()
@@ -74,8 +81,10 @@ class DaemonLink:
             thread.join(timeout=2.0)
 
     def request_snapshot(self) -> None:
-        """Read everything again now (no ``usage.refresh``: this only reads)."""
+        """Read everything again now (no ``usage.refresh``: this only reads). While the daemon is not answering
+        it also ends the wait before the next reconnect, so Start PixelSwitch is not held up by a 30 second backoff."""
         self._reread.set()
+        self._wake.set()
 
     # --- calls (the user's actions) ----------------------------------------------------------------------
 
@@ -85,10 +94,12 @@ class DaemonLink:
         self._calls.put((method, params, done, timeout))
 
     def _call_loop(self) -> None:
-        while not self._stop.is_set():
+        while True:
             item = self._calls.get()
-            if item is None or self._stop.is_set():
+            if item is None:
                 return
+            if self._stop.is_set():
+                continue  # stop() gave the queue its 2 seconds; what is still queued after that is dropped
             method, params, done, timeout = item
             result: Any = None
             error: Exception | None = None
@@ -137,8 +148,12 @@ class DaemonLink:
                 first = False
                 check_protocol(_as_dict(client.call("status.get")))
                 client.call("events.subscribe")
+                skipped = getattr(client, "skipped_events", 0)
                 self._publish(self._read(client))
+                if getattr(client, "skipped_events", 0) != skipped:
+                    self._reread.set()  # an event slipped by during this first read: read again at once
                 backoff = 1.0
+                self._wake.clear()
                 self._read_events(client)
             except (ClientError, ControlError) as error:
                 first = False
@@ -152,9 +167,13 @@ class DaemonLink:
                 self._publish(model.Snapshot(connected=False, error=f"{type(error).__name__}: {error}"))
             finally:
                 client.disconnect()
-            if self._stop.wait(backoff):
-                break
-            backoff = min(backoff * 2, MAX_BACKOFF)
+            if self._wake.wait(backoff):
+                if self._stop.is_set():
+                    break
+                self._wake.clear()  # asked to look again: try now, and start the waits over
+                backoff = 1.0
+            else:
+                backoff = min(backoff * 2, MAX_BACKOFF)
 
     def _read_events(self, client: ControlClient) -> None:
         dirty = False
@@ -173,8 +192,14 @@ class DaemonLink:
                 dirty = True
                 last_event = now - QUIET_SECONDS
             if dirty and now - last_event >= QUIET_SECONDS:
+                skipped = getattr(client, "skipped_events", 0)
                 self._publish(self._read(client))
                 dirty = False
+                if getattr(client, "skipped_events", 0) != skipped:
+                    # An event landed while the read was waiting for a reply and was thrown away: what it announced
+                    # may be newer than what was just read, so read once more.
+                    dirty = True
+                    last_event = time.monotonic()
 
 
 def _as_dict(value: Any) -> dict:

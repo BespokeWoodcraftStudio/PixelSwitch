@@ -53,8 +53,13 @@ class GeneralPage(Adw.PreferencesPage):
         self.set_icon_name("preferences-system-symbolic")
         self._updating = False
 
-        auto = Adw.PreferencesGroup()
-        auto.set_title("Auto-switch")
+        # The switch and the two defaults are one group whose description is the overflow sentence (a caption added
+        # with group.add() lands after the whole list, so it would sit under the strategy picker instead).
+        defaults = Adw.PreferencesGroup()
+        defaults.set_title("Auto-switch")
+        defaults.set_description(model.TEXT_OVERFLOW)
+        self.defaults_group = defaults
+        auto = defaults
         self.enabled = Adw.SwitchRow()
         self.enabled.set_title("Switch account before hitting the limit")
         self.enabled.set_use_markup(False)
@@ -65,9 +70,11 @@ class GeneralPage(Adw.PreferencesPage):
         self.weekly_default = self._percent_row("Weekly default", "autoSwitch.weeklyThreshold")
         auto.add(self.session_default)
         auto.add(self.weekly_default)
-        auto.add(caption(model.TEXT_OVERFLOW))
         auto.add(caption("Any account can have its own threshold in Settings → Accounts, from 1% to 100%, or be Manual only so "
                          "auto-switch never moves you to it. 100% uses an account until it is empty."))
+        self.add(defaults)
+
+        auto = Adw.PreferencesGroup()
 
         self.on_fable = Adw.SwitchRow()
         self.on_fable.set_title("Also switch when Fable runs out")
@@ -82,6 +89,14 @@ class GeneralPage(Adw.PreferencesPage):
         self.strategy.set_model(Gtk.StringList.new([label for _, label in model.STRATEGIES]))
         self.strategy.connect("notify::selected", self._strategy_chosen)
         auto.add(self.strategy)
+        # The D6 line, with its button, right under the strategy it is about: numbers do nothing unless this chooses Priority.
+        self.priority_note = plain_row(model.TEXT_PRIORITY_NOTE)
+        self.priority_note.set_title_lines(0)
+        use_priority = Gtk.Button(label="Use priority")
+        use_priority.set_valign(Gtk.Align.CENTER)
+        use_priority.connect("clicked", lambda _b: self.window.run("settings.set", {"key": "autoSwitch.strategy", "value": "priority"}))
+        self.priority_note.add_suffix(use_priority)
+        auto.add(self.priority_note)
 
         self.drain_early = Adw.SwitchRow()
         self.drain_early.set_title("Switch early to use quota before it resets")
@@ -116,7 +131,14 @@ class GeneralPage(Adw.PreferencesPage):
         refresh.add(self.interval)
         self.add(refresh)
 
-        self._rows_for_auto = (self.session_default, self.weekly_default, self.on_fable, self.strategy, self.drain_early, self.drain_hours)
+        self._rows_for_auto = (self.session_default, self.weekly_default, self.on_fable, self.strategy, self.priority_note,
+                               self.drain_early, self.drain_hours)
+
+    def flush(self) -> None:
+        """Sends any number typed in the last half second (the window is closing)."""
+        self.session_default.debounce.flush()
+        self.weekly_default.debounce.flush()
+        self._drain_debounce.flush()
 
     def _percent_row(self, title: str, key: str) -> Adw.SpinRow:
         row = Adw.SpinRow.new_with_range(model.DEFAULT_RANGE[0], model.DEFAULT_RANGE[1], 1)
@@ -160,6 +182,7 @@ class GeneralPage(Adw.PreferencesPage):
             keys = [key for key, _ in model.STRATEGIES]
             self.strategy.set_selected(keys.index(strategy) if strategy in keys else 0)
             self.strategy.set_subtitle(model.STRATEGY_HELP.get(strategy, ""))
+            self.priority_note.set_visible(model.priority_note_visible(strategy, snapshot.accounts))
             early = bool(settings.get("autoSwitch.drainEarly", snapshot.auto_switch.get("drainEarly", True)))
             self.drain_early.set_active(early)
             hours = settings.get("autoSwitch.drainWithinHours", snapshot.auto_switch.get("drainWithinHours", 24))
@@ -360,6 +383,10 @@ class AboutPage(Adw.PreferencesPage):
         if not self._updating:
             self.window.run("settings.set", {"key": "updates.automatic", "value": self.automatic.get_active()})
 
+    def mark_stopped(self) -> None:
+        """The daemon is not answering: say so, and leave the rest as it was last read."""
+        self.daemon_row.set_subtitle("not running")
+
     def update(self, snapshot: model.Snapshot) -> None:
         self._updating = True
         try:
@@ -416,16 +443,25 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.toasts.set_child(view)
         self.set_content(self.toasts)
         self.connect("close-request", self._closing)
+        # "Updated N ago" counts up by itself (D15); no socket call is needed to redraw it.
+        self._tick_source = GLib.timeout_add_seconds(30, self._tick)
+        self.connect("destroy", self._destroyed)
 
     # --- the daemon -> the window ----------------------------------------------------------------------------
 
     def apply_snapshot(self, snapshot: model.Snapshot) -> None:
-        self.snapshot = snapshot
         self.banner.set_revealed(not snapshot.connected)
-        if snapshot.connected:
-            self.banner.set_title("PixelSwitch is not running.")
-        elif snapshot.error:
-            self.banner.set_title("PixelSwitch is not running. " + snapshot.error)
+        if not snapshot.connected:
+            # Keep the last connected state on screen, greyed out. Drawing the empty disconnected snapshot would tear
+            # down every card, show "No Accounts" with a live Add button and invent defaults, on every daemon restart
+            # (each auto-update included).
+            self.banner.set_title("PixelSwitch is not running. " + snapshot.error if snapshot.error else "PixelSwitch is not running.")
+            self.stack.set_sensitive(False)
+            self.about_page.mark_stopped()
+            return
+        self.snapshot = snapshot
+        self.stack.set_sensitive(True)
+        self.banner.set_title("PixelSwitch is not running.")
         self.accounts_page.update(snapshot)
         self.general_page.update(snapshot)
         self.sign_in_page.update(snapshot)
@@ -486,8 +522,19 @@ class SettingsWindow(Adw.ApplicationWindow):
         except GLib.Error:
             self.toast("The link could not be opened. Use Copy and paste it into a browser.")
 
+    def _tick(self) -> bool:
+        if self.snapshot.connected:
+            self.accounts_page.update(self.snapshot)
+        return True
+
+    def _destroyed(self, *_args) -> None:
+        if self._tick_source:
+            GLib.source_remove(self._tick_source)
+            self._tick_source = 0
+
     def _closing(self, *_args) -> bool:
         self.accounts_page.flush()
+        self.general_page.flush()
         return False
 
 

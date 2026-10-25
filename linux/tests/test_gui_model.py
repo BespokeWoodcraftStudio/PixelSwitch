@@ -80,6 +80,38 @@ class AccountTextTests(unittest.TestCase):
         waiting = {"email": "x", "isSwitchable": True, "usage": {"error": "Waiting for Claude Code to renew this login. It renews the next time a session runs."}}
         self.assertFalse(model.can_retry(waiting))
         self.assertFalse(model.needs_resign(waiting))
+        # The daemon's own sentence for an unexpected failure offers Retry too (usagecycle: canRetry)
+        unexpected = {"email": "x", "isSwitchable": True, "usage": {"error": "Could not fetch usage: JSONDecodeError"}}
+        self.assertTrue(model.can_retry(unexpected))
+        self.assertFalse(model.needs_resign(unexpected))
+
+    def test_an_account_that_follows_split_defaults_gets_the_two_window_sentence(self):
+        # Session 90, weekly 50, and the account has no limit of its own. Even if its effective values were read a moment
+        # before the defaults changed (they say 90 and 90), the snapshot's defaults decide.
+        stale = {"email": "x", "isActive": True, "effectiveThreshold": 90, "effectiveSessionThreshold": 90, "effectiveWeeklyThreshold": 90}
+        text = model.limit_help(stale, (90.0, 50.0))
+        self.assertIn("at 90% of its session or 50% of its week", text)
+        self.assertIn("89% or less of its session and 49% or less of its week", text)
+        self.assertNotIn("moves you to it only while it is at 89% or less.", text)
+        # Equal defaults still give the one-limit sentence.
+        self.assertIn("at 90%, and moves you to it only while it is at 89% or less.", model.limit_help(stale, (90.0, 90.0)))
+        # An account's own limit is used as the daemon resolved it.
+        own = {"email": "x", "weeklyThreshold": 40, "effectiveWeeklyThreshold": 40, "effectiveSessionThreshold": 90}
+        self.assertIn("at 90% of its session or 40% of its week", model.limit_help(own, (90.0, 50.0)))
+
+    def test_the_remove_text_depends_on_whether_claude_code_will_be_switched(self):
+        active, other = {"id": "1", "isActive": True}, {"id": "2", "isActive": False}
+        self.assertIn("switch Claude Code to the next account by priority", model.remove_body(active, [active, other]))
+        self.assertIn("every Claude Code on this computer uses", model.remove_body(active, [active, other]))
+        for info, accounts in ((other, [active, other]), (active, [active])):
+            body = model.remove_body(info, accounts)
+            self.assertIn("Claude Code's own login is not touched.", body)
+            self.assertNotIn("switch Claude Code", body)
+
+    def test_underscores_are_doubled_for_dbusmenu(self):
+        self.assertEqual(model.dbusmenu_label("ahmed_h@example.com"), "ahmed__h@example.com")
+        self.assertEqual(model.dbusmenu_label("side_project"), "side__project")
+        self.assertEqual(model.dbusmenu_label("no underscore"), "no underscore")
 
     def test_short_message(self):
         self.assertEqual(model.short_message("Session expired. Re-authenticate (↻) to fix."), "Session expired.")

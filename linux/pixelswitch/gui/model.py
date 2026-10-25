@@ -60,6 +60,7 @@ RETRYABLE_PREFIXES = (
     "Unexpected reply from Anthropic",
     "Anthropic sent usage data PixelSwitch couldn't read",
     "Could not save the refreshed sign-in",
+    "Could not fetch usage",  # the daemon's own sentence for an unexpected failure (usagecycle: canRetry)
 )
 
 
@@ -243,11 +244,43 @@ def limit_menu_label(info: Mapping, window: str, defaults: tuple[float, float]) 
     return f"Default ({int(round_half_away(defaults[0 if window == 'session' else 1]))}%)"
 
 
+def _leave_value(info: Mapping, window: str, defaults: tuple[float, float]) -> float:
+    """Where auto-switch moves off the account for ``session`` or ``weekly``: its own limit (as the daemon resolved
+    it, when it says), else the snapshot's default for that window."""
+    own = own_limit(info, window)
+    index = 0 if window == "session" else 1
+    if own is None:
+        return defaults[index]
+    resolved = info.get("effectiveSessionThreshold" if window == "session" else "effectiveWeeklyThreshold", info.get("effectiveThreshold"))
+    return float(resolved) if isinstance(resolved, (int, float)) and not isinstance(resolved, bool) else own
+
+
+def remove_body(info: Mapping, accounts: Sequence[Mapping]) -> str:
+    """The Remove confirmation's text. Removing the account Claude Code is using now, while others remain, makes the
+    daemon switch Claude Code to the next account by priority (D20): that changes the account every Claude Code on this
+    computer uses (on the founder's laptop, the CabDesign farm's), so the dialog says so."""
+    if info.get("isActive") and len(accounts) > 1:
+        return ("This is the account Claude Code is using now. PixelSwitch will switch Claude Code to the next account by "
+                "priority, which changes the account every Claude Code on this computer uses. Its saved login is deleted "
+                "from PixelSwitch; signing it back in needs a person at a browser.")
+    return ("This deletes the account's saved login from PixelSwitch. Signing it back in needs a person at a browser. "
+            "Claude Code's own login is not touched.")
+
+
+def dbusmenu_label(text: str) -> str:
+    """A label as Dbusmenu shows it: an underscore marks an access key and is hidden, so a real one is doubled
+    (``side_project`` would otherwise show as ``sideproject``)."""
+    return text.replace("_", "__")
+
+
 def limit_help(info: Mapping, defaults: tuple[float, float]) -> str:
     """What the account's setting does, in numbers (SettingsAccountsTab.thresholdHelp). With equal
     windows it is the one-limit sentence."""
-    session_leave = info.get("effectiveSessionThreshold", info.get("effectiveThreshold", defaults[0]))
-    weekly_leave = info.get("effectiveWeeklyThreshold", info.get("effectiveThreshold", defaults[1]))
+    # An account that follows a default is judged by the defaults of THIS snapshot, not by an effective value that
+    # may have been read a moment before the default changed (status.get and accounts.list are separate reads):
+    # an account following split defaults (session 90, weekly 50) then still gets the two-window sentence.
+    session_leave = _leave_value(info, "session", defaults)
+    weekly_leave = _leave_value(info, "weekly", defaults)
 
     def pct(value: float) -> str:
         return f"{value:g}%"

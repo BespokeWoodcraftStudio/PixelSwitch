@@ -18,11 +18,11 @@ import math
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
+from .finite import finite_number
 from .usage_model import (
     FABLE_MODEL_NAME,
     UsageResponse,
     UsageWindow,
-    is_number,
 )
 
 # --- constants (AutoSwitchEngine.swift:42-68, 475-490) -------------------------------
@@ -75,10 +75,9 @@ def round_half_away(value: float) -> float:
 
 
 def _finite_number(value: Any) -> float | None:
-    if not is_number(value):
-        return None
-    number = float(value)
-    return number if math.isfinite(number) else None
+    """A JSON number as a finite float, else None. An integer of 309 or more digits is a valid Python int that
+    ``float()`` refuses with OverflowError; it reads as not a number here, never as a crash (finite.py)."""
+    return finite_number(value)
 
 
 def ceiling(threshold: float, room: float) -> float | None:

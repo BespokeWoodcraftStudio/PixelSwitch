@@ -174,7 +174,8 @@ class SniBackend:
             if entry.kind == "separator":
                 item.property_set("type", "separator")
             else:
-                item.property_set("label", entry.label)
+                # Dbusmenu reads a single underscore as an access-key mark and hides it; a real one is doubled.
+                item.property_set("label", model.dbusmenu_label(entry.label))
                 item.property_set_bool("enabled", entry.enabled)
                 if entry.kind == "check":
                     item.property_set("toggle-type", "checkmark")
@@ -305,12 +306,27 @@ class AppIndicatorBackend:
             else:
                 item = gtk.MenuItem.new_with_label(entry.label)
             item.set_sensitive(entry.enabled)
-            if entry.action is not None:
-                item.connect("activate", lambda _w, action=entry.action: self._on_action(action))
+            if entry.action is not None or entry.kind == "check":
+                item.connect("activate", self._activate_handler(entry))
             menu.append(item)
         menu.show_all()
         self._menu = menu
         self._indicator.set_menu(menu)
+
+
+    def _activate_handler(self, entry: model.MenuEntry) -> Callable:
+        def activated(widget) -> None:
+            if entry.kind == "check":
+                # A click flips a check item's mark before this runs. The daemon decides the real state, and the menu
+                # is redrawn only when its entries change, so a click that changes nothing (the active account, a
+                # failed switch) would leave a wrong mark. Put the mark back; the next snapshot moves it if it should move.
+                widget.handler_block_by_func(activated)
+                widget.set_active(entry.checked)
+                widget.handler_unblock_by_func(activated)
+            if entry.action is not None:
+                self._on_action(entry.action)
+
+        return activated
 
 
 def appindicator_available() -> bool:

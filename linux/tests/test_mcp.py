@@ -261,7 +261,8 @@ class SameAsSwiftTests(unittest.TestCase):
 
     def test_every_description_is_the_swift_one(self):
         region = self.source[self.source.index("static let tools"):self.source.index("private static func prop")]
-        swift = {s for s in swift_literals(region) if " " in s}
+        # The Swift text, after the one fixed list of Linux wordings (mcp.LINUX_TEXT): any other drift still fails.
+        swift = {mcp.linux_wording(s) for s in swift_literals(region) if " " in s}
         python: set[str] = set()
         for tool in mcp.TOOLS:
             python.add(tool.description)
@@ -297,7 +298,48 @@ class SameAsSwiftTests(unittest.TestCase):
         indent = min(len(line) - len(line.lstrip()) for line in body.split("\n") if line.strip())
         lines = [line[indent:] for line in body.split("\n")]
         joined = "\n".join(lines).replace("\\\n", "").rstrip()
-        self.assertEqual(mcp.INSTRUCTIONS, joined)
+        self.assertEqual(mcp.INSTRUCTIONS, mcp.linux_wording(joined))
+
+    def test_the_linux_wordings_are_all_needed_and_leave_no_mac_behind(self):
+        text = " ".join(swift_literals(self.source)) + self.source.replace("\\\n", "")  # literals and the instructions block
+        for old, new in mcp.LINUX_TEXT:
+            self.assertIn(old, text, f"{old!r} is no longer in the Swift text; drop it from LINUX_TEXT")
+            self.assertNotIn(old, mcp.INSTRUCTIONS + " ".join(t.description for t in mcp.TOOLS))
+        everything = [mcp.INSTRUCTIONS] + [t.description for t in mcp.TOOLS]
+        for tool in mcp.TOOLS:
+            everything += [prop["description"] for prop in tool.properties.values() if "description" in prop]
+        for line in everything:
+            self.assertNotIn("Mac", line)
+            self.assertNotIn("Safari", line)
+        by_name = {t.name: t for t in mcp.TOOLS}
+        self.assertEqual(by_name["check_for_updates"].description,
+                         "Ask PixelSwitch to check for an update; a newer version installs by itself.")
+        self.assertNotIn("cost", by_name["get_usage"].description)
+        self.assertIn('such as "Firefox"', by_name["start_sign_in"].properties["open"]["description"])
+
+    def test_types_limits_and_which_tools_pass_their_arguments_are_the_swift_ones(self):
+        region = self.source[self.source.index("static let tools"):self.source.index("private static func prop")]
+        blocks = re.split(r"(?=\bTool\(name: \")", region)[1:]
+        self.assertEqual(len(blocks), 20)
+        kinds = r'(?:prop\(|\.string\()"(string|number|integer|array|null|object|boolean)"'
+        for block in blocks:
+            name = re.match(r'Tool\(name: "([a-z_]+)"', block).group(1)
+            tool = next(t for t in mcp.TOOLS if t.name == name)
+            swift_types = re.findall(kinds, block)
+            if re.search(r"properties: account\b|account\.merging", block):
+                swift_types.append("string")  # the shared account property
+            python_types: list[str] = []
+            for prop in tool.properties.values():
+                declared = prop.get("type")
+                python_types += declared if isinstance(declared, list) else ([declared] if declared else [])
+                if "items" in prop:
+                    python_types.append(prop["items"]["type"])
+            self.assertEqual(sorted(swift_types), sorted(python_types), name)
+            swift_min = sorted(float(v) for v in re.findall(r'"minimum": \.number\(([0-9.]+)\)', block))
+            swift_max = sorted(float(v) for v in re.findall(r'"maximum": \.number\(([0-9.]+)\)', block))
+            self.assertEqual(swift_min, sorted(float(p["minimum"]) for p in tool.properties.values() if "minimum" in p), name)
+            self.assertEqual(swift_max, sorted(float(p["maximum"]) for p in tool.properties.values() if "maximum" in p), name)
+            self.assertEqual("params: pass" in block, tool.passes, name)
 
 
 # --- the stdio loop -------------------------------------------------------------------------------------

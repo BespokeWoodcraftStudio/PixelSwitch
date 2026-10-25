@@ -170,8 +170,10 @@ def _server_is_us(sock: socket.socket) -> bool:
     if option is None:
         return True
     try:
-        creds = sock.getsockopt(socket.SOL_SOCKET, option, struct.calcsize("3i"))
-        _pid, uid, _gid = struct.unpack("3i", creds)
+        # struct ucred is { pid_t pid; uid_t uid; gid_t gid; }: a signed int, then two UNSIGNED ones. Read as
+        # signed, a uid of 2**31 or more is negative and the client would refuse its own daemon.
+        creds = sock.getsockopt(socket.SOL_SOCKET, option, struct.calcsize("iII"))
+        _pid, uid, _gid = struct.unpack("iII", creds)
     except (OSError, struct.error):
         return False
     return uid == os.getuid()
@@ -195,6 +197,9 @@ class ControlClient:
         self._sock: socket.socket | None = None
         self._buffer = bytearray()
         self._next_id = 1
+        #: Pushed events that ``call`` skipped while it waited for its reply (a face that reads on an event
+        #: reads again when this rose during a read, so a change that landed mid-read is not lost).
+        self.skipped_events = 0
         #: The path the current connection was made to.
         self.path: str | None = None
 
@@ -293,6 +298,8 @@ class ControlClient:
                 raise ClientError("timedOut", method)
             response = decode_response(line)
             if response is None or response.id != request_id:
+                if decode_event(line) is not None:
+                    self.skipped_events += 1  # a pushed event that arrived while waiting; the faces read again
                 continue  # a pushed event, or another reply
             if response.error is not None:
                 raise ControlError.from_rpc(response.error)
