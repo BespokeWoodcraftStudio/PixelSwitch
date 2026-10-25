@@ -96,8 +96,10 @@ class Seed:
 class Rig:
     """A scratch HOME with a mock API, a stub claude and a wired coordinator."""
 
-    def __init__(self, case: unittest.TestCase | None = None, *, keep_log: bool = True) -> None:
-        self.tmp = tempfile.mkdtemp(prefix="pswitch-lb-")
+    def __init__(self, case: unittest.TestCase | None = None, *, keep_log: bool = True, root: str | None = None) -> None:
+        if root is not None:
+            os.makedirs(root, mode=0o700, exist_ok=True)
+        self.tmp = root if root is not None else tempfile.mkdtemp(prefix="pswitch-lb-")
         if case is not None:
             case.addCleanup(self.close)
         self.home = os.path.join(self.tmp, "home")
@@ -157,7 +159,7 @@ class Rig:
         accounts = sorted_by_priority([s.account for s in self.seeds])
         if accounts:
             AccountsFile(self.paths.accounts, self.log.category("seed")).save(accounts)
-        if self.settings_seed:
+        if self.settings_seed and not os.path.exists(self.paths.settings):
             fsio.atomic_write(self.paths.settings, json.dumps(self.settings_seed))
         ledger = LockLedger(os.path.join(self.paths.state_dir, "held-locks.json"))
         login = ClaudeLogin(self.paths, self.log.category("Login"), ledger=ledger, clock=self.clock, sleep=self.clock.sleep)
