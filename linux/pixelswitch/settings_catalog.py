@@ -35,7 +35,8 @@ from .engine import (
     resolve_defaults,
     round_half_away,
 )
-from .protocol import ControlError, dumps, trim_whitespace_and_newlines
+from .protocol import ControlError, dumps, fold_text, trim_whitespace_and_newlines
+from .finite import finite_number
 from .usage_model import is_number, swift_double, trim_whitespace
 
 MENU_BAR_MODULES = (
@@ -175,9 +176,9 @@ def invalid(key: SettingKey) -> ControlError:
 def named(name: str) -> SettingKey:
     """Finds a key by its name, case-insensitive, or lists the valid names (:141-145)."""
     trimmed = trim_whitespace(name)
-    wanted = trimmed.casefold()
+    wanted = fold_text(trimmed)
     for key in KEYS:
-        if key.name.casefold() == wanted:
+        if fold_text(key.name) == wanted:
             return key
     raise ControlError("notFound", f'There is no setting called "{trimmed}".', NAMES)
 
@@ -188,7 +189,7 @@ def named(name: str) -> SettingKey:
 def _as_number(value: Any) -> float | None:
     """:148-152. A JSON number, or numeric text (trimmed)."""
     if is_number(value):
-        return float(value)
+        return finite_number(value)  # a huge integer is not a number here (it overflows a double)
     if isinstance(value, str):
         return swift_double(trim_whitespace(value))
     return None
@@ -213,15 +214,17 @@ def normalize(key: SettingKey, value: Any) -> Any:
     kind = key.kind
 
     if key.name == STRATEGY_KEY and isinstance(value, str):
-        alias = STRATEGY_ALIASES.get(value.casefold())
+        # Trimmed first, as the Mac trims .whitespaces before comparing (SettingsCatalog.swift:108).
+        alias = STRATEGY_ALIASES.get(trim_whitespace(value).casefold())
         if alias is not None:
             return alias
 
     if kind.type == "bool":
         if isinstance(value, bool):
             return value
-        if is_number(value) and float(value) in (0.0, 1.0):
-            return float(value) == 1.0
+        number = finite_number(value)
+        if number is not None and number in (0.0, 1.0):
+            return number == 1.0
         if isinstance(value, str):
             text = value.lower()
             if text in ("true", "on", "yes", "1"):
@@ -238,7 +241,7 @@ def normalize(key: SettingKey, value: Any) -> Any:
                     return candidate
         if isinstance(value, str):
             for candidate in kind.choices:
-                if isinstance(candidate, str) and candidate.casefold() == value.casefold():
+                if isinstance(candidate, str) and fold_text(candidate) == fold_text(value):
                     return candidate
         raise invalid(key)
 
@@ -266,7 +269,7 @@ def normalize(key: SettingKey, value: Any) -> Any:
         seen: set[str] = set()
         result: list[str] = []
         for item in items:
-            canonical = next((c for c in kind.choices if c.casefold() == item.casefold()), None)
+            canonical = next((c for c in kind.choices if fold_text(c) == fold_text(item)), None)
             if canonical is None:
                 raise invalid(key)
             if canonical not in seen:
@@ -317,20 +320,22 @@ def validate_claude_binary_path(path: str, is_executable_file: Callable[[str], b
 
 
 def _stored_number(stored: Mapping[str, Any], store_key: str) -> float | None:
-    value = stored.get(store_key)
-    if is_number(value) and math.isfinite(float(value)):
-        return float(value)
-    return None
+    return finite_number(stored.get(store_key))
 
 
 def resolve_global_defaults(stored: Mapping[str, Any]) -> Defaults:
     """Spec 2.1 / 2.2 over ``settings.json``: ``autoSwitchThreshold`` (the base; unset or 0 reads
     90), then ``autoSwitchSessionThreshold`` / ``autoSwitchWeeklyThreshold`` (set only when
     present and a finite non-zero number, else they follow the base)."""
+    # A number too large for a double is read as unset (the engine would raise on it).
+    def number_or_unset(key: str) -> Any:
+        value = stored.get(key)
+        return finite_number(value) if is_number(value) else value
+
     return resolve_defaults(
-        stored.get("autoSwitchThreshold"),
-        stored.get("autoSwitchSessionThreshold"),
-        stored.get("autoSwitchWeeklyThreshold"),
+        number_or_unset("autoSwitchThreshold"),
+        number_or_unset("autoSwitchSessionThreshold"),
+        number_or_unset("autoSwitchWeeklyThreshold"),
     )
 
 
@@ -405,7 +410,8 @@ def read_setting(stored: Mapping[str, Any], key: SettingKey) -> Any:
         except ControlError:
             return key.default
     if kind.type == "number":
-        return _tidy(float(value)) if is_number(value) and math.isfinite(float(value)) else key.default
+        number = finite_number(value)
+        return _tidy(number) if number is not None else key.default
     if kind.type == "list":
         try:
             return normalize(key, value)

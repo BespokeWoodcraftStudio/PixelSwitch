@@ -203,9 +203,9 @@ class Coordinator(UsageMixin):
                 self.log.warning(f"[event] Listener failed ({type(error).__name__})")
 
     def emit_auto_switched(self, record) -> None:
-        data = protocol.auto_switched_data(record.from_id, record.to_id, record.limit, record.trigger, record.window)
-        if record.relaxed:
-            data["relaxed"] = True
+        # `relaxed` is always sent, as the Mac's ControlSnapshots.autoSwitchedData does.
+        data = protocol.auto_switched_data(record.from_id, record.to_id, record.limit, record.trigger, record.window,
+                                           relaxed=bool(record.relaxed))
         self.emit("autoSwitched", data)
 
     def emit_accounts_changed(self) -> None:

@@ -213,16 +213,18 @@ class MethodAndEventTests(unittest.TestCase):
 
     def test_an_event_is_a_notification_with_no_id(self):
         line = p.event_line("usageUpdated", 1_790_000_000)
-        self.assertEqual(line, '{"jsonrpc":"2.0","method":"event","params":{"at":"2026-09-21T14:13:20Z","type":"usageUpdated"}}')
-        self.assertEqual(p.decode_event(line), {"at": "2026-09-21T14:13:20Z", "type": "usageUpdated"})
+        # Every event carries a data object, as the Mac's does: usageUpdated sends {}.
+        self.assertEqual(line, '{"jsonrpc":"2.0","method":"event","params":{"at":"2026-09-21T14:13:20Z","data":{},"type":"usageUpdated"}}')
+        self.assertEqual(p.decode_event(line), {"at": "2026-09-21T14:13:20Z", "data": {}, "type": "usageUpdated"})
+        self.assertEqual(line, p.event_line("usageUpdated", 1_790_000_000, p.usage_updated_data()))
         self.assertIsNone(p.decode_response(line).id)
 
     def test_event_data_is_sorted_and_present_only_when_given(self):
-        line = p.event_line("autoSwitched", 0, p.auto_switched_data(A.id, B.id, "windows", "threshold", "weekly"))
+        line = p.event_line("autoSwitched", 0, p.auto_switched_data(A.id, B.id, "windows", "threshold", "weekly", relaxed=False))
         params = p.decode_event(line)
         self.assertEqual(params["data"], {"from": A.id.upper(), "to": B.id.upper(), "limit": "windows",
-                                          "trigger": "threshold", "window": "weekly"})
-        self.assertNotIn("window", p.auto_switched_data("a", "b", "fable", "threshold"))
+                                          "trigger": "threshold", "window": "weekly", "relaxed": False})
+        self.assertNotIn("window", p.auto_switched_data("a", "b", "fable", "threshold", relaxed=False))
 
     def test_active_account_changed_sends_explicit_nulls(self):
         self.assertEqual(p.dumps(p.active_account_changed_data(None, None)), '{"accountId":null,"email":null}')

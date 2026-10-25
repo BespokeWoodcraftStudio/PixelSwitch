@@ -25,6 +25,7 @@ from .accounts import Account
 from .credtools import gate_is_switchable, is_usable_login
 from .logins import Login, login_from_credential
 from .protocol import ControlError
+from .staying_put import WAITING_FOR_SESSION_LIMIT, staying_put_kind
 from .usage_guard import (
     NoticeCurrent, UsageDecision, UsageRequestError, choose_notice, fingerprint_for_log, fingerprint_of, paused_message,
     parked,
@@ -613,11 +614,10 @@ class UsageMixin:
         if not reached:
             self.last_staying_put_note = None
             return
-        overflow = engine.overflow_holds(
-            active=active, usage_by_account=dict(self.usage), is_unusable=self._has_no_subscription,
-            active_sampled_this_cycle=sampled_this_cycle, rule_of=lambda a: self.rule_for(a, defaults),
-            defaults=defaults, now=now)
-        if overflow:
+        # The overflow sentence only while the account is still under its relaxed limits (rule 10);
+        # at or past them, equal windows included, 1.9's sentence is the true one.
+        kind = staying_put_kind(usage, rule, defaults, sampled_this_cycle, config.on_fable, now)
+        if kind == WAITING_FOR_SESSION_LIMIT:
             note = (f"[autoSwitch] Active {active.id} at {', '.join(reached)} ({limits_text(leave)}), but no account "
                     f"under its weekly limit can take you; staying until the session limit ({leave.session:.0f}%)")
         else:

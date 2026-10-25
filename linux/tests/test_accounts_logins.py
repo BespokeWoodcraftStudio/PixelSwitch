@@ -143,7 +143,13 @@ class LoginParsingTests(unittest.TestCase):
         self.assertFalse(logins.same_oauth_tokens(base, credential(access="A", refresh="R2")))
         self.assertFalse(logins.same_oauth_tokens(base, "garbage"))
         self.assertFalse(logins.same_oauth_tokens(None, base))
-        self.assertFalse(logins.same_oauth_tokens("garbage", "garbage"))
+        # The Mac's liveLoginChanged (LoginSafetyTests.swift:105-121): equal text, none and none and
+        # blank tokens are the same; only a difference or one unreadable side is a change.
+        self.assertTrue(logins.same_oauth_tokens("garbage", "garbage"))
+        self.assertTrue(logins.same_oauth_tokens(None, None))
+        blank = credential(access="", refresh="")
+        self.assertTrue(logins.same_oauth_tokens(blank, blank))
+        self.assertTrue(logins.same_oauth_tokens(blank, credential(access="", refresh="", expires=7)))
 
 
 class MergeTests(unittest.TestCase):
