@@ -49,3 +49,6 @@ that file for the full entry. Start here to get up to speed on the project.
 ## 2026-10-24
 - [WL-2026-10-24-001](./2026-10-24.md) — 2.0 started: recon and spec for separate session/weekly thresholds, priority numbers, Linux — _design/wip_
 - [WL-2026-10-24-002](./2026-10-24.md) — PixelSwitch 2.0 released: separate session/weekly limits, priority numbers, and a Linux version (installed on the laptop) — _feature/done_
+
+## 2026-10-25
+- [WL-2026-10-25-001](./2026-10-25.md) — 2.0 confirmed on every client; records brought up to date (README Linux, AGENTS, ARCHITECTURE, spec and lanes marked released, investigation index) — _docs/done_

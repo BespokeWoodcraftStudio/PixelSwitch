@@ -579,3 +579,15 @@ other Mac ──ssh──▶ pixelswitch mcp ───────┤  ~/Library
 - **Events.** `ControlEventHub` pushes `activeAccountChanged`, `usageUpdated`, `autoSwitched` (with `window` and `relaxed` since 2.0), `accountsChanged` (the account list after any change to it or to a default threshold, debounced), `signInChanged` and `error` to subscribed connections (`pixelswitch watch`).
 - **Tool.** `PixelSwitchCLI/` (`pixelswitch`): hand-rolled argument parsing, readable output or `--json`, exit codes 0 ok, 1 failed, 2 usage, 3 busy, 4 no such account, 5 unreachable. Starts the app with `open -g -b` if it is not running. `pixelswitch mcp` serves 20 tools on stdio in both eras: modern (2026-07-28, per-request `_meta`, `server/discover`) and legacy (`initialize`).
 - **Logging.** Each remote command is logged as its method, account id or setting key, and outcome. No email address, link or argument is logged.
+
+## 2.0: separate limits, priority numbers, and the Linux version
+
+The rules (two windows, layered thresholds, weekly overflow, priority numbers, the usable-login rule, removing the
+active account, the switch with no active account) are specified in `docs/superpowers/specs/2026-10-24-2.0-spec.md`
+(revision 4) and pinned on both platforms by `Tests/conformance/autoswitch-vectors.json`. The Mac code is
+`PixelSwitch/Services/AutoSwitchEngine.swift` (`planWindowed`, `eligibleWindowed`), `AccountOrder.swift`,
+`AccountRemoval.swift`, `LiveLoginBackup.swift` and `AppState.swift`. The Linux version is in `linux/`; its design,
+Claude Code's three locks and how a running Claude Code notices a rewritten login are in `linux/README.md`. Parts of
+this file above describe 1.x behaviour (per-account Keychain items, a 30 s refresh) that the code has since replaced:
+when they disagree, the code and the 2.0 spec win.
+

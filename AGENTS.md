@@ -21,3 +21,15 @@
 - **Models**: `Account.swift`, `*Data.swift` (usage/cost/activity).
 - **Views**: `MainMenuView.swift` (dropdown), `SettingsView.swift` (native window), `HiddenWindowView.swift` (LSUIElement keepalive workaround).
 - **Remote control** (`PixelSwitch/Control/`, `PixelSwitchCLI/`): the `pixelswitch` tool (`Contents/Helpers/pixelswitch`, a `type: tool` target in `project.yml`, signed in CI) talks to the app over a user-only Unix socket (`~/Library/Application Support/PixelSwitch/control.sock`, newline-delimited JSON-RPC, `ControlProtocol.swift` shared by both). `ControlAPI` (pure, unit-tested) → `AppController` → `AppState`; `SettingsStore` owns every setting's side effect; `pixelswitch mcp` is an MCP server (20 tools; modern 2026-07-28 and legacy handshake). Protocol stays 2; 21 methods and 24 settings keys since 2.0 (`accounts.setThresholds`, `accounts.setPriority`, `autoSwitch.sessionThreshold`, `autoSwitch.weeklyThreshold`), all additions optional and announced in `status.features`. Priority is a stored 1-99 number, shown as `P1`, never an account reference. No token ever crosses the socket; no TCP listener.
+
+**Linux (2.0)**: `linux/` is a Python 3.12+ port (stdlib daemon `pixelswitchd` as a systemd user service, the same
+`pixelswitch` CLI and MCP, a GTK 3 tray over StatusNotifierItem, a GTK 4/libadwaita settings window, signed self-updates
+with rollback). It must behave exactly like the Mac on the shared rules: `Tests/conformance/autoswitch-vectors.json`
+runs on both engines. Start at `linux/README.md`; tests `python3 -m unittest discover -s linux/tests -t linux`.
+Contract for both platforms: `docs/superpowers/specs/2026-10-24-2.0-spec.md`.
+
+**Rules learned in 2.0** (details in `docs/SESSION-HANDOVER.md` gotchas): this Mac cannot compile SwiftUI view files, so a
+view change needs a CI branch build before main; wait on CI with an exit status that follows the run's conclusion and
+poll no faster than every 120 s (the GitHub API quota is shared with the founder's other sessions); never install,
+upgrade or relink software on the founder's machines; test Linux changes on his laptop only under spec section 5.7
+(scratch HOME, test mode, fabricated logins).

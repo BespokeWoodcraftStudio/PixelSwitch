@@ -28,3 +28,12 @@ Lane FL3 ran `brew install gnu-tar gtk4 libadwaita pygobject3` on the founder's 
 python@3.14` (after `brew unlink python@3.15`); `python3` is 3.14.7 again and `import graphify` works. python@3.15,
 gtk4, libadwaita, pygobject3 and gnu-tar (as `gtar`) remain installed and change no default. The lane plan now forbids
 installing anything on the founder's machines.
+
+## Closure (2026-10-25)
+
+| # | Closed by | Proof |
+|---|---|---|
+| O1 | Lane FL4 (d85ba1c): dirlock ownership on exact values (statx birth time in ns, PixelSwitch's own random-ns mtime read back) | CI run 40165732719 and the v2.0 release run 40167290828: Linux tests green on Ubuntu 24.04 and 26.04; deterministic same-inode tests |
+| O2 | Lane FL3 (6325b7c): `model.limit_help` judges a default-following account by the snapshot's defaults | `test_gui_model.py`; confirmed in the final Opus check |
+| O3 | Lane FE (03478e0): `remote-control.sh` skips `machine.todayCost` on Linux | `bash -n`; the Linux scratch runs |
+| O4 | Orchestrator: default `python3` restored to 3.14.7; lane rule added | `python3 --version`, `import graphify`; lanes plan "Never install" rule |
