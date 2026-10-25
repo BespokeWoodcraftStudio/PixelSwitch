@@ -637,6 +637,7 @@ final class AppState: ObservableObject {
                     accounts[i].isActive = (i == index)
                 }
                 activeAccount = accounts[index]
+                forgetRemovedLogins()
                 // A re-authentication is a deliberate account choice; grant it
                 // the same auto-switch grace period a manual switch gets.
                 lastAutoSwitchAt = Date()
@@ -1084,8 +1085,11 @@ final class AppState: ObservableObject {
         // No active account and no proven owner (spec D20 revision 4): the login
         // being replaced is not saved anywhere, so decide whether that is safe.
         var adoptsBelievedActive = false
-        // Set when the switch goes ahead on LiveLoginDisposal's word: the login it
-        // judged, so the switch writes nothing if the live login is another one.
+        // Set when the switch goes ahead on LiveLoginDisposal's word (.proceed, or
+        // .treatAsActive, where the safe overwrite rested on one account's backup
+        // holding this very grant): the login it judged, so the switch writes
+        // nothing if the live login is another one, such as a renewal that spent
+        // the refresh token that backup holds.
         var judgedLiveLogin: LiveLoginBackup.JudgedLogin?
         if currentActive == nil, liveOwner == nil {
             var decision = unownedLiveLoginDecision(credential: liveCredential, identity: liveIdentity)
@@ -1103,7 +1107,9 @@ final class AppState: ObservableObject {
                 log.warning("[switchTo] No account is active and the live login's owner is not proven; switching anyway (\(basis)), and saving nothing for the login being replaced")
                 judgedLiveLogin = LiveLoginBackup.JudgedLogin(credential: liveCredential)
             case .treatAsActive:
-                break
+                // Nothing is saved for the believed account at step 1 (no proven
+                // owner), so bind the switch to the login that was judged.
+                judgedLiveLogin = LiveLoginBackup.JudgedLogin(credential: liveCredential)
             case .refuse:
                 log.error("[switchTo] REFUSED: no account is active and the live login cannot be shown to be the removed account's or to be nobody's on the list; nothing was changed")
                 throw ActionError(kind: .failed, message: String(localized: "PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again.", bundle: L10n.bundle))
