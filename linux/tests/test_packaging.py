@@ -41,6 +41,11 @@ def spit(path, data):
         handle.write(data)
 
 
+def clean_path() -> str:
+    """The test interpreter's folder, then the system's: no per-user guard scripts that shadow rm."""
+    return os.pathsep.join([os.path.dirname(sys.executable), "/usr/bin", "/bin"])
+
+
 def gnu_tar() -> str | None:
     for name in ("tar", "gtar"):
         path = shutil.which(name)
@@ -215,7 +220,7 @@ class BuildReleaseTests(unittest.TestCase):
 
     def build(self, out, extra=(), env=None, root=None):
         script = BUILD if root is None else os.path.join(root, "linux", "build-release.sh")
-        full_env = dict(os.environ, SOURCE_DATE_EPOCH="1700000000", **(env or {}))
+        full_env = {**os.environ, "SOURCE_DATE_EPOCH": "1700000000", **(env or {})}
         return subprocess.run(["bash", script, "--out", out, *extra], capture_output=True, text=True, env=full_env)
 
     def tarball(self, out):
@@ -369,7 +374,7 @@ class InstallTests(unittest.TestCase):
         python_tarball(self.tar)
 
     def run_install(self, *args, extra_env=None, script=INSTALL):
-        env = {"HOME": self.home, "PATH": os.environ.get("PATH", ""), "PIXELSWITCH_INSTALL_SKIP_CHECKS": "1", **(extra_env or {})}
+        env = {"HOME": self.home, "PATH": clean_path(), "PIXELSWITCH_INSTALL_SKIP_CHECKS": "1", **(extra_env or {})}
         return subprocess.run(["bash", script, *args], capture_output=True, text=True, env=env, cwd=self.scratch)
 
     def path(self, *parts):
@@ -568,7 +573,7 @@ class InstallTests(unittest.TestCase):
 
     def test_the_dependency_check_names_what_is_missing(self):
         # Without the test bypass, a Python without PyGObject (or a missing typelib) refuses with one plain sentence.
-        env = {"HOME": self.home, "PATH": os.environ.get("PATH", "")}
+        env = {"HOME": self.home, "PATH": clean_path()}
         done = subprocess.run(["bash", INSTALL, "--from", self.tar, "--no-systemd", "--no-autostart"], capture_output=True, text=True, env=env, cwd=self.scratch)
         gi_ok = subprocess.run([sys.executable, "-c", "import gi"], capture_output=True).returncode == 0
         if done.returncode != 0:
@@ -577,6 +582,93 @@ class InstallTests(unittest.TestCase):
             self.assertFalse(os.path.exists(self.path(".local", "bin", "pixelswitch")))
         else:
             self.assertTrue(gi_ok)
+
+
+# --- scripts/verify-release.sh, Linux part, against a stand-in gh and curl ---------------------------------
+
+
+class VerifyReleaseTests(unittest.TestCase):
+    VERIFY = os.path.join(REPO_ROOT, "scripts", "verify-release.sh")
+
+    def setUp(self):
+        self.scratch = tempfile.mkdtemp(prefix="psverify", dir="/tmp")
+        self.addCleanup(shutil.rmtree, self.scratch, True)
+        self.seed = bytes(range(90, 122))
+        self.public = base64.b64encode(ed25519.public_key_from_seed(self.seed)).decode()
+        self.release = os.path.join(self.scratch, "release")
+        os.makedirs(self.release)
+        self.tar = os.path.join(self.release, "pixelswitch-linux-9.8.tar.gz")
+        python_tarball(self.tar)
+        installer = slurp(INSTALL, encoding="utf-8")
+        installer = re.sub(r'(?m)^SU_PUBLIC_ED_KEY=".*"$', f'SU_PUBLIC_ED_KEY="{self.public}"', installer)
+        spit(os.path.join(self.release, "install-linux.sh"), installer)
+        spit(os.path.join(self.release, "project.yml"),
+             f'targets:\n  A:\n    settings:\n      base:\n        MARKETING_VERSION: "9.8"\n        CURRENT_PROJECT_VERSION: "99"\n'
+             f'        SUPublicEDKey: {self.public}\n')
+        self.write_feed()
+        bin_dir = os.path.join(self.scratch, "bin")
+        os.makedirs(bin_dir)
+        spit(os.path.join(bin_dir, "gh"), f"""#!/bin/sh
+case "$*" in
+  *"release view"*) echo "pixelswitch-linux-9.8.tar.gz install-linux.sh latest-linux.json" ;;
+  *"release download"*)
+    while [ $# -gt 0 ]; do [ "$1" = "-D" ] && dest="$2"; shift; done
+    cp "{self.release}/pixelswitch-linux-9.8.tar.gz" "{self.release}/install-linux.sh" "{self.release}/latest-linux.json" "$dest/" ;;
+esac
+""")
+        spit(os.path.join(bin_dir, "curl"), f"""#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
+cp "{self.release}/project.yml" "$out"
+""")
+        for name in ("gh", "curl"):
+            os.chmod(os.path.join(bin_dir, name), 0o755)
+        self.bin = bin_dir
+
+    def write_feed(self, **overrides):
+        data = slurp(self.tar, "rb")
+        feed = {"version": "9.8", "build": 99, "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                "url": "https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/download/v9.8/pixelswitch-linux-9.8.tar.gz",
+                "signature": base64.b64encode(ed25519.sign(self.seed, data)).decode()}
+        feed.update(overrides)
+        spit(os.path.join(self.release, "latest-linux.json"), json.dumps(feed))
+
+    def verify(self):
+        env = dict(os.environ, PATH=self.bin + os.pathsep + os.environ.get("PATH", ""))
+        return subprocess.run(["bash", self.VERIFY, "v9.8", "--linux-only"], capture_output=True, text=True, env=env, cwd=self.scratch)
+
+    def test_a_good_release_passes_every_linux_check(self):
+        done = self.verify()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(done.stdout.count("PASS"), 3 + 8)
+        self.assertNotIn("FAIL", done.stdout)
+        self.assertIn("install-linux.sh sha256", done.stdout)
+
+    def test_each_wrong_thing_fails(self):
+        data = slurp(self.tar, "rb")
+        for overrides, text in (
+            ({"build": 100}, "build 100 matches project.yml 99"),
+            ({"version": "9.9"}, "version 9.9 matches project.yml 9.8"),
+            ({"sha256": "0" * 64}, "SHA-256 matches the tarball"),
+            ({"size": len(data) + 1}, "size"),
+            ({"signature": base64.b64encode(bytes(64)).decode()}, "Ed25519 signature verifies"),
+        ):
+            self.write_feed(**overrides)
+            done = self.verify()
+            self.assertEqual(done.returncode, 1, (overrides, done.stdout))
+            line = next(l for l in done.stdout.splitlines() if "FAIL" in l)
+            self.assertIn(text, line)
+
+    def test_a_missing_asset_fails(self):
+        spit(os.path.join(self.bin, "gh"), "#!/bin/sh\necho 'pixelswitch-linux-9.8.tar.gz latest-linux.json'\n")
+        done = self.verify()
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("FAIL  asset missing: install-linux.sh", done.stdout)
+
+    def test_the_script_still_has_its_mac_checks(self):
+        text = slurp(self.VERIFY, encoding="utf-8")
+        for needle in ("== EdDSA", "hdiutil attach", "codesign --verify --deep --strict", "xcrun stapler validate", "== feed"):
+            self.assertIn(needle, text)
+        self.assertEqual(subprocess.run(["bash", "-n", self.VERIFY]).returncode, 0)
 
 
 if __name__ == "__main__":
