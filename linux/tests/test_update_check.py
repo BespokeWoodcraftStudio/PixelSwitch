@@ -475,6 +475,27 @@ class SafeExtractTests(unittest.TestCase):
             self.assertEqual(mode & (stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX), 0, name)
             self.assertEqual(mode & (stat.S_IWGRP | stat.S_IWOTH), 0, name)
 
+    def test_directory_modes_do_not_depend_on_the_umask(self):
+        """tarfile's data filter ignores a directory's mode, so it would get 0777 & ~umask."""
+        for umask in (0o000, 0o002, 0o022, 0o077):
+            shutil.rmtree(self.dest, ignore_errors=True)
+            old = os.umask(umask)
+            try:
+                self.extract(ArchiveBuilder().directory("pub", 0o755).directory("pub/inner", 0o2777)
+                             .directory("priv", 0o700).file("pub/f", b"x", 0o666))
+            finally:
+                os.umask(old)
+            modes = {n: stat.S_IMODE(os.stat(os.path.join(self.dest, n)).st_mode) for n in ("pub", "pub/inner", "priv", "pub/f")}
+            self.assertEqual(modes["pub"], 0o755, umask)
+            self.assertEqual(modes["pub/inner"], 0o755, umask)       # no setgid, no group/other write
+            self.assertEqual(modes["priv"], 0o700, umask)
+            self.assertEqual(modes["pub/f"] & (stat.S_IWGRP | stat.S_IWOTH), 0, umask)
+            self.assertEqual(stat.S_IMODE(os.stat(self.dest).st_mode), 0o700, umask)
+
+    def test_a_directory_the_owner_cannot_use_gets_owner_rwx(self):
+        self.extract(ArchiveBuilder().directory("locked", 0o000).file("locked/f", b"x"))
+        self.assertEqual(stat.S_IMODE(os.stat(os.path.join(self.dest, "locked")).st_mode), 0o700)
+
     def test_the_owner_in_the_archive_is_ignored(self):
         builder = ArchiveBuilder()
         info = tarfile.TarInfo("owned")

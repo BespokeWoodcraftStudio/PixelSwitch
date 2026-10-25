@@ -259,6 +259,7 @@ def safe_extract(
     try:
         count = 0
         total = 0
+        directories: list[tuple[str, int]] = []
         with tarfile.open(tarball, "r:gz") as archive:
             for member in archive:
                 count += 1
@@ -268,8 +269,20 @@ def safe_extract(
                 total += max(member.size, 0)
                 if total > max_total_bytes:
                     raise UpdateError("archive", "The update unpacks to more than is allowed.")
+                if member.isdir():
+                    directories.append((member.name, member.mode))
         with tarfile.open(tarball, "r:gz") as archive:
             archive.extractall(dest, filter="data")
+        # The data filter ignores a directory's mode, so a directory gets 0777 & ~umask. Give
+        # each one the archive's mode without the high bits and the group/other write bits,
+        # and never less than owner rwx, whatever the umask of the process.
+        root = os.path.realpath(dest)
+        for name, mode in directories:
+            path = os.path.join(dest, name)
+            real = os.path.realpath(path)
+            if os.path.islink(path) or not os.path.isdir(real) or os.path.commonpath([real, root]) != root:
+                continue
+            os.chmod(real, (mode & 0o755) | 0o700)
         return count
     except UpdateError:
         raise
