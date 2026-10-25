@@ -129,9 +129,117 @@ enum SwitchShortcut {
     /// Whether the target's login is already the live one: the live login is
     /// proven to be the target's, or it is unproven and the target is the
     /// account believed active. With no active account and no proven owner
-    /// nothing is "already live", so the switch goes ahead.
+    /// nothing is "already live" here; `LiveLoginDisposal` decides first whether
+    /// the switch may go ahead at all.
     static func alreadyLive(liveOwnerId: UUID?, believedActiveId: UUID?, targetId: UUID) -> Bool {
         if let liveOwnerId { return liveOwnerId == targetId }
         return believedActiveId == targetId
+    }
+}
+
+/// What a switch does when NO account is active and the live login's owner is not
+/// proven (spec D20, revision 4). A switch is allowed in this state, or the app
+/// would be stuck after a removal whose fallbacks all failed. But it overwrites
+/// the live login without saving it anywhere (nothing is saved under an
+/// unproven owner), so it may only do that to a login that is provably
+/// disposable. Pure: `AppState` gathers the facts and acts on the answer.
+enum LiveLoginDisposal {
+
+    /// What the API said about the live access token.
+    enum APIAnswer: Equatable {
+        /// It could not say (expired token, parked or refused token, network).
+        case couldNotSay
+        /// It answered with an identity that names no remaining account.
+        case namesNoRemainingAccount
+        /// It answered with an identity that names a remaining account, or
+        /// more than one, without settling on exactly one (so no owner is proven).
+        case namesRemainingAccount
+    }
+
+    /// Why going ahead is safe.
+    enum Basis: Equatable {
+        /// The live credential is absent or holds a blanked login: nothing to lose.
+        case nothingToLose
+        /// The API proved the login belongs to someone who is not on the list.
+        case apiNamesNoRemainingAccount
+        /// The login is the same grant as a login of an account that was removed.
+        case sameGrantAsRemovedAccount
+    }
+
+    enum Decision: Equatable {
+        /// Go ahead; the login being replaced is disposable (nothing is saved for it).
+        case proceed(Basis)
+        /// The login is the same grant as exactly this remaining account's saved
+        /// login: treat that account as the believed active one, so the "already
+        /// live" shortcut, adopting it and 1.9's rules apply.
+        case treatAsActive(UUID)
+        /// Cannot tell whose login it is: refuse with `refusalSentence`.
+        case refuse
+    }
+
+    /// The English source of the sentence shown when the switch is refused (the
+    /// key in all five string tables).
+    static let refusalSentence = "PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again."
+
+    /// - `liveLoginUsable`: the live credential is a usable login (D12). Absent
+    ///   or blanked means there is nothing to lose.
+    /// - `api`: what the API said about the live access token.
+    /// - `remainingSameGrant`: ids of the remaining accounts whose SAVED login is
+    ///   the same grant as the live login; nil when the backup store cannot be
+    ///   read, in which case lineage proves nothing.
+    /// - `sameGrantAsRemovedLogin`: the live login is the same grant as a saved
+    ///   or live login recorded when an account was removed.
+    ///
+    /// Order, most certain first. The API's answer wins when it names no remaining
+    /// account; when it names one without settling on exactly one, nothing is
+    /// discarded. Then a login that is a remaining account's is never discarded as
+    /// the removed account's: exactly one such account becomes the believed active
+    /// one, several are ambiguous and refuse. Only a login that is the removed
+    /// account's and no remaining account's may go.
+    static func decide(liveLoginUsable: Bool, api: APIAnswer, remainingSameGrant: [UUID]?, sameGrantAsRemovedLogin: Bool) -> Decision {
+        guard liveLoginUsable else { return .proceed(.nothingToLose) }
+        if api == .namesNoRemainingAccount { return .proceed(.apiNamesNoRemainingAccount) }
+        // The API names a remaining account but not exactly one (its id and email
+        // disagree, or two accounts share one): the data is contradictory, so
+        // nothing is discarded on it.
+        if api == .namesRemainingAccount { return .refuse }
+        if let remaining = remainingSameGrant {
+            if remaining.count == 1 { return .treatAsActive(remaining[0]) }
+            if remaining.isEmpty, sameGrantAsRemovedLogin { return .proceed(.sameGrantAsRemovedAccount) }
+        }
+        return .refuse
+    }
+}
+
+/// The refresh tokens of removed accounts, remembered as fingerprints so a later
+/// switch can tell that the live login is a removed account's and disposable
+/// (spec D20 revision 4). Only a fingerprint is kept, never a token. Cleared by
+/// the next successful switch or add.
+enum RemovedLogins {
+    /// The most fingerprints kept (a handful of removals, two or three logins each).
+    static let limit = 16
+
+    /// Fingerprints of the refresh tokens in these credentials. A credential that
+    /// is absent or has no refresh token adds nothing.
+    static func fingerprints(ofCredentials credentials: [String?]) -> [String] {
+        credentials.compactMap { credential in
+            credential.flatMap { CredentialOwnership.login(fromCredential: $0) }?.refreshToken.map(TokenFingerprint.of)
+        }
+    }
+
+    /// `existing` plus `new`, without repeats, oldest dropped past `limit`.
+    static func remembering(_ new: [String], existing: [String]) -> [String] {
+        var all = existing
+        for fingerprint in new where !all.contains(fingerprint) { all.append(fingerprint) }
+        return Array(all.suffix(limit))
+    }
+
+    /// Whether this live login is the same grant as a removed account's login:
+    /// its refresh token is one that was recorded. (An access token is never
+    /// recorded, so a renewed login that rotated its refresh token no longer
+    /// matches; the API's answer covers that case.)
+    static func isRemovedLogin(_ login: CredentialOwnership.Login, fingerprints: [String]) -> Bool {
+        guard let refresh = login.refreshToken else { return false }
+        return fingerprints.contains(TokenFingerprint.of(refresh))
     }
 }

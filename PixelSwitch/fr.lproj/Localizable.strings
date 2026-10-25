@@ -282,6 +282,7 @@
 "Remote control could not start: %@" = "Le contrôle à distance n’a pas pu démarrer : %@";
 "To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH." = "Pour que Claude sur un autre Mac puisse contrôler PixelSwitch, ajoutez ceci à ses réglages MCP. Ce Mac doit pouvoir joindre celui-ci en SSH.";
 "No account is active yet, so there is nothing to switch from. Add the current account first." = "Aucun compte n’est encore actif, il n’y a donc rien à changer. Ajoutez d’abord le compte actuel.";
+"PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again." = "PixelSwitch ne peut pas savoir à qui appartient la connexion que Claude Code détient en ce moment. Utilisez Claude Code une fois, puis réessayez.";
 "A switch or sign-in is in progress. Try again in a moment." = "Un changement ou une connexion est en cours. Réessayez dans un instant.";
 
 /* Manual only (0%) and thresholds below 50% (1.5) */

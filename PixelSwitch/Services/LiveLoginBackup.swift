@@ -88,9 +88,40 @@ enum LiveLoginBackup {
     ///   moment ago. If step 1 then read nothing, it vanished or the Keychain
     ///   flaked: stop, because writing now could overwrite a login that is only
     ///   unreadable. The next try starts clean.
-    static func afterFirstPass(seen: String?, liveNow: String?, ownerKnown: Bool) -> FirstPassStep {
+    /// - `result`: what step 1 came to. With the login unchanged and an owner
+    ///   known, a save that could not be proven (`unproven`) or that the store
+    ///   refused (`storeRefused`) means the owner's backup does not hold the
+    ///   newest login, so writing now would lose it: stop. That cannot refuse
+    ///   every switch: with the owner known, `unproven` arises only when the
+    ///   fresh login differs from the one the API proved (`freshLoginProof` is
+    ///   `.needsAPI`) and the API could not vouch for it, and `storeRefused` only
+    ///   when the store itself failed. A login that changed goes to `.retry`
+    ///   first, which asks again with proof. Other reasons (`noOwner`,
+    ///   `identityMismatch`, `unreadable`) never stop an unchanged login here.
+    static func afterFirstPass(seen: String?, liveNow: String?, ownerKnown: Bool, result: Result) -> FirstPassStep {
         if ownerKnown, seen == nil { return .abort(.unreadable) }
-        return CredentialOwnership.liveLoginChanged(savedAtStep4: seen, now: liveNow) ? .retry : .proceed
+        if CredentialOwnership.liveLoginChanged(savedAtStep4: seen, now: liveNow) { return .retry }
+        if ownerKnown, case .notSaved(let reason) = result, reason == .unproven || reason == .storeRefused {
+            return .abort(.notSaved(reason))
+        }
+        return .proceed
+    }
+
+    /// How step 1 knows the login it is about to save is still the owner's.
+    enum FreshLoginProof: Equatable, Sendable {
+        /// The fresh login is the same grant as the one the API already proved
+        /// (spec 5.3): no second question is needed.
+        case sameGrant
+        /// It differs (Claude Code renewed it since): the API must vouch for it.
+        case needsAPI
+        /// There is no proven login or no readable fresh login to compare.
+        case none
+    }
+
+    /// Compares the login the API proved with the one the Keychain holds now.
+    static func freshLoginProof(verified: CredentialOwnership.Login?, fresh: CredentialOwnership.Login?) -> FreshLoginProof {
+        guard let verified, let fresh else { return .none }
+        return CredentialOwnership.sameGrant(verified, fresh) ? .sameGrant : .needsAPI
     }
 
     /// The verdict after step 1 ran a second time.

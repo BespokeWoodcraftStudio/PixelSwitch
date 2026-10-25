@@ -282,6 +282,7 @@
 "Remote control could not start: %@" = "远程控制无法启动：%@";
 "To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH." = "若要让另一台 Mac 上的 Claude 控制 PixelSwitch，请将此内容添加到它的 MCP 设置中。那台 Mac 必须能通过 SSH 连接到这台 Mac。";
 "No account is active yet, so there is nothing to switch from. Add the current account first." = "尚无活跃账户，因此无从切换。请先添加当前账户。";
+"PixelSwitch cannot tell whose login Claude Code holds right now. Use Claude Code once, then try again." = "PixelSwitch 目前无法判断 Claude Code 持有的是谁的登录。请先使用一次 Claude Code，然后再试。";
 "A switch or sign-in is in progress. Try again in a moment." = "正在切换或登录。请稍后再试。";
 
 /* Manual only (0%) and thresholds below 50% (1.5) */
