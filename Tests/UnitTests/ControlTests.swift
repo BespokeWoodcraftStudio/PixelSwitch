@@ -207,6 +207,8 @@ extension ControlTestKit {
         var calls: [String] = []
         var nextError: ControlError?
         var orderResult = true
+        /// When true, setPriority and setWindowThresholds find no such account (it vanished after the name was resolved).
+        var refuseAccountWrites = false
         var settings: [SettingKey: JSONValue] = [:]
         /// The global defaults the fake reports (the app reads them from UserDefaults).
         var windowDefaults = AutoSwitchEngine.WindowPair(both: 90)
@@ -269,6 +271,7 @@ extension ControlTestKit {
         }
         func setWindowThresholds(session: AutoSwitchSettings.WindowEdit, weekly: AutoSwitchSettings.WindowEdit, for id: UUID) -> Bool {
             calls.append("thresholds \(session) \(weekly)")
+            guard !refuseAccountWrites else { return false }
             guard let account = accounts.first(where: { $0.id == id }),
                   let updated = AutoSwitchSettings.applyingWindowEdits(to: account, session: session, weekly: weekly) else { return false }
             accounts = accounts.map { $0.id == id ? updated : $0 }
@@ -276,6 +279,7 @@ extension ControlTestKit {
         }
         func setPriority(_ priority: Int?, for id: UUID) -> Bool {
             calls.append("priority \(priority.map { String($0) } ?? "nil")")
+            guard !refuseAccountWrites else { return false }
             guard let updated = AccountOrder.settingPriority(priority, of: id, in: accounts) else { return false }
             accounts = updated
             return true

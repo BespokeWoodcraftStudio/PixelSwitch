@@ -29,12 +29,8 @@ final class SettingsStore {
             return .number((defaults.object(forKey: key.rawValue) as? NSNumber)?.doubleValue ?? 24)
         case .autoSwitchEnabled:
             return .bool(defaults.bool(forKey: AutoSwitchSettings.enabledKey))
-        case .autoSwitchThreshold:
-            return .number(AutoSwitchSettings.defaultThreshold)
-        case .autoSwitchSessionThreshold:
-            return .number(AutoSwitchSettings.defaultSessionThreshold)
-        case .autoSwitchWeeklyThreshold:
-            return .number(AutoSwitchSettings.defaultWeeklyThreshold)
+        case .autoSwitchThreshold, .autoSwitchSessionThreshold, .autoSwitchWeeklyThreshold:
+            return SettingKey.autoSwitchThresholdValue(key, in: defaults) ?? .null
         case .autoSwitchOnFable:
             return .bool(AutoSwitchFableSetting.isOn)
         case .autoSwitchStrategy:

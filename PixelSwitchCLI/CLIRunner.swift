@@ -175,7 +175,8 @@ struct CLIRunner {
 
         case .order(let references):
             let result = try call(.accountsSetOrder, .object(["accounts": .array(references.map(JSONValue.string))]))
-            show(result) { CLIOutput.orderSet(Self.accounts(result["accounts"])) }
+            let numbered = app.features?.contains(ControlProtocol.featurePriority) == true
+            show(result) { CLIOutput.orderSet(Self.accounts(result["accounts"]), numbered: numbered) }
 
         case .usage(let reference):
             let result = try call(.usageGet, reference.map { .object(["account": .string($0)]) })
@@ -290,12 +291,16 @@ enum CLIOutput {
         return lines.joined(separator: "\n")
     }
 
-    /// "90%" when the two windows share a default, else "5h 90% / 7d 50%".
+    /// The default auto-switch uses: "90%" when the two windows share one,
+    /// else "5h 90% / 7d 50%". The windows' own defaults are what auto-switch
+    /// reads (the Settings window never writes the base), so they win even when
+    /// they are equal and differ from the base. An app that sends neither
+    /// (1.9) has only the base.
     static func defaultWords(_ a: AutoSwitchInfo) -> String {
-        if let session = a.defaultSessionThreshold, let weekly = a.defaultWeeklyThreshold, session != weekly {
-            return windowsWords(session: session, weekly: weekly)
+        guard let session = a.defaultSessionThreshold, let weekly = a.defaultWeeklyThreshold else {
+            return percent(a.defaultThreshold)
         }
-        return percent(a.defaultThreshold)
+        return session == weekly ? percent(session) : windowsWords(session: session, weekly: weekly)
     }
 
     static func windowsWords(session: Double, weekly: Double) -> String {
@@ -370,9 +375,15 @@ enum CLIOutput {
         return text
     }
 
-    /// What `accounts order` prints: the new order, and that it numbered the accounts.
-    static func orderSet(_ list: [AccountInfo]) -> String {
-        accounts(list) + "\nEvery account is now numbered from 1 in this order, replacing any priority numbers you set. Lower numbers are tried first."
+    /// What `accounts order` prints: the new order, and, when the app numbers
+    /// accounts at all (it reports the priority feature; 1.9 does not), that it
+    /// numbered them.
+    static func orderSet(_ list: [AccountInfo], numbered: Bool) -> String {
+        var text = accounts(list)
+        if numbered {
+            text += "\nEvery account is now numbered from 1 in this order, replacing any priority numbers you set. Lower numbers are tried first."
+        }
+        return text
     }
 
     /// What `accounts threshold` prints once the app has saved it.

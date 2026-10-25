@@ -324,13 +324,13 @@ struct SettingsView: View {
 
     // MARK: - Helpers
 
-    /// One line under the strategy picker saying what the chosen strategy does.
     /// The effective default for one window: its own stored value if set, else
     /// the base (spec 2.1). Never a stand-in for "absent".
     private func effectiveDefault(_ window: AutoSwitchEngine.Window) -> Double {
         AutoSwitchSettings.windowDefaults(base: baseThreshold, session: sessionDefault, weekly: weeklyDefault).value(for: window)
     }
 
+    /// One line under the strategy picker saying what the chosen strategy does.
     private var strategyExplanation: LocalizedStringKey {
         switch autoSwitchStrategy {
         case .mostRoom:

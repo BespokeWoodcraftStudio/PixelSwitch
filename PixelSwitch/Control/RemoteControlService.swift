@@ -81,25 +81,13 @@ final class ControlEventHub {
     /// Anything that can change what `accounts.list` says apart from usage.
     private let accountsSignal = PassthroughSubject<Void, Never>()
 
-    /// What `AccountInfo` carries apart from usage, as stored on the list. A
-    /// change here (and only here) is an `accountsChanged` event.
-    private struct AccountFields: Equatable {
-        let id: UUID, email: String, label: String?, subscription: String?, isActive: Bool
-        let threshold: Double?, session: Double?, weekly: Double?, priority: Int?
-        init(_ account: Account) {
-            id = account.id; email = account.email; label = account.customLabel; subscription = account.subscriptionType
-            isActive = account.isActive; threshold = account.switchThreshold; session = account.sessionThreshold
-            weekly = account.weeklyThreshold; priority = account.priority
-        }
-    }
+    private typealias AccountFields = ControlSnapshots.AccountFields
+    private typealias DefaultFields = ControlSnapshots.DefaultFields
 
-    /// The global defaults every account's effective thresholds depend on.
-    private struct DefaultFields: Equatable {
-        let base: Double, session: Double, weekly: Double
-        static var current: DefaultFields {
-            DefaultFields(base: AutoSwitchSettings.defaultThreshold, session: AutoSwitchSettings.defaultSessionThreshold,
-                          weekly: AutoSwitchSettings.defaultWeeklyThreshold)
-        }
+    /// The global defaults as they stand now.
+    private static var currentDefaults: DefaultFields {
+        DefaultFields(base: AutoSwitchSettings.defaultThreshold, session: AutoSwitchSettings.defaultSessionThreshold,
+                      weekly: AutoSwitchSettings.defaultWeeklyThreshold)
     }
 
     init(appState: AppState, api: ControlAPI, send: @escaping @MainActor (ControlEvent) -> Void) {
@@ -142,9 +130,12 @@ final class ControlEventHub {
             .sink { [weak self] _ in self?.accountsSignal.send() }
             .store(in: &subscriptions)
 
+        // UserDefaults posts this on whichever thread wrote the default; hop to
+        // main before any closure runs, or Swift 6's isolation check traps.
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
-            .map { _ in DefaultFields.current }
-            .prepend(DefaultFields.current)
+            .receive(on: DispatchQueue.main)
+            .map { _ in Self.currentDefaults }
+            .prepend(Self.currentDefaults)
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] _ in self?.accountsSignal.send() }
