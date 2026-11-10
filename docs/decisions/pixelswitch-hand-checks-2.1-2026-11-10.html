@@ -1,0 +1,885 @@
+<!doctype html>
+<!--
+  THE FOUNDER QUESTIONS TEMPLATE. Standing rule, founder, 2026-09-19: every question for him is an HTML page
+  with multiple choice options, a box for his own words on every card, and a Copy my answers button whose
+  block he pastes into the session. Never a question only in chat.
+  HOW TO USE: copy this file into the project's decisions folder (PixelOS: program/decisions/
+  founder-questions-round-<N>-<date>-v1.html), change ONLY the PAGE object and the <title>, render it at 1920 by
+  1080 in both themes (founder, 2026-09-21: a phone width is never a check) and look at it, test the Copy button,
+  commit it, and link it from the final message and the handoff with its full path. Recommended option first.
+  Every question carries a default that stands if he says nothing, and the page says up front whether anything on
+  it blocks the work.
+  DATES (founder, 2026-10-20: "everything you give me should be according to American standards, not year, month,
+  day. It should be month, day, year."): write every date and time in PAGE as ISO text (2026-10-20, or
+  2026-10-20T15:41:00-07:00, or "2026-10-20, 15:41 PDT"). The page works out what he reads, "Oct 20, 2026, 3:41 PM PDT",
+  and does the same to the block he pastes back. Give each question an `asked` ISO time and the card shows "Asked ..."
+  by itself. The formatter is the block marked BEGIN and END us-date core below, a byte-identical copy of
+  cabinet-designer's shared/us-date.js (tests/us-date.test.cjs fails when the two differ): never edit it here.
+
+  ANSWERED QUESTIONS (founder, 2026-11-09: "As they are answered they need to be moved out of my way."):
+  PAGE.questions is one running list. Add each new question at the END and never delete or renumber one: the card
+  number is its place in the list, and other documents link to a card by its id (#q-<id>).
+  HOW THE SESSION MARKS A CARD ANSWERED. When he pastes his answers back and you have recorded them where the project
+  keeps his decisions, add ONE field to that question and change nothing else on it (its words, options and default stay
+  exactly as they were):
+      answered: { on: '2026-11-04T10:12', answer: 'A. The recommended option', note: 'His own words, if he gave any.' }
+    on      when he answered, ISO text, like `asked` (a bare date, 2026-11-04, is fine).
+    answer  what he chose, short enough for one line: the option's label, or "Your comment, not one of A to C".
+    note    optional. His words, or what he asked for. Links are allowed. Shown on the one line and when it opens.
+    pick    optional. The 0-based index of the option he took, so the open card marks it. Leave it out for his own words.
+  A card with `answered` leaves the comparison table, the open cards and the copied block, and goes to a closed section at the
+  very bottom, "Answered earlier (N)": one line each (number, title, answer, date answered), and it opens to the whole card.
+  Never type a count anywhere in PAGE (not in the title, not in the lede): the page works out how many are open and
+  answered, and writes that line itself. Write in `lede` only what is not a count: whether anything blocks the work, and why.
+  `lede` may be one string or an array of strings (one paragraph each). Keep it short: it is the first thing he reads, and the
+  table should still be near the top of the screen. Detail that need not be read every visit goes in `more` (a string or an
+  array), shown under a closed "more" line titled `moreTitle`. A question may carry `short`, a short title for its one-line
+  summary; without it the summary uses `title`.
+  WHAT THE PAGE DOES FOR HIM. Open questions only, at the top: the table of them, then their cards. Once a card has an option
+  picked or a comment typed it folds into one line (number, short title, his choice) with a Change button, and the next open
+  card scrolls into view. A pick made with the mouse folds after a moment, so he can still add words. A pick made from the
+  keyboard never folds on its own (an arrow key only moves through the options, and he may be reading each note): it folds on
+  Enter, on Done, or when he tabs on past the box. A comment folds when he leaves the box, never while he types. A live counter in
+  the bar says how many open questions he has answered on this page. His picks and words
+  are kept in this browser (localStorage, under PAGE.key) so a reload keeps them; the page works the same without storage.
+  Copy my answers is in the bar at all times. It copies the open questions only, in the same text shape as always (the card
+  numbers are the stable ones, so a block can skip numbers), and the button turns to "Copied".
+  THE TABLE shows each question's default in a short form, so that all the open questions fit on about one screen. Give a
+  question `nothingShort` (one plain sentence, about 100 characters at most; links are not shown there) and the table shows it,
+  clipped to two lines. Without it the table shows the first sentences of `nothing`, enough to pass 40 characters. The card
+  always carries the whole `nothing`, and the table cell shows it on hover.
+  A QUESTION WITHOUT OPTIONS (it asks for a fact, not a choice): leave `options` out, or empty. The card then has no option
+  list and is answered by his words alone; the block he pastes back says so.
+  WHEN THE LAST CARD IS FILED, rewrite `lede` in the same edit. The page keeps `lede` exactly as written, so a line such as
+  "some answers hold something back" would stay on a page with nothing open. In that state the page itself drops the table, the
+  cards, the "more" lines, the Copy and Save buttons and the paste box, and the bar says only "Nothing is open."
+  LOOK. The corners, the pill shape and the bar shadow are the tokens --radius, --radius-sm, --radius-xs, --radius-pill and
+  --shadow-bar, and the palette is the custom properties at the top of the styles. A project on its own design system sets its
+  palette and radius tokens in one :root rule after the dark block (and the dark palette in a prefers-color-scheme: dark rule
+  after that), and may add a look block at the end of the styles; carry both over with PAGE. PixelProtect does all three.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>PixelSwitch: hand checks for 2.1</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --surface: #ffffff; --ink: #16181d; --muted: #565b66; --line: #dcd9d0;
+    --accent: #1f4fd8; --accent-ink: #ffffff; --soft: #eef1fb; --ok: #17694a; --ok-soft: #e4f3ec; --warn: #8a5a00; --warn-soft: #fbf1dc;
+    --radius: 14px; --radius-sm: 11px; --radius-xs: 5px; --radius-pill: 99px; --shadow-bar: 0 -8px 30px rgba(0,0,0,.08);
+    --pad: clamp(16px, 3vw, 48px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a21; --ink: #eceef2; --muted: #a3a9b6; --line: #2a2f3a;
+      --accent: #8fb0ff; --accent-ink: #0b1020; --soft: #1c2436; --ok: #7fd6ad; --ok-soft: #13291f; --warn: #f0c46a; --warn-soft: #2b2312;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; padding-bottom: 120px; }
+  .wrap { max-width: 1800px; margin: 0 auto; padding: 0 var(--pad); }
+  header.top { padding: clamp(28px, 4vw, 56px) 0 8px; }
+  .eyebrow { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  h1 { font-size: clamp(28px, 3.4vw, 46px); line-height: 1.1; letter-spacing: -.02em; margin: 10px 0 14px; }
+  .lede { font-size: clamp(17px, 1.3vw, 20px); color: var(--muted); margin: 0 0 8px; max-width: 120ch; }
+  .lede strong { color: var(--ink); }
+  .lede a { color: var(--accent); font-weight: 600; }
+  details.more { margin: 4px 0 8px; max-width: 120ch; }
+  details.more > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 12px; padding: 8px 0; font-weight: 650; }
+  details.more > summary::-webkit-details-marker { display: none; }
+  details.more[open] > summary { margin-bottom: 4px; }
+  h2 { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 40px 0 12px; scroll-margin-top: 16px; }
+
+  /* The comparison table. It never scrolls sideways: on a narrow screen each row becomes a block. */
+  table.sum { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; table-layout: fixed; }
+  table.sum th, table.sum td { text-align: left; vertical-align: top; padding: 13px 16px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  table.sum th { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; background: var(--soft); }
+  table.sum tr:last-child td { border-bottom: 0; }
+  table.sum col.n { width: 56px; } table.sum col.state { width: 170px; }
+  table.sum a { color: var(--accent); font-weight: 600; }
+  table.sum td { font-size: 16px; line-height: 1.45; }
+  table.sum .clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+  .head2 { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 24px; margin: 24px 0 12px; }
+  .head2 h2 { margin: 0; }
+  .howto { margin: 0; color: var(--muted); font-size: 15px; }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: var(--radius-pill); font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .pill.open { background: var(--warn-soft); color: var(--warn); } .pill.done { background: var(--ok-soft); color: var(--ok); }
+
+  /* A card is a one-line summary (shown once it is answered) over a body in two columns. */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); margin: 0 0 18px; scroll-margin-top: 16px; }
+  .body { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); }
+  .body > div { padding: clamp(18px, 2vw, 30px); min-width: 0; }
+  /* The answer column stays in view while he reads a long card. The divider is the left column's right edge, so it still runs the full height. */
+  .body .ctx { border-right: 1px solid var(--line); }
+  .body .ask { align-self: start; position: sticky; top: 16px; max-height: calc(100vh - 112px); overflow: auto; }
+  .body.solo { grid-template-columns: minmax(0, 1fr); } .body.solo .ctx { border-right: 0; }
+  .num { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .asked { display: inline-block; margin: 0 0 6px; padding: 2px 10px; border-radius: var(--radius-pill); background: var(--soft); color: var(--muted); font-size: 13px; font-weight: 600; }
+  .card h3, .pbody h3 { font-size: clamp(21px, 1.7vw, 27px); line-height: 1.2; letter-spacing: -.01em; margin: 6px 0 12px; }
+  .card p, .pbody p { margin: 0 0 12px; overflow-wrap: anywhere; }
+  .card .label, .pbody .label { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 18px 0 6px; }
+  .card a, .pbody a { color: var(--accent); }
+  .steps { margin: 0 0 12px; padding-left: 22px; } .steps li { margin: 0 0 6px; }
+  code { font: 0.92em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--soft); padding: .1em .4em; border-radius: var(--radius-xs); overflow-wrap: anywhere; }
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  legend { font-weight: 600; padding: 0; margin: 0 0 10px; }
+  .option { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; align-items: start; padding: 13px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); margin: 0 0 9px; cursor: pointer; min-height: 48px; }
+  .option:hover { border-color: var(--accent); }
+  .option:has(input:checked) { border-color: var(--accent); background: var(--soft); outline: 1px solid var(--accent); outline-offset: -1px; }
+  .option input { width: 20px; height: 20px; margin: 3px 0 0; accent-color: var(--accent); }
+  .option b { display: block; } .option span.note { display: block; color: var(--muted); font-size: 15px; margin-top: 2px; }
+  .rec, .you { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; vertical-align: 2px; }
+  /* Recommended is a property of an option, so it is a plain tag. Green means a state: Answered, Your answer. */
+  .rec { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .you { background: var(--ok-soft); color: var(--ok); }
+  label.c { display: block; font-weight: 600; margin: 16px 0 6px; }
+  textarea { width: 100%; min-height: 86px; resize: vertical; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 11px 13px; }
+  textarea:focus-visible, .option input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  #out { min-height: 260px; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* Answered on this page: the card folds to one line. The inputs stay in the page (hidden), so nothing is lost. */
+  .sumline { display: none; align-items: center; gap: 16px; padding: 8px 16px 8px 24px; min-height: 64px; }
+  .card.is-done { background: var(--soft); }
+  .card.is-done > .sumline { display: flex; }
+  .card.is-done > .body { display: none; }
+  .sl-num { flex: 0 0 auto; width: 120px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .sl-title { flex: 1 1 34%; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sl-choice { flex: 1 1 46%; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sl-choice .k { color: var(--ok); font-weight: 700; margin-right: 4px; }
+  .acts { display: none; gap: 8px; margin: 16px 0 0; flex-wrap: wrap; }
+  .card.has-answer .acts { display: flex; }
+
+  /* Answered earlier: a closed section at the very bottom. One line each; each opens to the whole card. */
+  details.earlier { margin: 48px 0 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+  details.earlier > summary, details.past > summary { cursor: pointer; list-style: none; }
+  details.earlier > summary::-webkit-details-marker, details.past > summary::-webkit-details-marker { display: none; }
+  details.earlier > summary { display: flex; align-items: center; gap: 16px; padding: 16px 24px; font-size: 18px; font-weight: 700; }
+  details.earlier > summary .hint { font-size: 15px; font-weight: 400; color: var(--muted); }
+  .caret { flex: 0 0 auto; width: 8px; height: 8px; border: solid var(--muted); border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform .15s; }
+  details[open] > summary > .caret { transform: rotate(45deg); }
+  details.past { border-top: 1px solid var(--line); }
+  details.past > summary { display: grid; grid-template-columns: 8px 40px minmax(0, 4fr) minmax(0, 6fr) max-content; gap: 16px; align-items: baseline; padding: 12px 24px; }
+  details.past > summary:hover, details.past[open] > summary { background: var(--soft); }
+  details.earlier > summary:hover { background: var(--soft); }
+  .pn { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pt, .pa { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pt { font-weight: 600; }
+  .pa .note { color: var(--muted); }
+  .pd { color: var(--muted); text-align: right; white-space: nowrap; font-size: 15px; }
+  .pbody { padding: 8px 0 24px; }
+  .pans { margin: 0 24px 16px; padding: 16px 24px; background: var(--soft); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+  .pans p { margin: 0 0 8px; } .pans p:last-child { margin: 0; }
+  .pans .when { color: var(--muted); font-size: 15px; }
+  .pbody .body { margin: 0 24px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+  .option.static { cursor: default; grid-template-columns: minmax(0, 1fr); }
+  .option.static:hover { border-color: var(--line); }
+  .option.chosen { border-color: var(--ok); background: var(--ok-soft); outline: 1px solid var(--ok); outline-offset: -1px; }
+  .none { padding: 24px; margin: 24px 0 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); font-size: 20px; font-weight: 600; }
+
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); box-shadow: var(--shadow-bar); z-index: 5; }
+  .bar .wrap { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+  .bar .status { flex: 1 1 240px; min-width: 0; color: var(--muted); }
+  .bar .status strong { color: var(--ink); }
+  button { font: inherit; font-weight: 650; border-radius: var(--radius-sm); padding: 12px 20px; min-height: 48px; cursor: pointer; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); min-width: 200px; }
+  button.primary.copied { background: var(--ok); border-color: var(--ok); color: var(--accent-ink); }
+  button:disabled { opacity: .5; cursor: default; }
+  button:active { transform: translateY(1px); }
+
+  @media (max-width: 900px) {
+    .body { grid-template-columns: 1fr; } .body .ctx { border-right: 0; }
+    .body .ask { position: static; max-height: none; overflow: visible; border-top: 1px solid var(--line); }
+    table.sum .clamp { display: block; overflow: visible; }
+    .sumline { flex-wrap: wrap; gap: 8px 16px; }
+    .sl-num { width: auto; } .sl-title, .sl-choice { flex: 1 1 100%; white-space: normal; }
+    details.past > summary { grid-template-columns: 8px 32px minmax(0, 1fr); gap: 8px 16px; }
+    .pa, .pd { grid-column: 3; text-align: left; white-space: normal; }
+    table.sum, table.sum tbody, table.sum tr, table.sum td { display: block; width: 100%; }
+    table.sum colgroup, table.sum thead { display: none; }
+    table.sum tr { border-bottom: 1px solid var(--line); padding: 8px 0; } table.sum tr:last-child { border-bottom: 0; }
+    table.sum td { border: 0; padding: 4px 16px; }
+    table.sum td[data-h]::before { content: attr(data-h) ": "; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+    .bar .wrap { gap: 6px 8px; padding-top: 8px; padding-bottom: 10px; }
+    .bar .status { flex: 1 1 100%; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .bar .status .long { display: none; }
+    .bar button { flex: 1 1 0; white-space: nowrap; padding: 10px 12px; min-width: 0; }
+    body { padding-bottom: 110px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow" id="eyebrow"></div>
+    <h1 id="title"></h1>
+    <div id="lede"></div>
+  </header>
+
+  <div id="openpart">
+    <div class="head2">
+      <h2>The open questions on one screen</h2>
+      <p class="howto">Pick an answer on each card or write your own. An answered card folds; press <strong>Change</strong> to open it again. <strong>Copy my answers</strong> is in the bar.</p>
+    </div>
+    <table class="sum" id="sum">
+      <colgroup><col class="n"><col><col><col><col class="state"></colgroup>
+      <thead><tr><th>#</th><th>Decision</th><th>What I recommend</th><th>If you say nothing</th><th>Your answer</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2 id="cards-h">The open questions</h2>
+    <main id="cards"></main>
+  </div>
+  <p class="none" id="none" hidden>Nothing is waiting for you. Every question on this page is answered.</p>
+
+  <div id="pastepart">
+    <h2 id="paste">What you will paste back</h2>
+    <label class="c" for="all-comment">Anything else you want me to know</label>
+    <textarea id="all-comment" placeholder="Optional. Anything that is not about one card."></textarea>
+    <label class="c" for="out">Your answers, as they will be pasted. It updates as you go. If the button does not work, click in this box, select all, and copy.</label>
+    <textarea id="out" readonly></textarea>
+  </div>
+
+  <div id="earlier-slot"></div>
+</div>
+
+<div class="bar" role="region" aria-label="Your answers">
+  <div class="wrap">
+    <div class="status" id="status" aria-live="polite"></div>
+    <button type="button" id="save">Save as a file</button>
+    <button type="button" class="primary" id="copy">Copy my answers</button>
+  </div>
+</div>
+
+<script data-sweep>
+/* Dates in American order: a copy of cabinet-designer's shared/us-date.js, kept identical by tests/us-date.test.cjs. */
+/* BEGIN us-date core */
+(function (root, factory) {
+  'use strict';
+  var api = factory(root);
+  if (typeof module === 'object' && module && module.exports) module.exports = api;
+  if (root) root.USDate = api;
+})(typeof self !== 'undefined' ? self : this, function (root) {
+  'use strict';
+
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  var ZONE = 'America/Los_Angeles';
+
+  /* A date is only a date when nothing that belongs to a longer name touches it. */
+  var DATE_RE = new RegExp(
+    '(?<![\\w/\\-:#@=%])' +                                       /* not inside an id, a path, a URL or a query value */
+    '(20\\d\\d)-(0[1-9]|1[0-2])(?:-(0[1-9]|[12]\\d|3[01]))?' +    /* year, month, and usually the day */
+    '(?:' +
+      '(T|,?\\s+(?:at\\s+)?)' +                                   /* what joins the day to the time */
+      '([01]\\d|2[0-3]):([0-5]\\d)(?::([0-5]\\d)(?:\\.\\d+)?)?' +
+      '(?:\\s*(Z|[+-]\\d\\d:?\\d\\d|UTC|GMT|[PMCE][SD]T|PT)\\b)?' +
+    ')?' +
+    '(?![\\w\\-/]|\\.\\w|:\\d)',                                   /* nothing word-like, dash-like or slash-like follows */
+    'g');
+  /* a bare 24 hour clock that already names a US zone, "18:51 PDT" -> "6:51 PM PDT" */
+  var CLOCK_RE = /(?<![\w:.\-])([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\s+(P[SD]T|PT|M[SD]T|C[SD]T|E[SD]T)\b/g;
+
+  var zoneFmt = null;
+  function pacific(ms) {
+    /* the wall clock in Pacific time for an instant: { y, m, d, h, mi, zone } or null when Intl is missing */
+    try {
+      zoneFmt = zoneFmt || new Intl.DateTimeFormat('en-US', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
+      var parts = {}; zoneFmt.formatToParts(new Date(ms)).forEach(function (p) { parts[p.type] = p.value; });
+      return { y: +parts.year, m: +parts.month, d: +parts.day, h: +parts.hour % 24, mi: +parts.minute, zone: parts.timeZoneName };
+    } catch (e) { return null; }
+  }
+
+  function clock(h, mi) { return (h % 12 === 0 ? 12 : h % 12) + ':' + (mi < 10 ? '0' : '') + mi + ' ' + (h < 12 ? 'AM' : 'PM'); }
+  function dayText(y, m, d, long) {
+    var name = MONTHS[m - 1]; if (!long) name = name.slice(0, 3);
+    return d ? name + ' ' + d + ', ' + y : name + ' ' + y;
+  }
+
+  /* One match of DATE_RE -> the text he reads. long = prose style. */
+  function show(match, long) {
+    var y = +match[1], m = +match[2], d = match[3] ? +match[3] : 0;
+    var join = match[4], h = match[5], mi = match[6], zone = match[8];
+    if (!join) return dayText(y, m, d, long);
+    var hh = +h, mm = +mi, label = zone || '';
+    if (zone && /^(Z|[+-])/.test(zone)) {
+      /* a numeric offset or Z names an instant: show it on the Pacific wall clock */
+      var off = 0;
+      if (zone !== 'Z') { var s = zone.replace(':', ''); off = (s[0] === '-' ? -1 : 1) * (+s.slice(1, 3) * 60 + +s.slice(3, 5)); }
+      var p = pacific(Date.UTC(y, m - 1, d, hh, mm) - off * 60000);
+      if (p) { y = p.y; m = p.m; d = p.d; hh = p.h; mm = p.mi; label = p.zone; }
+      else label = zone === 'Z' ? 'UTC' : zone;
+    }
+    var glue = long ? ' at ' : ', ';
+    return dayText(y, m, d, long) + glue + clock(hh, mm) + (label ? ' ' + label : '');
+  }
+
+  /* The stored ISO value of a match, kept in the markup. */
+  function isoOf(match) {
+    var s = match[1] + '-' + match[2] + (match[3] ? '-' + match[3] : '');
+    if (match[4]) s += 'T' + match[5] + ':' + match[6] + (match[7] ? ':' + match[7] : '') + (match[8] && /^(Z|[+-])/.test(match[8]) ? match[8] : '');
+    return s;
+  }
+
+  function clocks(text) { return text.replace(CLOCK_RE, function (all, h, mi, z) { return clock(+h, +mi) + ' ' + z; }); }
+
+  function rewrite(text, opts) {
+    var long = !!(opts && (opts.style === 'long' || opts.long));
+    return clocks(String(text == null ? '' : text).replace(DATE_RE, function () { return show(arguments, long); }));
+  }
+
+  /* Where the stored dates are in a piece of text: [{ index, length, iso }]. For tests and for pictures. */
+  function find(text) {
+    var out = [], m; DATE_RE.lastIndex = 0;
+    var str = String(text == null ? '' : text);
+    while ((m = DATE_RE.exec(str))) out.push({ index: m.index, length: m[0].length, iso: isoOf(m) });
+    return out;
+  }
+
+  /* ---------- the page side (only runs where there is a DOM) ---------- */
+  var SKIP = /^(SCRIPT|STYLE|TEXTAREA|INPUT|SELECT|CODE|PRE|KBD|SAMP|NOSCRIPT|SVG|TIME)$/i;
+  var PROSE = 'p, li, blockquote, dd, figcaption, .desc, .prose, .lede';
+  var DENSE = 'td, th, summary, button, label, .chip, .pill, .badge, .asked, .stamp, [data-dense]';
+  var QUICK = /20\d\d-\d\d|\d:\d\d\s+(?:P|M|C|E)[SD]?T\b/;
+
+  function skipped(node) {
+    for (var e = node.parentNode; e && e.nodeType === 1; e = e.parentNode) {
+      if (SKIP.test(e.nodeName) || (e.hasAttribute && (e.hasAttribute('data-keep-iso') || e.isContentEditable === true))) return true;
+    }
+    return false;
+  }
+  function styleOf(node) {
+    var e = node.parentNode, hit = e && e.closest && e.closest(PROSE + ',' + DENSE);
+    return hit && hit.matches(PROSE) && !hit.matches(DENSE) ? 'long' : 'short';
+  }
+
+  /* returns true when the node changed */
+  function sweepNode(node, doc) {
+    var text = node.nodeValue, long = styleOf(node) === 'long', frag = null, last = 0, m;
+    DATE_RE.lastIndex = 0;
+    while ((m = DATE_RE.exec(text))) {
+      frag = frag || doc.createDocumentFragment();
+      if (m.index > last) frag.appendChild(doc.createTextNode(clocks(text.slice(last, m.index))));
+      var t = doc.createElement('time'); t.className = 'us-date'; t.setAttribute('datetime', isoOf(m));
+      t.textContent = show(m, long); frag.appendChild(t);
+      last = m.index + m[0].length;
+    }
+    if (frag) {
+      if (last < text.length) frag.appendChild(doc.createTextNode(clocks(text.slice(last))));
+      node.parentNode.replaceChild(frag, node);
+      return true;
+    }
+    var plain = clocks(text);
+    if (plain === text) return false;
+    node.nodeValue = plain;
+    return true;
+  }
+
+  /* A tooltip is read the same way: title, data-tip and aria-label carry text he sees on hover or hears. */
+  var ATTRS = ['title', 'data-tip', 'aria-label'];
+  function sweepAttrs(start) {
+    if (!start.querySelectorAll) return 0;
+    var els = Array.prototype.slice.call(start.querySelectorAll('[title],[data-tip],[aria-label]')), n = 0;
+    if (start.nodeType === 1 && (start.hasAttribute('title') || start.hasAttribute('data-tip') || start.hasAttribute('aria-label'))) els.push(start);
+    els.forEach(function (el) {
+      if (el.closest && el.closest('[data-keep-iso]')) return;
+      ATTRS.forEach(function (name) {
+        var v = el.getAttribute(name);
+        if (v && QUICK.test(v)) { var w = rewrite(v, { long: false }); if (w !== v) { el.setAttribute(name, w); n += 1; } }
+      });
+    });
+    return n;
+  }
+
+  function sweep(rootNode) {
+    var doc = (rootNode && (rootNode.ownerDocument || rootNode)) || null;
+    if (!doc || !doc.createTreeWalker || !rootNode) return 0;
+    var start = rootNode, found = [], n = 0;
+    if (start.nodeType === 3) {
+      return start.nodeValue && QUICK.test(start.nodeValue) && start.parentNode && !skipped(start) && sweepNode(start, doc) ? 1 : 0;
+    }
+    if (start.nodeType !== 1 && start.nodeType !== 9 && start.nodeType !== 11) return 0;
+    var walker = doc.createTreeWalker(start, 4 /* SHOW_TEXT */, null);
+    for (var node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.nodeValue && QUICK.test(node.nodeValue) && !skipped(node)) found.push(node);
+    }
+    found.forEach(function (node) { if (node.parentNode && sweepNode(node, doc)) n += 1; });
+    return n + sweepAttrs(start);
+  }
+
+  function watch(rootNode) {
+    var doc = rootNode && (rootNode.ownerDocument || rootNode);
+    var Observer = doc && doc.defaultView && doc.defaultView.MutationObserver;
+    sweep(rootNode);
+    if (!Observer) return null;
+    var queue = [], scheduled = false, win = doc.defaultView;
+    function flush() {
+      scheduled = false;
+      var batch = queue; queue = [];
+      batch.forEach(function (n) { if (n.isConnected !== false) sweep(n); });
+    }
+    var obs = new Observer(function (records) {
+      records.forEach(function (r) { for (var i = 0; i < r.addedNodes.length; i++) { var a = r.addedNodes[i]; if (a.nodeType === 1 || a.nodeType === 3) queue.push(a); } });
+      if (queue.length && !scheduled) { scheduled = true; (win.requestAnimationFrame || win.setTimeout).call(win, flush, 16); }
+    });
+    obs.observe(rootNode, { childList: true, subtree: true });
+    return obs;
+  }
+
+  function auto() {
+    try {
+      var doc = root && root.document, me = doc && doc.currentScript;
+      if (!me || !me.hasAttribute('data-sweep')) return;
+      var go = function () { watch(doc.body); };
+      if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', go); else go();
+    } catch (e) { /* lint-ok-bare-catch: a page without a DOM still gets rewrite() */ }
+  }
+  auto();
+
+  return { rewrite: rewrite, find: find, sweep: sweep, watch: watch, ZONE: ZONE };
+});
+/* END us-date core */
+</script>
+<script>
+/* ==========================================================================================
+   THE ONLY PART THAT CHANGES FROM ROUND TO ROUND. Everything below PAGE is rendered from it.
+   html: true fields may carry links and <code>. Put the recommended option FIRST.
+   Never type a count: the page works out how many questions are open and answered.
+   ========================================================================================== */
+var PAGE = {
+  "key": "pixelswitch-hand-checks-2-1-2026-11-10",
+  "heading": "PIXELSWITCH: HAND CHECKS FOR 2.1 (2026-11-10)",
+  "eyebrow": "PixelSwitch · hand checks · version 2.1 · 2026-11-10",
+  "title": "Hand checks for 2.1: readable colors, Ultra accounts, sign-in expiry",
+  "lede": [
+    "<strong>Nothing on this page blocks the work.</strong> 2.1 is built and merged, with every automatic check and a real build passing. It is released first and checked by you afterwards, as with every release since 1.2. Cards 1 and 2 are things only your eyes can judge. Card 3 is information and needs nothing from you.",
+    "To check, 2.1 has to be the version running: Settings → About reads <b>Version 2.1</b>. It installs itself through the updater after it is released.",
+    "<b>About the pictures:</b> they are renders made by the app's own views with example accounts, not your data and not the real window frame. There is no picture of the old look, so the old cannot be marked in red there. Where a change can be drawn (card 2), the new is outlined in green and the old in red dashes."
+  ],
+  "more": [
+    "<b>What is in 2.1.</b> (1) The menu bar window, its cards, bars and badges are solid and easier to read, in light and dark. (2) Ultra (Max 20x) accounts show Ultra and have no 5-hour limit anywhere. (3) PixelSwitch renews a target's saved sign-in before every switch, skips an account that Anthropic refuses, and watches the live sign-in every 30 seconds. (4) A small change to how a renewed sign-in is saved (it is saved before anything else happens, and a slow renewal gives up after 15 seconds); you do not need to check this.",
+    "<b>Not in 2.1:</b> the Linux version is unchanged and does not have these three changes yet."
+  ],
+  "moreTitle": "What is in 2.1 (you do not need to read this)",
+  "questions": [
+    {
+      "id": "readable",
+      "asked": "2026-11-10T07:52:00-08:00",
+      "title": "Is the popover readable now, in light and in dark?",
+      "short": "Popover readable, light and dark",
+      "what": "You said the menu bar window was next to impossible to read because of its background. 2.1 makes the window, its cards, usage bars and badges solid, so nothing from your desktop shows through, and it makes the text stronger, in both light and dark. The pictures are renders of the new Usage card made by the app's own views, with example accounts (not yours).<span style=\"display:flex;gap:16px;flex-wrap:wrap;margin:10px 0 6px\"><span style=\"display:block;flex:1 1 220px;min-width:0\"><a href=\"../investigations/2026-11-10-readability-ultra-auth/evidence/limits-light.png\" target=\"_blank\" rel=\"noopener\" style=\"display:block;position:relative;line-height:0;outline:3px solid #2ea043;outline-offset:2px;\"><img src=\"../investigations/2026-11-10-readability-ultra-auth/evidence/limits-light.png\" alt=\"The Usage card in light mode, example account\" style=\"width:100%;height:auto;display:block;border-radius:6px\"></a><span style=\"display:block;font-size:14px;margin-top:6px\">Light mode (new). Click to see it full size.</span></span><span style=\"display:block;flex:1 1 220px;min-width:0\"><a href=\"../investigations/2026-11-10-readability-ultra-auth/evidence/limits-dark.png\" target=\"_blank\" rel=\"noopener\" style=\"display:block;position:relative;line-height:0;outline:3px solid #2ea043;outline-offset:2px;\"><img src=\"../investigations/2026-11-10-readability-ultra-auth/evidence/limits-dark.png\" alt=\"The Usage card in dark mode, example account\" style=\"width:100%;height:auto;display:block;border-radius:6px\"></a><span style=\"display:block;font-size:14px;margin-top:6px\">Dark mode (new). Click to see it full size.</span></span></span><b>About the marks:</b> there is no picture of the old look, so I cannot mark the old in red. Each picture has a <span style=\"border:2px solid #2ea043;border-radius:4px;padding:0 6px\">green</span> outline because the whole card is new. The real window's frame (the arrow and rounded corners) cannot be drawn offscreen, so the pictures do not show it.",
+      "why": "Only your eyes on your own screen and wallpaper can say whether it is comfortable. By the numbers, measured on the rendered pixels: every word is at least 4.5 to 1 against its background and every bar and outline at least 3 to 1, in both light and dark. Two things were left as they were: the white labels on the orange buttons (3.1 to 1), and any bar colors you chose yourself.",
+      "steps": [
+        "Settings → About reads <b>Version 2.1</b>. (2.1 installs itself after it is released; check it before the steps below.)",
+        "System Settings → Appearance → <b>Light</b>. Click the PixelSwitch icon in the menu bar, then look at the <b>Usage</b>, <b>Costs</b> and <b>Accounts</b> tabs.",
+        "Look for: the window is solid (put a busy picture or window behind it, and nothing shows through); you can read account names, <b>Resets in …</b>, the percentages, and the <b>Max</b>, <b>Ultra</b> and <b>Active</b> badges without effort; each bar stands out from its track; the orange outline around the account you are using is clear.",
+        "Switch to <b>Dark</b> and look at the same three tabs for the same things.",
+        "Optional: open Settings and see whether the grey help text under each control is easier to read than before."
+      ],
+      "nothing": "Counted as not checked yet. If something is still hard to read, it is fixed in the next version, which reaches you by itself.",
+      "nothingShort": "Counted as not checked yet; anything hard to read is fixed in the next version.",
+      "recommend": "Look in light, then dark, and tell me what you saw",
+      "options": [
+        {
+          "label": "A. Passed: easy to read in both light and dark",
+          "note": "Pick this only if you looked at both."
+        },
+        {
+          "label": "B. Something is still hard to read",
+          "note": "Say which mode (light or dark), which tab and which words in the box below. A screenshot path helps."
+        },
+        {
+          "label": "C. Skipped for now",
+          "note": "Fine. I will ask again later."
+        }
+      ]
+    },
+    {
+      "id": "ultra",
+      "asked": "2026-11-10T07:52:00-08:00",
+      "title": "Does an Ultra account show Ultra and no 5-hour row?",
+      "short": "Ultra badge, no 5-hour row",
+      "what": "Anthropic removed the 5-hour limit from the Max 20x plan, now called Ultra. 2.1 calls such an account <b>Ultra</b> and stops showing, tracking or acting on a 5-hour limit for it: no Session row on its card, no Session item in the menu bar while it is the account you are using, no Session views in the widget, and auto-switch follows its weekly limit alone. If PixelSwitch cannot tell an account's plan, that account keeps the 5-hour limit. If Anthropic ever reports a real 5-hour reading for an Ultra account, PixelSwitch shows it again.<span style=\"display:flex;gap:16px;flex-wrap:wrap;margin:10px 0 6px\"><span style=\"display:block;flex:1 1 220px;min-width:0\"><a href=\"../investigations/2026-11-10-readability-ultra-auth/evidence/ultra-light.png\" target=\"_blank\" rel=\"noopener\" style=\"display:block;position:relative;line-height:0;\"><img src=\"../investigations/2026-11-10-readability-ultra-auth/evidence/ultra-light.png\" alt=\"An Ultra card above a Max card, light mode, example accounts\" style=\"width:100%;height:auto;display:block;border-radius:6px\"><span style=\"position:absolute;left:83.4%;top:10.4%;width:9.7%;height:3.3%;border:3px solid #2ea043;border-radius:8px;box-sizing:border-box;pointer-events:none\"></span><span style=\"position:absolute;left:10.5%;top:15.9%;width:82.6%;height:20.1%;border:3px solid #2ea043;border-radius:8px;box-sizing:border-box;pointer-events:none\"></span><span style=\"position:absolute;left:10.5%;top:58.6%;width:82.6%;height:9.1%;border:3px dashed #e5484d;border-radius:8px;box-sizing:border-box;pointer-events:none\"></span></a><span style=\"display:block;font-size:14px;margin-top:6px\">Light mode. Click to see it full size.</span></span><span style=\"display:block;flex:1 1 220px;min-width:0\"><a href=\"../investigations/2026-11-10-readability-ultra-auth/evidence/ultra-dark.png\" target=\"_blank\" rel=\"noopener\" style=\"display:block;position:relative;line-height:0;\"><img src=\"../investigations/2026-11-10-readability-ultra-auth/evidence/ultra-dark.png\" alt=\"An Ultra card above a Max card, dark mode, example accounts\" style=\"width:100%;height:auto;display:block;border-radius:6px\"><span style=\"position:absolute;left:83.4%;top:10.4%;width:9.7%;height:3.3%;border:3px solid #2ea043;border-radius:8px;box-sizing:border-box;pointer-events:none\"></span><span style=\"position:absolute;left:10.5%;top:15.9%;width:82.6%;height:20.1%;border:3px solid #2ea043;border-radius:8px;box-sizing:border-box;pointer-events:none\"></span><span style=\"position:absolute;left:10.5%;top:58.6%;width:82.6%;height:9.1%;border:3px dashed #e5484d;border-radius:8px;box-sizing:border-box;pointer-events:none\"></span></a><span style=\"display:block;font-size:14px;margin-top:6px\">Dark mode. Click to see it full size.</span></span></span><b>About the marks:</b> the <span style=\"border:2px solid #2ea043;border-radius:4px;padding:0 6px\">green</span> boxes are what is new (the Ultra badge, and a card with only Weekly and Fable). The <span style=\"border:2px dashed #e5484d;border-radius:4px;padding:0 6px\">red dashed</span> box is the row an Ultra card used to have and no longer does; it is drawn on the Max card below only because that is where the row still exists. These are renders with example accounts.",
+      "why": "Before 2.1 an Ultra account still showed a 5-hour row that had no number to show, and the plan badge said Max. Anthropic has sent no 5-hour reading for any of your accounts in the logs on your Mac, which start on 2026-11-03. A non-active account is recognized from its saved login the first time PixelSwitch reads it after it starts, so if one still says Max, wait one refresh (about 5 minutes).",
+      "steps": [
+        "Open the popover and look at the account you are using: the plan badge reads <b>Ultra</b> and the card shows <b>Weekly</b> and <b>Fable</b> only, with no <b>Session</b> row.",
+        "Click the <b>Accounts</b> tab: each Ultra account's badge reads Ultra.",
+        "Settings → Accounts: an Ultra account's row says <b>No 5-hour limit</b> where the Session menu used to be.",
+        "In Terminal: <code>/Applications/PixelSwitch.app/Contents/Helpers/pixelswitch accounts</code>. The Session column reads <code>n/a</code> for an Ultra account, and Switches at shows one number (the weekly one) instead of two.",
+        "If you have an account that is not Ultra (Max 5x or Pro), it keeps its Session row and its Max or Pro badge."
+      ],
+      "nothing": "Counted as not checked yet. Anything that is wrong is fixed in the next version, which reaches you by itself.",
+      "nothingShort": "Counted as not checked yet; anything wrong is fixed in the next version.",
+      "recommend": "Look at one Ultra account, the Accounts tab and the CLI",
+      "options": [
+        {
+          "label": "A. Passed: Ultra badge and no 5-hour row everywhere I looked",
+          "note": "Pick this only if every step matched."
+        },
+        {
+          "label": "B. Something is wrong",
+          "note": "Say which account, where you saw a 5-hour row or a Max badge, and what the account is (Max 20x or something else)."
+        },
+        {
+          "label": "C. Skipped for now",
+          "note": "Fine. I will ask again later."
+        }
+      ]
+    },
+    {
+      "id": "signin-expiry",
+      "asked": "2026-11-10T07:52:00-08:00",
+      "title": "Sign-in expiry: what 2.1 now does (nothing to do by hand)",
+      "short": "Sign-in expiry (information)",
+      "what": "You asked that PixelSwitch never switch onto an account that needs signing in again, and that it keeps watching the account you are using and moves you if its sign-in dies. 2.1 does both. <b>There is nothing for you to click:</b> the only way to test the second part by hand would be to sign Claude Code out on purpose, which I do not want you to do.<ul style='margin:8px 0 0;padding-left:20px'><li><b>Before every switch,</b> PixelSwitch renews the saved sign-in of the account it is about to switch to. If Anthropic refuses it, that account is marked as needing a sign-in and the next account is tried. If Anthropic cannot be reached, the switch goes ahead as before.</li><li><b>Every 30 seconds</b> it looks at the sign-in Claude Code is using. It counts as dead only when Claude Code has signed that account out (the login is blank) <i>and</i> <code>claude auth status</code> agrees, on two looks at least 15 seconds apart. An expired token on its own, no internet, a busy server or a slow answer never counts.</li><li><b>With auto-switch on,</b> a dead sign-in moves you to an account that works within about a minute, even if the account you are on is set to Manual only (you cannot work on a signed-out account). <b>With auto-switch off,</b> nothing moves: the account is marked and the log says so once.</li></ul>",
+      "why": "Your Claude sign-in on one account (ahamade@gmail.com) died at 2026-11-10T10:40Z. The 2.0 app never noticed it and stayed on that account until you switched by hand at 2026-11-10T13:39Z, about three hours later. That account is the one you switched back to, and its saved copy probably holds the sign-in Anthropic had just refused. If that happens again with 2.1, it leaves that account within about a minute and the account shows <b>Session expired. Re-authenticate (↻) to fix.</b> To fix such an account, click the refresh button (↻) on its row in the Accounts tab, or run <code>pixelswitch accounts reauth &lt;account&gt;</code>.<br><br><b>What you would see in <code>~/Library/Logs/PixelSwitch-app.log</code></b> if it ever happens: lines starting <code>[authWatch]</code> (first <i>looks signed out … confirming on the next look</i>, then <i>is signed out … marking it as needing sign-in</i>, then <i>Auto-switch will move you off …</i>), then <code>[autoSwitch] Rule needsSignIn</code> and <code>Switching to</code>. It cannot be seen by looking: the watch only speaks when a sign-in dies.",
+      "nothing": "Nothing happens. The watch runs by itself and there is nothing for you to do; the card counts as read.",
+      "nothingShort": "Nothing happens; the watch runs by itself and the card counts as read.",
+      "recommend": "Read it; nothing to do by hand",
+      "options": [
+        {
+          "label": "A. Understood, nothing for me to do",
+          "note": "The watch runs by itself."
+        },
+        {
+          "label": "B. I want it to behave differently",
+          "note": "For example, not leaving an account set to Manual only. Say how in the box below; behavior changes ship in the next version."
+        }
+      ]
+    }
+  ]
+};
+
+/* ================================== the page, rendered ================================== */
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var el = function (tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
+  var store = {
+    read: function () { try { return JSON.parse(localStorage.getItem(PAGE.key) || '{}') || {}; } catch (e) { return {}; } },
+    write: function (v) { try { localStorage.setItem(PAGE.key, JSON.stringify(v)); } catch (e) { /* a private window: the page still works */ } }
+  };
+  var saved = store.read();
+  var reduced = false;
+  try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { reduced = false; }
+
+  /* The list: every question keeps its place (its number never changes); the ones with `answered` are filed, not asked. */
+  var total = PAGE.questions.length, openQs = [], doneQs = [];
+  PAGE.questions.forEach(function (q, i) { (q.answered ? doneQs : openQs).push({ q: q, n: i + 1 }); });
+
+  var plain = function (html) { var t = document.createElement('div'); t.innerHTML = html; return USDate.rewrite((t.textContent || '').replace(/\s+/g, ' ').trim()); };
+  var clip = function (s, n) { return s.length > n ? s.slice(0, n - 3).replace(/\s+\S*$/, '') + '...' : s; };
+  var count = function (n, one, many) { return n + ' ' + (n === 1 ? one : many); };
+  /* The label of option p of question q, or '' when it has none: a card may ask for a fact, with no options at all. */
+  var optLabel = function (q, p) { var o = (q.options || [])[Number(p)]; return o ? plain(o.label) : ''; };
+  /* The table's short default when a question has no `nothingShort`: whole sentences of `nothing` until 40 characters are passed ("B holds." alone says little). */
+  var lead = function (s) { var parts = s.split(/(?<=[.!?])\s+/), out = ''; for (var i = 0; i < parts.length && out.length < 40; i++) out += (out ? ' ' : '') + parts[i]; return out; };
+
+  $('eyebrow').textContent = PAGE.eyebrow;
+  $('title').textContent = PAGE.title;
+
+  /* The lede: the counts come from PAGE, then the paragraphs the session wrote. */
+  var counts;
+  if (!total) counts = '<strong>There are no questions on this page.</strong>';
+  else if (!openQs.length) counts = '<strong>Nothing is waiting for you.</strong> ' + (total === 1 ? 'The one question is' : 'All ' + total + ' questions are') + ' answered and filed at the bottom of the page, under Answered earlier.';
+  else counts = '<strong>' + count(openQs.length, 'question is', 'questions are') + ' open.</strong>' +
+    (doneQs.length ? ' ' + count(doneQs.length, 'more is', 'more are') + ' already answered and filed at the bottom of the page, under Answered earlier.' : '');
+  $('lede').appendChild(el('p', 'lede', counts));
+  [].concat(PAGE.lede || []).forEach(function (p) { $('lede').appendChild(el('p', 'lede', p)); });
+  if ([].concat(PAGE.more || []).length) {
+    var more = el('details', 'more');
+    more.appendChild(el('summary', '', '<span class="caret"></span><span>' + (PAGE.moreTitle || 'More about what waits on your answers') + '</span>'));
+    [].concat(PAGE.more).forEach(function (p) { more.appendChild(el('p', 'lede', p)); });
+    $('lede').appendChild(more);
+  }
+
+  /* ---------- the parts of a card, shared by an open card and an answered one ---------- */
+  function contextColumn(q, n, filed) {
+    var left = el('div', 'ctx');
+    left.appendChild(el('div', 'num', 'Card ' + n));
+    if (q.asked) left.appendChild(el('div', 'asked', 'Asked ' + q.asked));
+    left.appendChild(el('h3', '', q.title));
+    left.appendChild(el('p', '', q.what));
+    left.appendChild(el('div', 'label', 'Why it matters'));
+    left.appendChild(el('p', '', q.why));
+    if (q.steps) {
+      left.appendChild(el('div', 'label', 'How to do it'));
+      var ol = el('ol', 'steps'); q.steps.forEach(function (t) { ol.appendChild(el('li', '', t)); }); left.appendChild(ol);
+    }
+    left.appendChild(el('div', 'label', filed ? 'If you had said nothing' : 'If you say nothing'));
+    left.appendChild(el('p', '', q.nothing));
+    return left;
+  }
+
+  /* ---------- the open questions: table row and card ---------- */
+  var tbody = $('sum').querySelector('tbody');
+  var cards = $('cards');
+  openQs.forEach(function (it) {
+    var q = it.q, n = it.n;
+    var tr = el('tr');
+    tr.appendChild(el('td', '', String(n)));
+    tr.appendChild(el('td', '', '<a href="#q-' + q.id + '">' + q.title + '</a>'));
+    var r = el('td', '', q.recommend || ''); r.setAttribute('data-h', 'I recommend'); tr.appendChild(r);
+    var d = el('td'); d.setAttribute('data-h', 'If you say nothing');
+    var nothingFull = plain(q.nothing || ''), nothingEl = el('span', 'clamp');
+    if (q.nothingShort) nothingEl.innerHTML = q.nothingShort; else nothingEl.textContent = lead(nothingFull);
+    nothingEl.title = nothingFull; d.appendChild(nothingEl); tr.appendChild(d);
+    var s = el('td', '', '<span class="pill open" id="pill-' + q.id + '">Not answered</span>'); tr.appendChild(s);
+    tbody.appendChild(tr);
+
+    var card = el('section', 'card'); card.id = 'q-' + q.id; it.card = card;
+
+    var line = el('div', 'sumline');
+    it.slChoice = el('span', 'sl-choice');
+    it.chg = el('button', '', 'Change'); it.chg.type = 'button';
+    it.chg.setAttribute('aria-expanded', 'true'); it.chg.setAttribute('aria-controls', 'b-' + q.id);
+    it.chg.setAttribute('aria-label', 'Change your answer to decision ' + n);
+    var slTitle = el('span', 'sl-title'); slTitle.textContent = plain(q.short || q.title); slTitle.title = plain(q.title);
+    line.appendChild(el('span', 'sl-num', 'Card ' + n));
+    line.appendChild(slTitle); line.appendChild(it.slChoice); line.appendChild(it.chg);
+    card.appendChild(line);
+
+    var body = el('div', 'body'); body.id = 'b-' + q.id;
+    body.appendChild(contextColumn(q, n, false));
+
+    var right = el('div', 'ask');
+    var fs = el('fieldset');
+    fs.appendChild(el('legend', '', 'Your answer'));
+    it.radios = [];
+    (q.options || []).forEach(function (o, k) {
+      var lab = el('label', 'option');
+      var inp = el('input'); inp.type = 'radio'; inp.name = q.id; inp.value = String(k);
+      if (saved[q.id] && saved[q.id].pick === String(k)) inp.checked = true;
+      it.radios.push(inp);
+      lab.appendChild(inp);
+      lab.appendChild(el('span', '', '<b>' + o.label + (k === 0 ? '<span class="rec">Recommended</span>' : '') + '</b><span class="note">' + o.note + '</span>'));
+      fs.appendChild(lab);
+    });
+    if (it.radios.length) right.appendChild(fs);
+    var cl = el('label', 'c', 'Your own words (optional)'); cl.setAttribute('for', 'c-' + q.id); right.appendChild(cl);
+    var ta = el('textarea'); ta.id = 'c-' + q.id; ta.placeholder = 'Add to your answer, or overrule every option above.';
+    if (saved[q.id] && saved[q.id].comment) ta.value = saved[q.id].comment;
+    it.ta = ta;
+    right.appendChild(ta);
+    var acts = el('div', 'acts');
+    it.doneBtn = el('button', '', 'Done'); it.doneBtn.type = 'button';
+    it.clearBtn = el('button', '', 'Clear my answer'); it.clearBtn.type = 'button';
+    acts.appendChild(it.doneBtn); acts.appendChild(it.clearBtn);
+    right.appendChild(acts);
+    body.appendChild(right);
+    card.appendChild(body);
+    cards.appendChild(card);
+  });
+  if (saved._all) $('all-comment').value = saved._all;
+
+  /* ---------- what he has said on an open card ---------- */
+  function pickOf(it) { for (var i = 0; i < it.radios.length; i++) if (it.radios[i].checked) return it.radios[i].value; return null; }
+  function wordsOf(it) { return it.ta.value.trim(); }
+  function answered(it) { return pickOf(it) !== null || wordsOf(it) !== ''; }
+  function choiceOf(it) {
+    var p = pickOf(it), w = wordsOf(it);
+    if (p !== null) return optLabel(it.q, p) + (w ? ' (and your own words)' : '');
+    return w ? 'Your own words: “' + clip(w.replace(/\s+/g, ' '), 120) + '”' : '';
+  }
+
+  /* ---------- folding a card, and moving on to the next open one ---------- */
+  function fold(it) { it.card.classList.add('is-done'); it.chg.setAttribute('aria-expanded', 'false'); }
+  function unfold(it, focus) {
+    it.card.classList.remove('is-done'); it.chg.setAttribute('aria-expanded', 'true');
+    if (focus) { var t = it.radios.filter(function (r) { return r.checked; })[0] || it.radios[0] || it.ta; if (t) t.focus(); }
+  }
+  function advance(it, hadFocus) {
+    var i = openQs.indexOf(it), next = null, k;
+    for (k = i + 1; k < openQs.length && !next; k++) if (!openQs[k].card.classList.contains('is-done')) next = openQs[k];
+    for (k = 0; k < i && !next; k++) if (!openQs[k].card.classList.contains('is-done')) next = openQs[k];
+    var target = next ? next.card : $('paste');
+    if (hadFocus) { try { (next ? (next.radios[0] || next.ta) : $('all-comment')).focus({ preventScroll: true }); } catch (e) { /* focus is a courtesy */ } }
+    var go = function () { target.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' }); };
+    if (window.requestAnimationFrame) window.requestAnimationFrame(go); else go();
+  }
+
+  /* A card never folds under a pressed mouse button (the layout would move between press and release and the click would land
+     on the wrong thing), so a fold that falls due while the button is down waits for the release. */
+  var downAt = 0, waiting = [];
+  function isDown() { return downAt && Date.now() - downAt < 10000; }
+  function settle(fn) { if (isDown()) waiting.push(fn); else fn(); }
+  function release() { downAt = 0; var q = waiting; waiting = []; if (q.length) setTimeout(function () { q.forEach(function (f) { f(); }); }, 0); }
+  document.addEventListener('pointerdown', function () { downAt = Date.now(); }, true);
+  document.addEventListener('pointerup', release, true);
+  document.addEventListener('pointercancel', release, true);
+  window.addEventListener('blur', release);
+
+  function planFold(it, delay) {
+    clearTimeout(it.timer);
+    it.timer = setTimeout(function () {
+      settle(function () {
+        if (!answered(it) || it.card.classList.contains('is-done') || document.activeElement === it.ta) return;
+        var hadFocus = it.card.contains(document.activeElement);
+        fold(it); advance(it, hadFocus);
+      });
+    }, delay);
+  }
+
+  openQs.forEach(function (it) {
+    /* A pick made with the mouse or a finger folds the card after a moment, so he can still reach for the box. Moving into the box
+       cancels it. A pick made from the keyboard never folds on its own: an arrow key only moves through the options, and he may be
+       reading each note. It folds on Enter, on Done, or when he tabs on past the box (the rule below folds a card whose box he leaves). */
+    it.card.addEventListener('pointerdown', function (ev) { it.byPointer = !!(ev.target.closest && ev.target.closest('.option')); });
+    it.card.addEventListener('keydown', function () { it.byPointer = false; });
+    it.radios.forEach(function (r) {
+      r.addEventListener('change', function () { if (it.byPointer) { it.byPointer = false; planFold(it, 700); } });
+      r.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' && answered(it)) { ev.preventDefault(); clearTimeout(it.timer); fold(it); advance(it, true); }
+      });
+    });
+    it.ta.addEventListener('focus', function () { clearTimeout(it.timer); });
+    /* Words fold the card when he leaves the box, never while he types. Leaving the window does not count as leaving the box. */
+    it.ta.addEventListener('blur', function () { if (document.hasFocus() && answered(it)) planFold(it, 0); });
+    it.chg.addEventListener('click', function () { clearTimeout(it.timer); unfold(it, true); });
+    it.doneBtn.addEventListener('click', function () { clearTimeout(it.timer); var had = it.card.contains(document.activeElement); fold(it); advance(it, had); });
+    it.clearBtn.addEventListener('click', function () {
+      clearTimeout(it.timer);
+      it.radios.forEach(function (r) { r.checked = false; }); it.ta.value = '';
+      collect(); (it.radios[0] || it.ta).focus();
+    });
+  });
+
+  /* ---------- the answered ones, at the very bottom, closed ---------- */
+  if (doneQs.length) {
+    var earlier = el('details', 'earlier'); earlier.id = 'earlier';
+    earlier.appendChild(el('summary', '', '<span class="caret"></span><span>Answered earlier (' + doneQs.length + ')</span><span class="hint">Already recorded. Open one to read the whole card.</span>'));
+    doneQs.forEach(function (it) {
+      var q = it.q, a = q.answered || {}, n = it.n;
+      var det = el('details', 'past'); det.id = 'q-' + q.id;
+      var sm = el('summary');
+      var pa = el('span', 'pa'), ans = el('b'); ans.textContent = a.answer || 'Answered';
+      pa.appendChild(ans);
+      if (a.note) { var nt = el('span', 'note'); nt.textContent = ' · ' + plain(a.note); pa.appendChild(nt); }
+      pa.title = plain((a.answer || 'Answered') + (a.note ? ' · ' + a.note : ''));
+      var pt = el('span', 'pt'); pt.textContent = plain(q.short || q.title); pt.title = plain(q.title);
+      var pd = el('span', 'pd'); pd.textContent = a.on ? 'Answered ' + a.on : '';
+      sm.appendChild(el('span', 'caret')); sm.appendChild(el('span', 'pn', String(n)));
+      sm.appendChild(pt); sm.appendChild(pa); sm.appendChild(pd);
+      det.appendChild(sm);
+
+      var pb = el('div', 'pbody');
+      var box = el('div', 'pans');
+      box.appendChild(el('div', 'label', 'Your answer'));
+      var bp = el('p'); var bb = el('b'); bb.textContent = a.answer || 'Answered'; bp.appendChild(bb); box.appendChild(bp);
+      if (a.note) box.appendChild(el('p', '', a.note));
+      if (a.on) box.appendChild(el('p', 'when', 'Answered ' + a.on));
+      pb.appendChild(box);
+      var body = el('div', 'body');
+      body.appendChild(contextColumn(q, n, true));
+      var right = el('div', 'ask');
+      var opts = q.options || [];
+      if (opts.length) right.appendChild(el('div', 'label', 'The options'));
+      opts.forEach(function (o, k) {
+        var chosen = a.pick === k;
+        right.appendChild(el('div', 'option static' + (chosen ? ' chosen' : ''), '<span><b>' + o.label + (k === 0 ? '<span class="rec">Recommended</span>' : '') + (chosen ? '<span class="you">Your answer</span>' : '') + '</b><span class="note">' + o.note + '</span></span>'));
+      });
+      if (opts.length) body.appendChild(right); else body.classList.add('solo');
+      pb.appendChild(body);
+      det.appendChild(pb);
+      earlier.appendChild(det);
+    });
+    $('earlier-slot').appendChild(earlier);
+  }
+
+  /* Nothing open: say so and drop the parts that are only for answering. */
+  if (!openQs.length) {
+    $('openpart').hidden = true; $('pastepart').hidden = true; $('none').hidden = !total;
+    $('copy').hidden = true; $('save').hidden = true;
+    var moreLines = document.querySelector('details.more'); if (moreLines) moreLines.hidden = true;
+  }
+
+  /* ---------- the block he pastes back: open questions only, the same shape as always ---------- */
+  var lastCount = 0, flashTimer = null, copyTimer = null;
+  function showCount() {
+    if (!openQs.length) { $('status').innerHTML = '<strong>Nothing is open.</strong>'; return; }
+    $('status').innerHTML = lastCount === openQs.length
+      ? '<strong>All ' + openQs.length + ' answered.</strong> Press Copy my answers.<span class="long"> Your answers are kept in this browser until you clear them.</span>'
+      : '<strong>' + lastCount + ' of ' + openQs.length + '</strong> open ' + (openQs.length === 1 ? 'question' : 'questions') + ' answered on this page.<span class="long"> Your answers are kept in this browser until you clear them.</span>';
+  }
+
+  function collect() {
+    var state = {}, lines = [USDate.rewrite(PAGE.heading), ''], answeredCount = 0;
+    openQs.forEach(function (it) {
+      var q = it.q, p = pickOf(it), comment = wordsOf(it), yes = p !== null || comment !== '';
+      state[q.id] = { pick: p, comment: comment };
+      var pill = $('pill-' + q.id);
+      if (yes) { answeredCount += 1; pill.className = 'pill done'; pill.textContent = 'Answered'; }
+      else { pill.className = 'pill open'; pill.textContent = 'Not answered'; }
+      it.card.classList.toggle('has-answer', yes);
+      var shown = choiceOf(it);
+      it.slChoice.innerHTML = '<span class="k">Your answer</span>'; it.slChoice.appendChild(document.createTextNode(' ' + shown)); it.slChoice.title = shown;
+      lines.push(it.n + '. ' + plain(q.title) + ' [' + q.id + ']');
+      if (p !== null) lines.push('   ANSWER: ' + optLabel(q, p) + (p === '0' ? ' (the recommended one)' : ''));
+      else if (comment) lines.push('   ANSWER: see my comment; I picked none of the options.');
+      else lines.push('   ANSWER: none given. The default stands: ' + plain(q.nothing));
+      if (comment) lines.push('   COMMENT: ' + comment.replace(/\n+/g, '\n            '));
+      lines.push('');
+    });
+    var all = $('all-comment').value.trim();
+    state._all = all;
+    if (all) { lines.push('ANYTHING ELSE: ' + all.replace(/\n+/g, '\n               ')); lines.push(''); }
+    lines.push('(' + answeredCount + ' of ' + openQs.length + ' answered)');
+    store.write(state);
+    $('out').value = lines.join('\n');
+    lastCount = answeredCount;
+    showCount();
+    return lines.join('\n');
+  }
+
+  document.addEventListener('input', collect);
+  document.addEventListener('change', collect);
+  collect();
+  openQs.forEach(function (it) { if (answered(it)) fold(it); });   // a reload keeps the folds, with no scrolling
+
+  /* ---------- a link to a card (the table, another card, another page) opens whatever hides it ---------- */
+  function reveal() {
+    var id = ''; try { id = decodeURIComponent((location.hash || '').slice(1)); } catch (e) { id = ''; }
+    var t = id && $(id); if (!t) return;
+    for (var e = t; e; e = e.parentElement) if (e.tagName === 'DETAILS') e.open = true;
+    openQs.forEach(function (it) { if (it.card === t && t.classList.contains('is-done')) unfold(it, false); });
+    t.scrollIntoView({ block: 'start' });
+  }
+  window.addEventListener('hashchange', reveal);
+  document.addEventListener('click', function (ev) {
+    var a = ev.target && ev.target.closest && ev.target.closest('a[href^="#q-"]');
+    if (a) setTimeout(reveal, 0);
+  });
+  reveal();
+
+  /* ---------- Copy my answers: always in the bar, and it says so when it has copied ---------- */
+  function say(msg) {
+    $('status').innerHTML = '<strong>' + msg + '</strong>';
+    clearTimeout(flashTimer); flashTimer = setTimeout(showCount, 5000);
+  }
+  function copied() {
+    var b = $('copy'); b.textContent = 'Copied'; b.classList.add('copied');
+    clearTimeout(copyTimer); copyTimer = setTimeout(function () { b.textContent = 'Copy my answers'; b.classList.remove('copied'); }, 3000);
+    say('Copied. Paste it into the Claude session.');
+  }
+  $('copy').addEventListener('click', function () {
+    var text = collect();
+    var fallback = function () {
+      var out = $('out'); out.focus(); out.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      if (ok) copied(); else say('Your answers are selected in the box above. Press Command C, then paste into the Claude session.');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(copied, fallback);
+    } else { fallback(); }
+  });
+  $('save').addEventListener('click', function () {
+    var blob = new Blob([collect() + '\n'], { type: 'text/plain' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = PAGE.key + '-answers.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+    say('Saved to your Downloads folder as ' + PAGE.key + '-answers.txt.');
+  });
+})();
+</script>
+</body>
+</html>

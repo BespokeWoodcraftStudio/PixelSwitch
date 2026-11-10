@@ -1,9 +1,85 @@
 # PixelSwitch: session handover
 
-Read this first. Then read `docs/worklog/INDEX.md` for the full history; the newest entries are at the bottom of `docs/worklog/2026-10-16.md`.
-Last updated 2026-10-25 (PDT), after 2.0: separate session and weekly limits, priority numbers, and PixelSwitch for Linux.
+Read this first. Then read `docs/worklog/INDEX.md` for the full history; the newest entries are in `docs/worklog/2026-11-10.md` (WL-2026-11-10-001 to -004).
+Last updated 2026-11-10 (PST), after 2.1 was built and merged: readable colours, Ultra accounts, and the sign-in expiry watch. **Release: pending.** Before that, 2.0 (2026-10-25).
 
-## 2.0 (2026-10-25): read this first
+## 2.1 (2026-11-10): read this first
+
+**State: built, merged on `main`, verified; release: pending. The next step is the release script** (details below). Nothing is
+pushed. When this was written `main` was 12 commits ahead of `origin/main` (`50a5243`, the 2.0 close-out), at `fb7d296`. The
+last lane, `lane/auth-fixes-2` (`3ff3ce2`, merged `fb7d296`: rotation safety), merged while this records branch
+(`lane/records-2.1`, cut from `4294327`) was being written, so it is in 2.1 but not in this branch's tree; merge
+`lane/records-2.1` into `main` (a plain merge, it only adds documents).
+
+- **What 2.1 is** (his four requests are verbatim in the last section of `docs/decisions/2026-09-24-remote-control-answers.md`):
+  1. **Readable colours** (`53bde1c`): opaque popover, solid card, tile and bar-track fills, stronger text tokens, badge
+     text `#111111`; every body pair at least 4.5:1 and every graphic at least 3:1 in light and dark, measured on rendered pixels.
+  2. **Ultra** (`b0e9521`, `65c0e82`): a Max 20x account is Ultra: the badge says Ultra, no Session row, no session menu-bar
+     modules, no widget session views, Settings shows "No 5-hour limit", the CLI's Session cell is `n/a`. A real `five_hour`
+     reading from the API always wins over the stored tier (`Account.sessionLimitObserved`). An unknown plan keeps the 5-hour limit.
+     Protocol version stays 2, revision 3 to 4 (`AccountInfo.hasSessionLimit`, optional).
+  3. **Sign-in expiry** (`f519f40`, `b345bfa`, `6ee54f6`, `3ff3ce2`): new `PixelSwitch/Services/AuthHealth.swift`.
+     Every switch target's saved login is renewed first (skipped when this app renewed it within 300 s with the same token
+     fingerprint); a server refusal flags the account and the next target is tried. A 30-second watch reads the live login;
+     it counts as dead only when Claude Code has blanked it (empty `accessToken` and `refreshToken`, or `expiresAt` 0) AND
+     `claude auth status` exits non-zero, confirmed on two reads 15 s or more apart. Then the account is flagged and the
+     UNCHANGED engine is asked to switch through `isUnusable`, cooldown bypassed, never to an unusable target. A Manual only
+     active account with a dead login IS left; auto-switch off only flags, logs once and shows. An expired token alone, a 401,
+     429, 5xx, offline or a timeout never counts. Log tags: `[authWatch]`, and `[autoSwitch] Rule needsSignIn`.
+- **Decisions and their reasons** (a later session must not undo them): the engine and the 150 frozen conformance vectors were
+  deliberately not touched (the Linux port mirrors them; a change is a three-place change); Manual only + dead login is left
+  (matches 1.6 `noSubscription`; staying on a dead login blocks agentic coding); auto-switch off never moves; renew EVERY target
+  before a switch (validates the refresh grant at the moment it matters, one request per switch; the first 60-minute window let
+  a revoked grant with a valid access token through); the API's data beats the stored plan tier; Ultra ships Mac-only; the
+  Settings → General "Session (5-hour) default" stays (it still governs other accounts). Full reasons: the decisions file.
+- **Tests (this records branch at `4294327`, which does not hold `3ff3ce2`, after its last edit):** `bash Tests/run-unit-tests.sh`
+  printed `1733 passed, 0 failed` and `conformance: 150/150 cases agree with the engine`. The count on `main` after
+  `3ff3ce2` is higher; re-run it on `main` before the release and quote that. Linux suite at `4294327`: `python3 -m unittest discover -s linux/tests -t linux`
+  1670 OK, 47 skipped. A real Debug build (`xcodegen generate`, then the `xcodebuild` line in "How things work") succeeded for
+  the app, widget and CLI at `65c0e82`. Not run: the live watch against a real dead login (it cannot be caused on purpose),
+  `backfillPlans` against real saved logins, the real popover frame.
+- **Release (the next step).** `RELEASE_NOTES.md` is written for 2.1 and carries the Linux installer's SHA-256
+  (`31bdbeeb...`, unchanged because `linux/` has not changed since v2.0; `release.sh` checks it). Merge `lane/records-2.1`, re-run the
+  unit tests on `main`, then `echo y | ./scripts/release.sh 2.1` (it stops at `Proceed? [y/N]`), then
+  `scripts/verify-release.sh v2.1`. Every push to `main` starts a CI build: see the gotchas about two release builds racing.
+  Whether 2.1 is released is stated by the release step, not by this file.
+- **Branch note: `lane/ultra` holds `e538ad5` (the MCP description wording) UNMERGED.** `linux/tests/test_mcp.py` pins the
+  Linux MCP text to `PixelSwitchCLI/MCPServer.swift` word for word, so landing it alone fails two Linux tests. Land it together
+  with the matching `linux/pixelswitch/mcp.py` edit. The other 2.1 lane branches are merged and already deleted locally; keep `lane/ultra` until `e538ad5`
+  is landed or dropped. Any worktree left under `.claude/worktrees/` goes with `git worktree remove` (never a sibling folder).
+- **Waiting on the founder:** the 2.1 hand-check page,
+  [docs/decisions/pixelswitch-hand-checks-2.1-2026-11-10.html](decisions/pixelswitch-hand-checks-2.1-2026-11-10.html)
+  (card 1: is the popover readable, light and dark; card 2: does an Ultra account show Ultra and no 5-hour row; card 3: sign-in
+  expiry, information only). He pastes the Copy block back. Record his answers verbatim in `docs/decisions/`, mark the page
+  answered (the template's `answered` field), fix any failure test-first and ship it as 2.2. The 2.0 page
+  (`pixelswitch-2.0-2026-10-24.html`) and the 2026-09-25 page are still open; do not touch them except to record answers.
+- **Live-evidence note.** On 2026-11-10 the founder's Mac had a Claude login die at 10:40Z and the app's 2.0 sat on it until
+  he switched by hand at 13:39Z, back to the account with id prefix `318644E2`, which is **ahamade@gmail.com** (found with
+  `/Applications/PixelSwitch.app/Contents/Helpers/pixelswitch accounts --json`, which prints no token). Its saved copy likely
+  carries the refresh token the server refused (inferred: it equalled the live login at 10:35Z). 2.1's watch leaves it within
+  about a minute if it dies again, and the account then shows "Session expired. Re-authenticate (↻) to fix." (CLI: `!`, "cannot
+  be switched to until it is re-signed"); fix it with the Accounts tab refresh button or `pixelswitch accounts reauth <account>`.
+  Read-only check next session: `grep '\[authWatch\]' ~/Library/Logs/PixelSwitch-app.log` after 2.1 installs.
+- **Follow-ups (none blocks the release):**
+  - The Linux port has no live-login watch and no Ultra handling (its rows still show Session for an Ultra account).
+  - The MCP description commit `e538ad5` (above).
+  - The Usage card for a flagged account has no sign-in button (the Accounts tab refresh button and `pixelswitch accounts reauth` work).
+  - A Manual only Ultra account whose weekly default is below the session default still has `defaults.relaxed` raise its weekly
+    leave-at (needs an engine change, which is a three-place change; no effect at the founder's 91 / 97 defaults).
+  - Log lines (`limitsText`, "staying until the session limit") still say "session" for an Ultra account.
+  - `MenuBarStripView.swift` should call `MenuBarModule.visibleModules(_:activeAccount:)` (one line plus its pin).
+  - `borderedProminent` button labels (white on coral, 3.1:1) were not touched by the colours change; `assets/screenshots` (the
+    README pictures) were not regenerated.
+  - Not covered by the watch: Claude Code's `account_on_hold` outcome and a past `refreshTokenExpiresAt` do not blank a login.
+  - The `autoSwitched` event still reports `trigger: noSubscription` for a dead-login switch (the engine is frozen); only the log says `needsSignIn`.
+- **Cold start, in this order:** this section; `docs/investigations/2026-11-10-readability-ultra-auth/README.md` (index of the
+  recons, the three reviews, the renders and every commit); WL-2026-11-10-001 to -004; the last section of
+  `docs/decisions/2026-09-24-remote-control-answers.md`; then the code: `PixelSwitch/Services/AuthHealth.swift`,
+  `PixelSwitch/Models/AccountPlan.swift`, `PixelSwitch/Models/BrandColor.swift`, and in `PixelSwitch/AppState.swift`
+  `startAuthWatch`, `authWatchTick`, `validatedTargetBackup`, `settleLeftLiveLogin`, `windowRule(for:)`, `requestUsage`, `backfillPlans`.
+- **Before anything else in a new session: `git fetch`.** The checkout was 104 commits behind when this session started.
+
+## 2.0 (2026-10-25): released earlier
 
 Released **v2.0 (build 31)**, Mac and Linux, tag `v2.0`, release CI run 40167290828, published 2026-10-25T06:01:50Z.
 `scripts/verify-release.sh v2.0` passes every Mac check (Latest, feed 2.0/31, appcast length = DMG, EdDSA, notarized,
@@ -33,18 +109,20 @@ The founder asked for it on 2026-10-24 (his words verbatim in spec section 0). *
   Beeco accounts need re-signing on that Mac.
 - **Waiting on the founder:** `docs/decisions/pixelswitch-2.0-2026-10-24.html` (four choices that ship with defaults,
   three hand checks). Record his pasted answers verbatim in `docs/decisions/`, mark the page answered, and ship any
-  behaviour change as 2.1.
-- **Tests:** Mac `bash Tests/run-unit-tests.sh` 1352/1352 (150/150 conformance, the frozen 1.9 engine oracle). This Mac
-  cannot compile SwiftUI view files: CI is the only compile proof for views (see the gotchas).
+  behaviour change in the next version (2.1 was built without them, so 2.2).
+- **Tests:** Mac `bash Tests/run-unit-tests.sh` 1352/1352 (150/150 conformance, the frozen 1.9 engine oracle). (Corrected
+  2026-11-10: this Mac's Command Line Tools cannot compile SwiftUI view files, but the installed Xcode 27.2 builds the whole app;
+  see "Building and type-checking on this Mac" under Current state.)
 
 ## Current state
 
-- **Released: 2.0** (build 31, tag `v2.0`, run 40167290828, 2026-10-25T06:01:50Z): see the 2.0 section above. Before it, 1.9 (build 30, tag `v1.9`, run 38924948392, 2026-10-16).
-- **Installed:** the Linux laptop (2.0, 2026-10-25). The Macs install 2.0 by themselves at their next Sparkle check (see the 2.0 section).
+- **Built and merged: 2.1** (`project.yml` still says 2.0 build 31; the release script moves it). **Release: pending** (see the 2.1 section). Last released: **2.0** (build 31, tag `v2.0`, run 40167290828, 2026-10-25T06:01:50Z), see the 2.0 section below. Before it, 1.9 (build 30, tag `v1.9`, run 38924948392, 2026-10-16).
+- **Installed:** the founder's Mac and the Beeco Mac run 2.0 (Sparkle installed it by itself, 2026-10-25); the Linux laptop runs 2.0. 2.1 reaches the Macs through Sparkle after its release; the Linux version is unchanged in 2.1.
 - **Next session, prove 1.9 on the founder's Mac** (no founder action needed; read, never ask): `/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" /Applications/PixelSwitch.app/Contents/Info.plist` gives 1.9; then count, from the `[init]` of 1.9 onwards, `grep -c 'rate-limited; parked' ~/Library/Logs/PixelSwitch-app.log` (expected 0 for a healthy set of logins) and the 401s per login per hour (the scripts in `docs/investigations/2026-10-16-usage-429/scripts/`). Any 429 on a login that had no 401 in the hour before it would be new evidence: read the investigation's "Still unknown" first.
-- **Branches:** `main` holds everything. `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only`, `no-subscription-switch`, `exhausted-switch-and-usage-errors`, `switch-at-threshold` and `fix/usage-429-dead-tokens` are fully merged and can be deleted.
-- **Tests:** `bash Tests/run-unit-tests.sh` gives 706/706. **`bash scripts/typecheck.sh` no longer works on this Mac** (since its Command Line Tools moved to Swift 6.4, by 2026-10-16): it fails on main with 4 baseline errors in `PixelSwitchApp.swift` (the SwiftUIMacros plugin is missing), and swiftc then stops, so later files are never checked. Use `bash docs/investigations/2026-10-16-usage-429/scripts/typecheck-reordered.sh .` (SwiftUI view files last; checks all 55 non-view files; the only errors on main are 5 in `SignInView.swift`), the CLI line in that investigation's build notes, and a CI branch build (`gh workflow run build.yml -R BespokeWoodcraftStudio/PixelSwitch --ref <branch>`, then `scripts/verify-ci-artifact.sh <run-id>`) as the real compile proof.
-- **Users:** the founder is the only one. Release through the updater, then hand-check (memory: sole user). Versions are two-part: 1.5, then 1.6, …, 2.0.
+- **Branches:** `main` holds everything except `lane/ultra`'s `e538ad5` (the MCP description wording, deliberately unmerged: see the 2.1 section). `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only`, `no-subscription-switch`, `exhausted-switch-and-usage-errors`, `switch-at-threshold` and `fix/usage-429-dead-tokens` are fully merged and can be deleted.
+- **Tests:** `bash Tests/run-unit-tests.sh`: 1733 passed, 0 failed, conformance 150/150 on the 2.1 records branch (cut from `4294327`); see the 2.1 section for what it does and does not include. Linux: `python3 -m unittest discover -s linux/tests -t linux` (1670 OK, 47 skipped at `4294327`).
+- **Building and type-checking on this Mac (corrected 2026-11-10).** Xcode 27.2 IS installed here (an older note said it was not). The real build is the proof: `xcodegen generate`, then `xcodebuild -project PixelSwitch.xcodeproj -scheme PixelSwitch -configuration Debug -derivedDataPath <dir> CODE_SIGNING_ALLOWED=NO build` builds the app, the widget and the CLI, views included. The local typecheck scripts are weaker than they look: `bash scripts/typecheck.sh` stops on baseline errors in `PixelSwitchApp.swift` (the SwiftUIMacros plugin of the Command Line Tools) and then checks nothing after them; `typecheck-reordered.sh` (in `docs/investigations/2026-10-16-usage-429/scripts/`) checks all non-view files but does NOT check the function bodies of `AppState.swift`, so a clean run there is false assurance for the file where most 2.1 behaviour lives. `scripts/typecheck.sh` also looks for Sparkle 2.9.0 in `$HOME/Library/Caches/pixelswitch-dev/`, which does not exist on this Mac (the builders used their own Sparkle 2.9.0 copy). A CI branch build (`gh workflow run build.yml -R BespokeWoodcraftStudio/PixelSwitch --ref <branch>`, then `scripts/verify-ci-artifact.sh <run-id>`) remains the check for the signed, notarized product.
+- **Users:** the founder is the only one. Release through the updater, then hand-check (memory: sole user). Versions are two-part: 1.5, then 1.6, …, 2.0, 2.1.
 
 | Version | What it added |
 |---|---|
@@ -57,17 +135,19 @@ The founder asked for it on 2026-10-24 (his words verbatim in spec section 0). *
 | 1.8 | Auto-switch moves you **at your number** to any account at least a point under its own threshold (`AutoSwitchEngine.hysteresis` 10 → 1), on session, weekly and Fable; 1.7's `exhausted` rule removed. The founder's answer on `docs/decisions/pixelswitch-switch-point-2026-09-29.html` (answered). |
 | 1.9 | PixelSwitch **stops causing the usage 429s** ("API Rate Limited. Try again later.") and says what is really happening. `UsageRequestGuard` (pure, unit-tested) gates every usage and profile request: a token that got a 401 is never sent again until it changes, an expired one is renewed first (saved login) or left alone (live login: "Waiting for Claude Code to renew this login"), 20 minutes' rest after any 401 or 429 whatever the number of accounts, a server-refused grant is `needsReauth` (persisted, not polled, not switchable), and the park belongs to the token, so a re-sign clears the card at once. Delegated `claude auth status` refresh removed (0 recoveries in 13). Full story: `docs/investigations/2026-10-16-usage-429.md`. |
 | 2.0 | **Separate Session and Weekly limits** (defaults 50-100, per account 1-100), **priority numbers** (P1; lists sorted; "Priority (lowest number first)"), weekly overflow (when no account under its weekly limit can take you, the session limit decides), login-safety fixes (blank logins never saved or written; re-read before write; honest refreshTokenExpiresAt; removing the active account really switches; disposable-login rule; 429 recorded without an account), CLI/MCP additions (protocol stays 2, 21 methods, 20 tools, 24 keys), and **PixelSwitch for Linux** (Ubuntu 24.04/26.04). Spec `docs/superpowers/specs/2026-10-24-2.0-spec.md`. |
+| 2.1 | **Readable colours** (opaque popover, solid cards, tiles and bars, stronger text; light and dark), **Ultra** (Max 20x: badge says Ultra, no 5-hour limit anywhere, `AccountInfo.hasSessionLimit`, protocol 2 revision 4), and **sign-in expiry** (every switch target's saved login is renewed first and a refusal skips it; a 30-second watch leaves a live login Claude Code has blanked, with auto-switch on, within about a minute). Built and merged on 2026-11-10, release pending. Decisions: `docs/decisions/2026-09-24-remote-control-answers.md`, last section; evidence: `docs/investigations/2026-11-10-readability-ultra-auth/`. |
 
 ## Waiting on the founder
 
-0. **2.0 decisions and hand checks** (four choices that ship with defaults; checks on his Mac, the laptop and the CLI): [docs/decisions/pixelswitch-2.0-2026-10-24.html](decisions/pixelswitch-2.0-2026-10-24.html). He pastes the Copy block back; record it verbatim in `docs/decisions/`, mark the page answered, ship behaviour changes as 2.1.
-1. **Hand checks** (15 cards, one round, on 1.5 to 1.8; card 4 is the no-subscription fix, card 5 is 1.8's switch at your number, card 6 is 1.7's Retry): [docs/decisions/pixelswitch-hand-checks-2026-09-25.html](decisions/pixelswitch-hand-checks-2026-09-25.html). He pastes the Copy block back. Then:
+1. **2.1 hand checks** (three cards: the popover by eye in light and dark, an Ultra account by eye, and the sign-in expiry as information): [docs/decisions/pixelswitch-hand-checks-2.1-2026-11-10.html](decisions/pixelswitch-hand-checks-2.1-2026-11-10.html). He pastes the Copy block back; record it verbatim in `docs/decisions/`, mark the page answered, fix any failure test-first and ship it as 2.2. Nothing blocks the release: it is checked after the release, as every release since 1.2.
+2. **2.0 decisions and hand checks** (four choices that ship with defaults; checks on his Mac, the laptop and the CLI): [docs/decisions/pixelswitch-2.0-2026-10-24.html](decisions/pixelswitch-2.0-2026-10-24.html). He pastes the Copy block back; record it verbatim in `docs/decisions/`, mark the page answered, ship behaviour changes in the next version after 2.1.
+3. **Hand checks** (15 cards, one round, on 1.5 to 1.8; card 4 is the no-subscription fix, card 5 is 1.8's switch at your number, card 6 is 1.7's Retry): [docs/decisions/pixelswitch-hand-checks-2026-09-25.html](decisions/pixelswitch-hand-checks-2026-09-25.html). He pastes the Copy block back. Then:
    - record his answers verbatim in `docs/decisions/`;
    - mark the page answered;
    - fix any failure test-first and ship it as the next minor version.
 
    Regenerate the page with `python3 scripts/hand-checks/gen-hand-checks.py`, and render it with `node scripts/hand-checks/render-hand-checks.cjs <out-dir>`.
-2. **Optional, his call:** a paid graphify refresh of this repo, now estimated at $6.75 to $21.38 (355 files would be sent, after 2.0; the free AST update ran 2026-10-25: 7,595 nodes, 17,123 edges); earlier estimate $3.10 to $10.43 (163 files) by `~/.claude/graphify-smart/fleet-audit.py .` on 2026-10-16. Only the free AST update has been run (latest 2026-10-16 after 1.9: 2,325 nodes, 5,271 edges).
+4. **Optional, his call:** a paid graphify refresh of this repo, now estimated at $6.75 to $21.38 (355 files would be sent, after 2.0; the free AST update ran 2026-10-25: 7,595 nodes, 17,123 edges); earlier estimate $3.10 to $10.43 (163 files) by `~/.claude/graphify-smart/fleet-audit.py .` on 2026-10-16. Only the free AST update has been run (latest 2026-10-16 after 1.9: 2,325 nodes, 5,271 edges).
 
 ## Automatic updates: proven, and 1.6 is the second run
 
@@ -112,7 +192,7 @@ The founder: "on my computer, I'm getting this API rate-limited message, because
 
 ## How things work (pointers, not copies)
 
-- **Project and build.** `project.yml` is the only project source (XcodeGen); never edit `.pbxproj` or `Info.plist`. There is no Xcode on this Mac: full builds, signing and notarization run only in GitHub Actions. `bash scripts/typecheck.sh` is the local compile check.
+- **Project and build.** `project.yml` is the only project source (XcodeGen); never edit `.pbxproj` or `Info.plist`. Xcode 27.2 is installed on this Mac: `xcodegen generate` then `xcodebuild ... CODE_SIGNING_ALLOWED=NO build` is the local build (full line in "Current state"); signing and notarization run only in GitHub Actions. Neither typecheck script is a substitute for that build.
 - **Release.** Write `RELEASE_NOTES.md` first and commit it, then `echo y | ./scripts/release.sh X.Y` (the script stops at a `Proceed? [y/N]` prompt). Verify with `scripts/verify-release.sh vX.Y`. A branch build (no release) can be checked with `scripts/verify-ci-artifact.sh <run-id>`.
 - **Auto-switch rules.** `PixelSwitch/Services/AutoSwitchEngine.swift` is pure and fully unit-tested. `AutoSwitchEngine.ceiling(threshold:room:)` is the one rule for whether an account may be switched TO (nil for Manual only). The 1.5 spec is at `docs/superpowers/specs/2026-09-26-manual-only-spec.json`.
 - **Remote control.** See AGENTS.md "Remote control" and ARCHITECTURE.md; the specs and plans are under `docs/superpowers/`.
@@ -120,7 +200,14 @@ The founder: "on my computer, I'm getting this API rate-limited message, because
 
 ## Gotchas that cost time (so the next session doesn't relearn them)
 
-- **(2.0) This Mac cannot compile SwiftUI view files** (missing SwiftUI macro plugin since its Swift 6.4 tools): the unit
+- **(2.1) `git fetch` before anything.** This session's checkout was 104 commits behind (local `main` at 1.8, `origin/main` at 2.0) and its own CLAUDE.md and handover said 1.8; `git status -sb` showed no "behind" count because the tracking ref had never been fetched. Compare `git rev-parse main origin/main` before believing a file.
+- **(2.1) Opaque surface tokens and text tokens change together.** Make a fill opaque without re-measuring the text on it (or the reverse) and an unmeasured pair is left. The README screenshots were rendered on their own solid backdrop, so the earlier readability check never saw that the real popover was see-through; the harness (`Tools/screenshots/make_screenshots.swift`) now paints the app's `popoverBackground`. Sample rendered pixels from `bitmapData`, not `NSBitmapImageRep.colorAt` (it shifts values). `ImageRenderer` cannot draw the real popover frame.
+- **(2.1) Claude Code blanks a login only when the server refused its refresh token** (read from Claude Code 2.1.321's own bundle). A blank therefore means a dead grant, and the saved copy of that login likely carries the same refused token. An expired token alone is normal and Claude Code renews it.
+- **(2.1) Behaviour in `AppState.swift` is pinned only by source text** (it is not in the unit harness). Put a decision in a pure function next to its tests (`AuthHealth.swift`, `AccountPlan.swift`), or a pin passes on an inverted implementation.
+- **(2.1) The hand-check generator and render script (`scripts/hand-checks/gen-hand-checks.py`, `render-hand-checks.cjs`) hard-code `/Users/ahamade/...`**, which does not exist on this Mac (home is `/Users/ahmed`). The 2.1 page has its own portable pair (`gen-hand-checks-2.1.py`, `render-hand-checks-2.1.cjs`); the old two are unchanged.
+- **(2.1) `Tools/screenshots/make_settings_renders.sh` was already broken** (an `AssetColorStubs` clash) before this session.
+- **(2.1) A lane never writes the worklog:** `worklog.sh` refuses inside `.claude/worktrees/`; the records lane sets `WORKLOG_LANE_OK=1`.
+- **(2.0, superseded by 2.1: the real Xcode build compiles views here) This Mac's Command Line Tools cannot compile SwiftUI view files** (missing SwiftUI macro plugin since its Swift 6.4 tools): the unit
   harness and every local typecheck skip or stop before views. A lane dropped `import SwiftUI` and only CI caught it.
   Run `gh workflow run build.yml -R BespokeWoodcraftStudio/PixelSwitch --ref <branch>` and `scripts/verify-ci-artifact.sh`
   before any view change reaches main. Standalone view components can be rendered offscreen
