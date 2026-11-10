@@ -32,11 +32,11 @@ last lane, `lane/auth-fixes-2` (`3ff3ce2`, merged `fb7d296`: rotation safety), m
   before a switch (validates the refresh grant at the moment it matters, one request per switch; the first 60-minute window let
   a revoked grant with a valid access token through); the API's data beats the stored plan tier; Ultra ships Mac-only; the
   Settings → General "Session (5-hour) default" stays (it still governs other accounts). Full reasons: the decisions file.
-- **Tests (this records branch at `4294327`, which does not hold `3ff3ce2`, after its last edit):** `bash Tests/run-unit-tests.sh`
-  printed `1733 passed, 0 failed` and `conformance: 150/150 cases agree with the engine`. The count on `main` after
-  `3ff3ce2` is higher; re-run it on `main` before the release and quote that. Linux suite at `4294327`: `python3 -m unittest discover -s linux/tests -t linux`
-  1670 OK, 47 skipped. A real Debug build (`xcodegen generate`, then the `xcodebuild` line in "How things work") succeeded for
-  the app, widget and CLI at `65c0e82`. Not run: the live watch against a real dead login (it cannot be caused on purpose),
+- **Tests (the release tree: `main` at `f71f451` minus the docs):** `bash Tests/run-unit-tests.sh` printed
+  `1763 passed, 0 failed` and `conformance: 150/150 cases agree with the engine`. (The records branch at `4294327`, before
+  `3ff3ce2` and the last lanes merged, printed 1733; that older number is superseded.) Linux suite: `python3 -m unittest discover -s linux/tests -t linux`
+  1670 OK, 47 skipped. A real Debug and a real Release build (`xcodegen generate`, then the `xcodebuild` line in "How things work") succeeded for
+  the app, widget and CLI on this tree. Not run: the live watch against a real dead login (it cannot be caused on purpose),
   `backfillPlans` against real saved logins, the real popover frame.
 - **Release (the next step).** `RELEASE_NOTES.md` is written for 2.1 and carries the Linux installer's SHA-256
   (`31bdbeeb...`, unchanged because `linux/` has not changed since v2.0; `release.sh` checks it). Merge `lane/records-2.1`, re-run the
@@ -72,6 +72,7 @@ last lane, `lane/auth-fixes-2` (`3ff3ce2`, merged `fb7d296`: rotation safety), m
     README pictures) were not regenerated.
   - Not covered by the watch: Claude Code's `account_on_hold` outcome and a past `refreshTokenExpiresAt` do not blank a login.
   - The `autoSwitched` event still reports `trigger: noSubscription` for a dead-login switch (the engine is frozen); only the log says `needsSignIn`.
+  - `loginNewAccount`'s `.existing` branch (`AppState.swift` ~682-696) does not update `planTier` from the sign-in status; harmless because `updateActiveAccount` runs on the next refresh; the Ultra pin counts only the other two sites.
 - **Cold start, in this order:** this section; `docs/investigations/2026-11-10-readability-ultra-auth/README.md` (index of the
   recons, the three reviews, the renders and every commit); WL-2026-11-10-001 to -004; the last section of
   `docs/decisions/2026-09-24-remote-control-answers.md`; then the code: `PixelSwitch/Services/AuthHealth.swift`,
@@ -120,7 +121,7 @@ The founder asked for it on 2026-10-24 (his words verbatim in spec section 0). *
 - **Installed:** the founder's Mac and the Beeco Mac run 2.0 (Sparkle installed it by itself, 2026-10-25); the Linux laptop runs 2.0. 2.1 reaches the Macs through Sparkle after its release; the Linux version is unchanged in 2.1.
 - **Next session, prove 1.9 on the founder's Mac** (no founder action needed; read, never ask): `/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" /Applications/PixelSwitch.app/Contents/Info.plist` gives 1.9; then count, from the `[init]` of 1.9 onwards, `grep -c 'rate-limited; parked' ~/Library/Logs/PixelSwitch-app.log` (expected 0 for a healthy set of logins) and the 401s per login per hour (the scripts in `docs/investigations/2026-10-16-usage-429/scripts/`). Any 429 on a login that had no 401 in the hour before it would be new evidence: read the investigation's "Still unknown" first.
 - **Branches:** `main` holds everything except `lane/ultra`'s `e538ad5` (the MCP description wording, deliberately unmerged: see the 2.1 section). `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only`, `no-subscription-switch`, `exhausted-switch-and-usage-errors`, `switch-at-threshold` and `fix/usage-429-dead-tokens` are fully merged and can be deleted.
-- **Tests:** `bash Tests/run-unit-tests.sh`: 1733 passed, 0 failed, conformance 150/150 on the 2.1 records branch (cut from `4294327`); see the 2.1 section for what it does and does not include. Linux: `python3 -m unittest discover -s linux/tests -t linux` (1670 OK, 47 skipped at `4294327`).
+- **Tests:** `bash Tests/run-unit-tests.sh`: 1763 passed, 0 failed, conformance 150/150 on the 2.1 release tree (`main` at `f71f451` minus the docs; the older 1733 was the records branch at `4294327`, before the last lanes merged); see the 2.1 section for what it does and does not include. Linux: `python3 -m unittest discover -s linux/tests -t linux` (1670 OK, 47 skipped).
 - **Building and type-checking on this Mac (corrected 2026-11-10).** Xcode 27.2 IS installed here (an older note said it was not). The real build is the proof: `xcodegen generate`, then `xcodebuild -project PixelSwitch.xcodeproj -scheme PixelSwitch -configuration Debug -derivedDataPath <dir> CODE_SIGNING_ALLOWED=NO build` builds the app, the widget and the CLI, views included. The local typecheck scripts are weaker than they look: `bash scripts/typecheck.sh` stops on baseline errors in `PixelSwitchApp.swift` (the SwiftUIMacros plugin of the Command Line Tools) and then checks nothing after them; `typecheck-reordered.sh` (in `docs/investigations/2026-10-16-usage-429/scripts/`) checks all non-view files but does NOT check the function bodies of `AppState.swift`, so a clean run there is false assurance for the file where most 2.1 behaviour lives. `scripts/typecheck.sh` also looks for Sparkle 2.9.0 in `$HOME/Library/Caches/pixelswitch-dev/`, which does not exist on this Mac (the builders used their own Sparkle 2.9.0 copy). A CI branch build (`gh workflow run build.yml -R BespokeWoodcraftStudio/PixelSwitch --ref <branch>`, then `scripts/verify-ci-artifact.sh <run-id>`) remains the check for the signed, notarized product.
 - **Users:** the founder is the only one. Release through the updater, then hand-check (memory: sole user). Versions are two-part: 1.5, then 1.6, …, 2.0, 2.1.
 

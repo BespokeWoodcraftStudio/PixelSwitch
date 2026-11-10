@@ -39,8 +39,9 @@ green. A before and after of the popover itself was not made.
 
 ## What was verified, and what was not
 
-- `bash Tests/run-unit-tests.sh`: 1733 passed, 0 failed, conformance 150/150 at `4294327`. The records lane re-ran it on
-  its own tree (cut from `4294327`, so without `3ff3ce2`) at the end, with the same result; the handover quotes that run. Linux suite: 1670 OK, 47 skipped.
+- `bash Tests/run-unit-tests.sh` on the release tree (`main` at `f71f451` minus the docs, which holds every lane including
+  `3ff3ce2`): 1763 passed, 0 failed, conformance 150/150. An earlier run at `4294327` (and the records lane's own tree, cut from
+  it, without `3ff3ce2`) printed 1733; that number is superseded. Linux suite: 1670 OK, 47 skipped. A real Debug and a real Release `xcodebuild` also succeeded.
 - A real Debug build (`xcodegen generate`, then `xcodebuild ... CODE_SIGNING_ALLOWED=NO build`) succeeded for the app, the
   widget and the CLI at `65c0e82`. `scripts/typecheck-reordered.sh` does NOT check the function bodies of `AppState.swift`;
   the real build is the proof.
