@@ -49,8 +49,9 @@ struct MenuBarStripView: View {
             }
 
             // The session modules are left out while the active account has no
-            // 5-hour limit (Ultra); the saved list is not touched.
-            ForEach(MenuBarModule.visibleModules(config.modules, activeHasSessionLimit: appState.activeAccount?.hasSessionLimit ?? true)) { module in
+            // 5-hour limit (Ultra); the saved list is not touched. The filter is
+            // the unit-tested `visibleModules`; no active account draws them all.
+            ForEach(MenuBarModule.visibleModules(config.modules, activeAccount: appState.activeAccount)) { module in
                 MenuBarModuleView(
                     module: module,
                     appState: appState,
