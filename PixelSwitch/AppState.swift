@@ -399,12 +399,19 @@ final class AppState: ObservableObject {
     /// refusal is by far the likelier answer, and signing in again clears it.
     ///
     /// Runs on its own, after the switch has released the switching flag, because
-    /// the renewal can take a minute or more offline and must not hold up another
-    /// switch or a sign-in. Nothing is lost by that: a switch back to this account
-    /// renews it first (`validatedTargetBackup`) and joins the renewal in flight.
+    /// the renewal can take several seconds offline and must not hold up another
+    /// switch or a sign-in. Nothing is lost by that: the account just left is
+    /// flagged until this check ends, so a switch back to it is refused at once
+    /// (`validatedTargetBackup` answers `.needsReauth` before any renewal), and the
+    /// check's answer belongs to the saved login it was made for: when that login
+    /// changed meanwhile (the account was signed in again, or removed), the answer is
+    /// dropped and neither flags nor overwrites anything (`RenewalPersistence`).
     private func settleLeftLiveLogin(_ accountId: UUID) async {
         guard let left = accounts.first(where: { $0.id == accountId }) else { return }
-        let outcome = await refreshBackupInPlace(for: left)
+        guard let outcome = await refreshBackupInPlace(for: left) else {
+            log.info("[authWatch] \(left.id)'s saved login changed while it was being checked (signed in again, or removed); the answer is dropped")
+            return
+        }
         if case .refreshed = outcome {
             // The flag went with the old token; the card's re-sign state does not, and would keep
             // the account unswitchable until its round-robin visit. Clear it and read it next.
@@ -1518,7 +1525,10 @@ final class AppState: ObservableObject {
         /// expired-or-refused case; false is a login whose access token is still
         /// good (`TargetRenewalPolicy`), where only the server's own verdict stops the switch.
         func renewAndIdentify(loginIsDead: Bool = true) async -> SwitchProblem? {
-            let outcome = await refreshBackupInPlace(for: account)
+            guard let outcome = await refreshBackupInPlace(for: account) else {
+                // The saved login changed while it was being renewed: nothing is switched from the copy read before.
+                return SwitchProblem(message: String(localized: "Credential storage is temporarily unavailable. Try again shortly.", bundle: L10n.bundle))
+            }
             switch TargetRenewalPolicy.step(after: outcome, loginIsDead: loginIsDead) {
             case .useRenewedLogin:
                 if case .refreshed(let renewed) = outcome {
@@ -2115,6 +2125,10 @@ final class AppState: ObservableObject {
             // later cycle. Keep the stale sample.
             accountUsageErrors[account.id] = UsageErrorState(isExpired: false, isRateLimited: false, message: String(localized: "Could not save the refreshed sign-in; will retry automatically.", bundle: L10n.bundle))
             return nil
+        case nil:
+            // The saved login changed while the request was in flight (a sign-in, a
+            // removal): whatever changed it already cleared the card and queued a read.
+            return nil
         }
     }
 
@@ -2284,17 +2298,20 @@ final class AppState: ObservableObject {
     /// Renewals already running, by account id. Two renewals of one saved
     /// login from the same refresh token would race: the loser gets
     /// invalid_grant, and a server that detects the reuse may revoke the grant.
-    private var renewalsInFlight: [String: Task<BackupRefreshOutcome, Never>] = [:]
+    private var renewalsInFlight: [String: Task<BackupRefreshOutcome?, Never>] = [:]
 
     /// Renews a saved login in place, joining a renewal already running for
-    /// the same account instead of starting a second one.
-    private func refreshBackupInPlace(for account: Account) async -> BackupRefreshOutcome {
+    /// the same account instead of starting a second one. Nil means the answer was
+    /// dropped: the saved login changed while the request was in flight (the
+    /// account was signed in again, or removed), so nothing was saved or flagged.
+    private func refreshBackupInPlace(for account: Account) async -> BackupRefreshOutcome? {
         let accountId = account.id.uuidString
         if let running = renewalsInFlight[accountId] { return await running.value }
         let renewal = Task { await self.renewBackupInPlace(for: account) }
         renewalsInFlight[accountId] = renewal
-        let outcome = await renewal.value
+        let result = await renewal.value
         renewalsInFlight[accountId] = nil
+        guard let outcome = result else { return nil }
         // Settled once, by the call that started the renewal. What the server
         // said decides what the account is allowed to do next.
         if case .refreshed(let renewed) = outcome {
@@ -2313,7 +2330,21 @@ final class AppState: ObservableObject {
         return outcome
     }
 
-    private func renewBackupInPlace(for account: Account) async -> BackupRefreshOutcome {
+    /// What the backup store holds for an account right now, for the check that a
+    /// renewal still belongs to the login it was made for (`RenewalPersistence`).
+    private func storedLoginNow(_ accountId: String) -> RenewalPersistence.StoredLogin {
+        switch keychain.lookupAccountBackup(forAccountId: accountId) {
+        case .found(let backup):
+            return .login(accessTokenFingerprint: CredentialOwnership.login(fromCredential: backup.token).map { TokenFingerprint.of($0.accessToken) })
+        case .missing:
+            return .missing
+        case .storeUnavailable:
+            return .unreadable
+        }
+    }
+
+    /// Nil when the saved login changed while the request was in flight (see `refreshBackupInPlace`).
+    private func renewBackupInPlace(for account: Account) async -> BackupRefreshOutcome? {
         let accountId = account.id.uuidString
 
         let backup: AccountBackup
@@ -2362,34 +2393,60 @@ final class AppState: ObservableObject {
             return .storeUnavailable
         }
 
+        // The answer belongs to the login the request was made with. The request can take
+        // seconds, and the account can be signed in again (or removed) in that time.
+        let madeFor = CredentialOwnership.login(fromCredential: backup.token).map { TokenFingerprint.of($0.accessToken) }
+        func answerStillApplies() -> Bool {
+            let applies = RenewalPersistence.stillApplies(madeFor: madeFor, stored: storedLoginNow(accountId))
+            if !applies { log.info("[refreshBackup] \(account.id)'s saved login changed while it was being renewed; the answer is dropped") }
+            return applies
+        }
+
         switch await claudeService.refreshOAuthCredentials(backup.token) {
         case .success(let refreshed):
-            // A renewed token is fresh, so the API can say whose it is. A login
-            // that belongs to another account must not stay under this one.
-            if let renewed = CredentialOwnership.login(fromCredential: refreshed),
-               let identity = await claudeService.accountIdentity(forAccessToken: renewed.accessToken, expiresAt: renewed.expiresAt, account: account.id),
-               let owner = self.account(matching: identity), owner.id != account.id {
-                log.error("[refreshBackup] \(account.id)'s saved login belongs to \(owner.email); removing it")
-                keychain.removeAccountBackup(forAccountId: accountId)
-                return .belongsToAnotherAccount(owner.email)
+            // The refresh token was rotated: the pair just read is spent and this one is the
+            // account's only valid login. It is saved FIRST; the profile lookup (up to 15
+            // seconds) comes after, so a crash or Quit while it waits loses nothing.
+            let renewedLogin = CredentialOwnership.login(fromCredential: refreshed)
+            let result = await RenewalPersistence.settleRotation(
+                renewed: refreshed,
+                renewedFingerprint: renewedLogin.map { TokenFingerprint.of($0.accessToken) },
+                madeFor: madeFor,
+                storedNow: { self.storedLoginNow(accountId) },
+                save: { self.keychain.saveAccountBackup(token: refreshed, oauthAccount: backup.oauthAccount, forAccountId: accountId) },
+                // The probe passed moments ago, so a failed save is likely a blip: one retry.
+                pauseBeforeRetry: { _ = try? await Task.sleep(nanoseconds: 1_000_000_000) },
+                // A renewed token is fresh, so the API can say whose it is. A login that
+                // belongs to another account must not stay under this one.
+                otherOwner: {
+                    guard let renewedLogin,
+                          let identity = await self.claudeService.accountIdentity(forAccessToken: renewedLogin.accessToken, expiresAt: renewedLogin.expiresAt, account: account.id),
+                          let owner = self.account(matching: identity), owner.id != account.id else { return nil }
+                    log.error("[refreshBackup] \(account.id)'s saved login belongs to \(owner.email)")
+                    return owner.email
+                },
+                removeEntry: {
+                    log.error("[refreshBackup] Removing \(account.id)'s saved login: it is another account's")
+                    self.keychain.removeAccountBackup(forAccountId: accountId)
+                })
+            switch result {
+            case nil:
+                log.info("[refreshBackup] \(account.id)'s saved login changed while it was being renewed; the answer is dropped")
+            case .rotationLost?:
+                log.error("[refreshBackup] Rotation succeeded but the store write failed twice for \(account.id); the account needs re-authentication")
+            default:
+                break
             }
-            if keychain.saveAccountBackup(token: refreshed, oauthAccount: backup.oauthAccount, forAccountId: accountId) {
-                return .refreshed(refreshed)
-            }
-            // The probe passed moments ago, so this is likely a blip — one retry.
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            if keychain.saveAccountBackup(token: refreshed, oauthAccount: backup.oauthAccount, forAccountId: accountId) {
-                return .refreshed(refreshed)
-            }
-            log.error("[refreshBackup] Rotation succeeded but the store write failed twice for \(account.id); the account needs re-authentication")
-            return .rotationLost
+            return result
 
         case .rejected:
+            guard answerStillApplies() else { return nil }
             log.warning("[refreshBackup] Refresh grant rejected for \(account.id); the refresh token is dead")
             return .grantRejected
 
         case .transient:
-            log.warning("[refreshBackup] Refresh attempt for \(account.id) failed transiently (network/server); will retry")
+            guard answerStillApplies() else { return nil }
+            log.warning("[refreshBackup] Refresh attempt for \(account.id) failed transiently (network/server or no answer in time); will retry")
             return .unreachable
         }
     }

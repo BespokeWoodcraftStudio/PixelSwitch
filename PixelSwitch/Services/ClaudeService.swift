@@ -403,14 +403,9 @@ final class ClaudeService: @unchecked Sendable {
             return .rejected
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "grant_type": "refresh_token",
-            "refresh_token": refreshToken,
-            "client_id": Self.oauthClientID,
-        ])
+        // 15 seconds, not URLSession's default 60: a switch waits for this request
+        // (the dead-login rescue included). A timeout is no verdict, see below.
+        let request = RenewalRequest.urlRequest(url: url, refreshToken: refreshToken, clientID: Self.oauthClientID)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -432,14 +427,9 @@ final class ClaudeService: @unchecked Sendable {
                 log.warning("[refreshOAuth] Refresh not applied (HTTP \(status), error=\(loggedCode), \(data.count) bytes)")
 
                 // A 200 that failed OUR parse is a schema change, not a dead
-                // grant. Otherwise only a grant-terminal OAuth error means the
-                // refresh token is dead (RFC 6749 §5.2: `invalid_grant` covers
-                // expired/revoked/invalid refresh tokens). Everything else —
-                // 5xx, 429, 408, an `invalid_request` from a request-shape
-                // mismatch — says nothing about the token, and demanding
-                // re-authentication for it would be a pointless login.
-                if status == 200 { return .transient }
-                return oauthError == "invalid_grant" ? .rejected : .transient
+                // grant; only an `invalid_grant` refusal is a verdict on the
+                // refresh token (the rule is `RenewalRequest.verdict`, unit-tested).
+                return Self.refreshResult(for: RenewalRequest.verdict(httpStatus: status, oauthError: oauthError))
             }
 
             oauth["accessToken"] = accessToken
@@ -463,8 +453,16 @@ final class ClaudeService: @unchecked Sendable {
             guard let json = String(data: out, encoding: .utf8) else { return .transient }
             return .success(json)
         } catch {
+            // No answer at all (a timeout, no connection): no verdict, never a flag.
             log.warning("[refreshOAuth] Refresh failed: \(error.localizedDescription)")
-            return .transient
+            return Self.refreshResult(for: RenewalRequest.verdict(afterTransportError: error))
+        }
+    }
+
+    private static func refreshResult(for verdict: RenewalRequest.Verdict) -> OAuthRefreshResult {
+        switch verdict {
+        case .grantDead: return .rejected
+        case .noVerdict: return .transient
         }
     }
 
