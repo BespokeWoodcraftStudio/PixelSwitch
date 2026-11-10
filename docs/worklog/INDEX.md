@@ -58,3 +58,4 @@ that file for the full entry. Start here to get up to speed on the project.
 - [WL-2026-11-10-002](./2026-11-10.md) — 2.1: never switch to an account that needs signing in, and leave a live login that dies (30-second watch); two reviews — _feature/partial_
 - [WL-2026-11-10-003](./2026-11-10.md) — 2.1: Ultra (Max 20x) accounts have no 5-hour limit; the badge says Ultra; first-pass review and fixes — _feature/done_
 - [WL-2026-11-10-004](./2026-11-10.md) — 2.1 session: how the work was run, and the lessons (fetch first, real Xcode build, typecheck gaps, hand checks) — _note/partial_
+- [WL-2026-11-10-005](./2026-11-10.md) — 2.1 released: v2.1 (build 32), CI run 42850349982, verify-release passed (Mac and Linux) — _infra/done_

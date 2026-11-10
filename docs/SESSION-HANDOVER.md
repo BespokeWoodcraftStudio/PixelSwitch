@@ -1,15 +1,28 @@
 # PixelSwitch: session handover
 
-Read this first. Then read `docs/worklog/INDEX.md` for the full history; the newest entries are in `docs/worklog/2026-11-10.md` (WL-2026-11-10-001 to -004).
-Last updated 2026-11-10 (PST), after 2.1 was built and merged: readable colours, Ultra accounts, and the sign-in expiry watch. **Release: pending.** Before that, 2.0 (2026-10-25).
+Read this first. Then read `docs/worklog/INDEX.md` for the full history; the newest entries are in `docs/worklog/2026-11-10.md` (WL-2026-11-10-001 to -005; -005 is the release).
+Last updated 2026-11-10 (PST), after 2.1 was built, merged and **released**: readable colours, Ultra accounts, and the sign-in expiry watch. **Released: v2.1 (build 32), tag `v2.1`, release CI run 42850349982, published 2026-11-10T16:05:46Z.** Before that, 2.0 (2026-10-25).
 
 ## 2.1 (2026-11-10): read this first
 
-**State: built, merged on `main`, verified; release: pending. The next step is the release script** (details below). Nothing is
-pushed. When this was written `main` was 12 commits ahead of `origin/main` (`50a5243`, the 2.0 close-out), at `fb7d296`. The
-last lane, `lane/auth-fixes-2` (`3ff3ce2`, merged `fb7d296`: rotation safety), merged while this records branch
-(`lane/records-2.1`, cut from `4294327`) was being written, so it is in 2.1 but not in this branch's tree; merge
-`lane/records-2.1` into `main` (a plain merge, it only adds documents).
+**State: RELEASED and verified.** Tag `v2.1`, build 32, release CI run **42850349982** (all five jobs green; published
+2026-11-10T16:05:46Z, marked Latest). `scripts/verify-release.sh v2.1` exited 0: appcast `sparkle:version` 32 and
+`shortVersionString` 2.1, appcast length 4811875 = DMG 4811875, EdDSA "Signature Verified Successfully", Info.plist 2.1 / 32,
+`SUScheduledCheckInterval` 21600, helper signed (Team LM3P28DNVQ), deep verify OK, DMG and app "Notarized Developer ID", stapler
+"The validate action worked!", and every Linux check PASS (assets, version 2.1, build 32, size 231782, SHA-256, Ed25519, installer
+key, the notes carry the installer's SHA-256 `31bdbeeb...`). The shipped Localizable.strings carry the new key "No 5-hour limit"
+(read with `plutil -p`, in all five languages). The release script pushed `main` to the bump commit `373da3e` (on top of the 16 lane and records commits since
+v2.0 and the count-correction docs commit `d316601`) and the tag. `lane/records-2.1` was already merged. **The next step is not a release: it is the founder's hand check of the installed 2.1.**
+
+- **Next session, prove 2.1 installed on the founder's Mac** (read only, no founder action): Sparkle installs it by itself at its next
+  scheduled check (every 6 hours) or on an Install click. Confirm with
+  `/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" /Applications/PixelSwitch.app/Contents/Info.plist` (expect 2.1) and
+  `grep "\[init\]" ~/Library/Logs/PixelSwitch-app.log | tail -2` (the relaunch time); then
+  `grep '\[authWatch\]' ~/Library/Logs/PixelSwitch-app.log`. The hand-check page is
+  [docs/decisions/pixelswitch-hand-checks-2.1-2026-11-10.html](decisions/pixelswitch-hand-checks-2.1-2026-11-10.html).
+- **CI note:** the push of `main` (run 42850348491, the same commit as the tag) starts an ordinary CI build; only a tag run publishes (every
+  release step is gated on `refs/tags/v`), so it cannot race the release. It finished success. The docs-only push that records this
+  release starts another `main` build: cancel it with `gh run cancel <id> -R BespokeWoodcraftStudio/PixelSwitch`.
 
 - **What 2.1 is** (his four requests are verbatim in the last section of `docs/decisions/2026-09-24-remote-control-answers.md`):
   1. **Readable colours** (`53bde1c`): opaque popover, solid card, tile and bar-track fills, stronger text tokens, badge
@@ -38,11 +51,9 @@ last lane, `lane/auth-fixes-2` (`3ff3ce2`, merged `fb7d296`: rotation safety), m
   1670 OK, 47 skipped. A real Debug and a real Release build (`xcodegen generate`, then the `xcodebuild` line in "How things work") succeeded for
   the app, widget and CLI on this tree. Not run: the live watch against a real dead login (it cannot be caused on purpose),
   `backfillPlans` against real saved logins, the real popover frame.
-- **Release (the next step).** `RELEASE_NOTES.md` is written for 2.1 and carries the Linux installer's SHA-256
-  (`31bdbeeb...`, unchanged because `linux/` has not changed since v2.0; `release.sh` checks it). Merge `lane/records-2.1`, re-run the
-  unit tests on `main`, then `echo y | ./scripts/release.sh 2.1` (it stops at `Proceed? [y/N]`), then
-  `scripts/verify-release.sh v2.1`. Every push to `main` starts a CI build: see the gotchas about two release builds racing.
-  Whether 2.1 is released is stated by the release step, not by this file.
+- **Release (done).** `RELEASE_NOTES.md` carried the Linux installer's SHA-256 (`31bdbeeb...`, unchanged because `linux/` has not changed
+  since v2.0; `release.sh` checks it). Ran `echo y | ./scripts/release.sh 2.1` (build 31 to 32, commit `373da3e`, tag `v2.1`, the tag push
+  started run 42850349982 by itself, so no manual dispatch), then `scripts/verify-release.sh v2.1` (passed). Result above.
 - **Branch note: `lane/ultra` holds `e538ad5` (the MCP description wording) UNMERGED.** `linux/tests/test_mcp.py` pins the
   Linux MCP text to `PixelSwitchCLI/MCPServer.swift` word for word, so landing it alone fails two Linux tests. Land it together
   with the matching `linux/pixelswitch/mcp.py` edit. The other 2.1 lane branches are merged and already deleted locally; keep `lane/ultra` until `e538ad5`
@@ -117,8 +128,8 @@ The founder asked for it on 2026-10-24 (his words verbatim in spec section 0). *
 
 ## Current state
 
-- **Built and merged: 2.1** (`project.yml` still says 2.0 build 31; the release script moves it). **Release: pending** (see the 2.1 section). Last released: **2.0** (build 31, tag `v2.0`, run 40167290828, 2026-10-25T06:01:50Z), see the 2.0 section below. Before it, 1.9 (build 30, tag `v1.9`, run 38924948392, 2026-10-16).
-- **Installed:** the founder's Mac and the Beeco Mac run 2.0 (Sparkle installed it by itself, 2026-10-25); the Linux laptop runs 2.0. 2.1 reaches the Macs through Sparkle after its release; the Linux version is unchanged in 2.1.
+- **Released: 2.1** (build 32, tag `v2.1`, run 42850349982, 2026-11-10T16:05:46Z; `project.yml` says 2.1 build 32), see the 2.1 section. Before it: **2.0** (build 31, tag `v2.0`, run 40167290828, 2026-10-25T06:01:50Z), see the 2.0 section below, and 1.9 (build 30, tag `v1.9`, run 38924948392, 2026-10-16).
+- **Installed:** as last checked, the founder's Mac and the Beeco Mac ran 2.0 (Sparkle installed it by itself, 2026-10-25); the Linux laptop runs 2.0. 2.1 reaches the Macs through Sparkle (about 6 hours or an Install click; not yet confirmed installed); the Linux version is unchanged in 2.1 (the 2.1 Linux tarball is the same code, rebuilt at version 2.1).
 - **Next session, prove 1.9 on the founder's Mac** (no founder action needed; read, never ask): `/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" /Applications/PixelSwitch.app/Contents/Info.plist` gives 1.9; then count, from the `[init]` of 1.9 onwards, `grep -c 'rate-limited; parked' ~/Library/Logs/PixelSwitch-app.log` (expected 0 for a healthy set of logins) and the 401s per login per hour (the scripts in `docs/investigations/2026-10-16-usage-429/scripts/`). Any 429 on a login that had no 401 in the hour before it would be new evidence: read the investigation's "Still unknown" first.
 - **Branches:** `main` holds everything except `lane/ultra`'s `e538ad5` (the MCP description wording, deliberately unmerged: see the 2.1 section). `part-a-auto-switch-rules`, `part-b-sign-in-links`, `part-c-remote-control`, `auto-update`, `auto-update-default`, `manual-only`, `no-subscription-switch`, `exhausted-switch-and-usage-errors`, `switch-at-threshold` and `fix/usage-429-dead-tokens` are fully merged and can be deleted.
 - **Tests:** `bash Tests/run-unit-tests.sh`: 1763 passed, 0 failed, conformance 150/150 on the 2.1 release tree (`main` at `f71f451` minus the docs; the older 1733 was the records branch at `4294327`, before the last lanes merged); see the 2.1 section for what it does and does not include. Linux: `python3 -m unittest discover -s linux/tests -t linux` (1670 OK, 47 skipped).
@@ -136,11 +147,11 @@ The founder asked for it on 2026-10-24 (his words verbatim in spec section 0). *
 | 1.8 | Auto-switch moves you **at your number** to any account at least a point under its own threshold (`AutoSwitchEngine.hysteresis` 10 → 1), on session, weekly and Fable; 1.7's `exhausted` rule removed. The founder's answer on `docs/decisions/pixelswitch-switch-point-2026-09-29.html` (answered). |
 | 1.9 | PixelSwitch **stops causing the usage 429s** ("API Rate Limited. Try again later.") and says what is really happening. `UsageRequestGuard` (pure, unit-tested) gates every usage and profile request: a token that got a 401 is never sent again until it changes, an expired one is renewed first (saved login) or left alone (live login: "Waiting for Claude Code to renew this login"), 20 minutes' rest after any 401 or 429 whatever the number of accounts, a server-refused grant is `needsReauth` (persisted, not polled, not switchable), and the park belongs to the token, so a re-sign clears the card at once. Delegated `claude auth status` refresh removed (0 recoveries in 13). Full story: `docs/investigations/2026-10-16-usage-429.md`. |
 | 2.0 | **Separate Session and Weekly limits** (defaults 50-100, per account 1-100), **priority numbers** (P1; lists sorted; "Priority (lowest number first)"), weekly overflow (when no account under its weekly limit can take you, the session limit decides), login-safety fixes (blank logins never saved or written; re-read before write; honest refreshTokenExpiresAt; removing the active account really switches; disposable-login rule; 429 recorded without an account), CLI/MCP additions (protocol stays 2, 21 methods, 20 tools, 24 keys), and **PixelSwitch for Linux** (Ubuntu 24.04/26.04). Spec `docs/superpowers/specs/2026-10-24-2.0-spec.md`. |
-| 2.1 | **Readable colours** (opaque popover, solid cards, tiles and bars, stronger text; light and dark), **Ultra** (Max 20x: badge says Ultra, no 5-hour limit anywhere, `AccountInfo.hasSessionLimit`, protocol 2 revision 4), and **sign-in expiry** (every switch target's saved login is renewed first and a refusal skips it; a 30-second watch leaves a live login Claude Code has blanked, with auto-switch on, within about a minute). Built and merged on 2026-11-10, release pending. Decisions: `docs/decisions/2026-09-24-remote-control-answers.md`, last section; evidence: `docs/investigations/2026-11-10-readability-ultra-auth/`. |
+| 2.1 | **Readable colours** (opaque popover, solid cards, tiles and bars, stronger text; light and dark), **Ultra** (Max 20x: badge says Ultra, no 5-hour limit anywhere, `AccountInfo.hasSessionLimit`, protocol 2 revision 4), and **sign-in expiry** (every switch target's saved login is renewed first and a refusal skips it; a 30-second watch leaves a live login Claude Code has blanked, with auto-switch on, within about a minute). Built and merged on 2026-11-10 and released the same day (v2.1, build 32). Decisions: `docs/decisions/2026-09-24-remote-control-answers.md`, last section; evidence: `docs/investigations/2026-11-10-readability-ultra-auth/`. |
 
 ## Waiting on the founder
 
-1. **2.1 hand checks** (three cards: the popover by eye in light and dark, an Ultra account by eye, and the sign-in expiry as information): [docs/decisions/pixelswitch-hand-checks-2.1-2026-11-10.html](decisions/pixelswitch-hand-checks-2.1-2026-11-10.html). He pastes the Copy block back; record it verbatim in `docs/decisions/`, mark the page answered, fix any failure test-first and ship it as 2.2. Nothing blocks the release: it is checked after the release, as every release since 1.2.
+1. **2.1 hand checks** (three cards: the popover by eye in light and dark, an Ultra account by eye, and the sign-in expiry as information): [docs/decisions/pixelswitch-hand-checks-2.1-2026-11-10.html](decisions/pixelswitch-hand-checks-2.1-2026-11-10.html). He pastes the Copy block back; record it verbatim in `docs/decisions/`, mark the page answered, fix any failure test-first and ship it as 2.2. Nothing blocks anything: 2.1 is already released and the hand check runs on the installed app, as every release since 1.2.
 2. **2.0 decisions and hand checks** (four choices that ship with defaults; checks on his Mac, the laptop and the CLI): [docs/decisions/pixelswitch-2.0-2026-10-24.html](decisions/pixelswitch-2.0-2026-10-24.html). He pastes the Copy block back; record it verbatim in `docs/decisions/`, mark the page answered, ship behaviour changes in the next version after 2.1.
 3. **Hand checks** (15 cards, one round, on 1.5 to 1.8; card 4 is the no-subscription fix, card 5 is 1.8's switch at your number, card 6 is 1.7's Retry): [docs/decisions/pixelswitch-hand-checks-2026-09-25.html](decisions/pixelswitch-hand-checks-2026-09-25.html). He pastes the Copy block back. Then:
    - record his answers verbatim in `docs/decisions/`;
