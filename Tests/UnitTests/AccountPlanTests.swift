@@ -8,13 +8,15 @@
 // 5-hour limit and today's badge exactly.
 //
 // What is pinned here: the plan resolver (AccountPlan), the stored tier
-// (Account, AuthStatus, the saved-login parser), the one strip point for the
-// usage reading, the engine's behaviour for an account with no session window,
-// the control protocol's account (one number for such an account, the flag over
-// the wire), the CLI's table, usage and threshold replies, the menu bar modules,
-// the widget's data, a reply from an app that predates the field, and the
-// wiring and strings a view test cannot compile. Compiled into the unit harness
-// by Tests/run-unit-tests.sh and run from main.swift. Uses the global `check`.
+// (Account, AuthStatus, the saved-login parser), the one place the usage
+// reading's 5-hour window is decided (the API's own data wins over the tier),
+// the rule the engine is handed for an account with no session limit, the
+// engine's behaviour for it, the control protocol's account (one number for
+// such an account, the flag over the wire), the CLI's table, usage and threshold
+// replies, the menu bar modules, the widget's data, the plan backfill's
+// bookkeeping, a reply from an app that predates the field, and the wiring and
+// strings a view test cannot compile. Compiled into the unit harness by
+// Tests/run-unit-tests.sh and run from main.swift. Uses the global `check`.
 import Foundation
 
 @MainActor func runAccountPlanTests() {
@@ -22,8 +24,11 @@ import Foundation
     badgeTests()
     storedPlanTests()
     stripTests()
+    sessionObservedTests()
     savedLoginTests()
+    backfillLedgerTests()
     engineTests()
+    effectiveRuleTests()
     controlTests()
     cliTests()
     menuBarTests()
@@ -154,37 +159,179 @@ private let ultraWireUsage = #"{"five_hour":null,"seven_day":{"utilization":15,"
           "stored plan: a CLI that reports no tier does not erase the one already stored")
     check(AccountPlan.updatedTier(current: nil, reported: " max_20x ") == "max_20x" && AccountPlan.updatedTier(current: nil, reported: nil) == nil,
           "stored plan: a first tier is stored trimmed; none stays none")
+
+    // The CLI's vague tiers (max_other, other) say "I do not know": they never erase a known 5x or 20x tier.
+    check(AccountPlan.updatedTier(current: "max_20x", reported: "max_other") == "max_20x"
+          && AccountPlan.updatedTier(current: "max_20x", reported: "other") == "max_20x"
+          && AccountPlan.updatedTier(current: "default_claude_max_20x", reported: " Max_Other ") == "default_claude_max_20x",
+          "stored plan: max_other and other never overwrite a stored 20x tier (in either spelling, any case)")
+    check(AccountPlan.updatedTier(current: "max_5x", reported: "max_other") == "max_5x" && AccountPlan.updatedTier(current: "default_claude_max_5x", reported: "other") == "default_claude_max_5x",
+          "stored plan: nor a stored 5x tier")
+    check(AccountPlan.updatedTier(current: "max_20x", reported: "some_future_tier") == "max_20x"
+          && AccountPlan.updatedTier(current: "max_5x", reported: "default_claude_zero") == "max_5x",
+          "stored plan: a tier the app does not recognise does not overwrite a known 5x or 20x tier either")
+    check(AccountPlan.updatedTier(current: "max_20x", reported: "pro") == "pro" && AccountPlan.updatedTier(current: "max_20x", reported: "max_5x") == "max_5x"
+          && AccountPlan.updatedTier(current: "max_5x", reported: "default_claude_max_20x") == "default_claude_max_20x"
+          && AccountPlan.updatedTier(current: "max_20x", reported: "default_claude_ai") == "default_claude_ai",
+          "stored plan: a recognised, different tier (pro, max_5x, a 20x for a 5x) still replaces it")
+    check(AccountPlan.updatedTier(current: nil, reported: "max_other") == "max_other" && AccountPlan.updatedTier(current: "max_other", reported: "other") == "other"
+          && AccountPlan.updatedTier(current: "max_other", reported: "max_20x") == "max_20x" && AccountPlan.updatedTier(current: "pro", reported: "max_other") == "max_other",
+          "stored plan: a vague tier is stored when nothing known is there, and anything replaces a vague one")
+    check(AccountPlan.resolve(subscriptionType: "max", planTier: AccountPlan.updatedTier(current: "max_20x", reported: "max_other")) == .ultra,
+          "stored plan: so an older backup swapped in (the CLI says max_other) leaves an Ultra account Ultra")
 }
 
-// MARK: - The one strip point for the usage reading
+// MARK: - The empty 5-hour window
 
 @MainActor private func stripTests() {
     let wire = decodeUsage(ultraWireUsage)
     check(wire.fiveHour == nil && wire.sevenDay?.utilization == 15, "strip: the real Max 20x reading, five_hour null, decodes with no session window")
-    let strippedWire = wire.droppingSession()
+    let strippedWire = wire.droppingEmptySession()
     check(strippedWire.fiveHour == nil && strippedWire.sevenDay?.utilization == 15
           && strippedWire.modelWeeklyLimit(named: "Fable")?.percent == 74 && strippedWire.limits?.count == 2,
           "strip: on the null shape nothing changes: weekly and Fable are kept")
 
     let object = decodeUsage(#"{"five_hour":{"utilization":97,"resets_at":"2026-11-10T20:00:00+00:00"},"seven_day":{"utilization":15,"resets_at":"2026-11-14T10:00:00+00:00"},"extra_usage":{"is_enabled":true,"monthly_limit":5000,"used_credits":12,"utilization":0.2},"limits":[{"kind":"weekly_scoped","group":"weekly","percent":74,"scope":{"model":{"id":null,"display_name":"Fable"}}}]}"#)
-    check(object.fiveHour?.utilization == 97, "strip: fixture: an object five_hour decodes")
-    let strippedObject = object.droppingSession()
-    check(strippedObject.fiveHour == nil && strippedObject.sevenDay?.utilization == 15 && strippedObject.extraUsage?.isEnabled == true
-          && strippedObject.modelWeeklyLimit(named: "Fable")?.percent == 74,
-          "strip: on a five_hour object (the day Anthropic sends one again) the session is dropped and weekly, Fable and extra usage are kept")
+    check(object.fiveHour?.utilization == 97 && object.hasSessionReading, "strip: fixture: an object five_hour with a number decodes, and is a session reading")
+    let keptObject = object.droppingEmptySession()
+    check(keptObject.fiveHour?.utilization == 97 && keptObject.sevenDay?.utilization == 15 && keptObject.extraUsage?.isEnabled == true,
+          "strip: a five_hour object that carries a number is a real reading and is never dropped")
 
-    let nullUtilization = decodeUsage(#"{"five_hour":{"utilization":null},"seven_day":{"utilization":15}}"#)
-    check(nullUtilization.fiveHour != nil && nullUtilization.droppingSession().fiveHour == nil,
-          "strip: a five_hour object with a null utilization (which the views would draw as 0%) is dropped too")
+    let nullUtilization = decodeUsage(#"{"five_hour":{"utilization":null,"resets_at":"2026-11-10T20:00:00+00:00"},"seven_day":{"utilization":15,"resets_at":"2026-11-14T10:00:00+00:00"},"extra_usage":{"is_enabled":true,"monthly_limit":5000,"used_credits":12,"utilization":0.2},"limits":[{"kind":"weekly_scoped","group":"weekly","percent":74,"scope":{"model":{"id":null,"display_name":"Fable"}}}]}"#)
+    let strippedNull = nullUtilization.droppingEmptySession()
+    check(nullUtilization.fiveHour != nil && !nullUtilization.hasSessionReading && strippedNull.fiveHour == nil
+          && strippedNull.sevenDay?.utilization == 15 && strippedNull.extraUsage?.isEnabled == true && strippedNull.modelWeeklyLimit(named: "Fable")?.percent == 74,
+          "strip: a five_hour object with a null utilization (which the views would draw as 0%) is dropped, and weekly, Fable and extra usage are kept")
     let absent = decodeUsage(#"{"seven_day":{"utilization":15}}"#)
-    check(absent.fiveHour == nil && absent.droppingSession().fiveHour == nil && absent.droppingSession().sevenDay?.utilization == 15,
+    check(absent.fiveHour == nil && absent.droppingEmptySession().fiveHour == nil && absent.droppingEmptySession().sevenDay?.utilization == 15,
           "strip: with five_hour absent nothing changes")
+    let zero = decodeUsage(#"{"five_hour":{"utilization":0,"resets_at":null},"seven_day":{"utilization":15}}"#)
+    check(zero.hasSessionReading && zero.droppingEmptySession().fiveHour?.utilization == 0, "strip: a reading of 0% is a reading, not an empty window")
 
-    // What the control protocol then says about the stripped reading.
-    let info = ControlSnapshots.usageInfo(object.droppingSession(), sampledAt: nil, error: nil)
+    // What the control protocol then says about a stripped reading.
+    let info = ControlSnapshots.usageInfo(strippedNull, sampledAt: nil, error: nil)
     let json = (try? JSONValue.encode(info)) ?? .null
     check(info?.session == nil && info?.weekly?.utilization == 15 && info?.fable?.utilization == 74 && json["session"] == nil,
           "strip: usage.get has no session for a stripped reading (the key is omitted, never sent as null)")
+}
+
+// MARK: - The API's own word about the 5-hour window beats the tier
+
+@MainActor private func sessionObservedTests() {
+    func reading(_ five: String, weekly: Double = 15) -> UsageAPIResponse {
+        decodeUsage(#"{"five_hour":"# + five + #","seven_day":{"utilization":\#(weekly),"resets_at":"\#(iso(hours: 100))"}}"#)
+    }
+    let real = reading(#"{"utilization":42,"resets_at":"\#(iso(hours: 2))"}"#)
+    let nullWindow = reading("null")
+    let emptyObject = reading(#"{"utilization":null,"resets_at":null}"#)
+    let absent = decodeUsage(#"{"seven_day":{"utilization":15}}"#)
+
+    // An account the tier says is Ultra, and the API sends a real 5-hour reading anyway.
+    var account = ultra("stale")
+    check(account.isClassedUltra && !account.hasSessionLimit, "observed: fixture: the tier says Ultra, so no 5-hour limit until the API says otherwise")
+    let kept = real.settingSession(for: account)
+    check(kept.usage.fiveHour?.utilization == 42 && kept.usage.sevenDay?.utilization == 15 && kept.sessionLimitObserved == true,
+          "observed: a real five_hour reading on an Ultra-classed account is kept, and remembered")
+    account.sessionLimitObserved = kept.sessionLimitObserved
+    check(account.hasSessionLimit && account.plan != .ultra && account.isClassedUltra && account.displaySubscriptionType == "Max",
+          "observed: the account then reports hasSessionLimit true (one source: its plan) and says Max, while its tier still says 20x")
+    check(AccountPlan.resolve(subscriptionType: "max", planTier: "max_20x", sessionObserved: true) == .other("max")
+          && AccountPlan.resolve(subscriptionType: nil, planTier: "max_20x", sessionObserved: true) == .unknown
+          && AccountPlan.resolve(subscriptionType: "max", planTier: "max_20x", sessionObserved: false) == .ultra,
+          "observed: the plan resolver itself is where the flag counts: the same fields are Ultra without it and not with it")
+    check(account.plan.hasSessionLimit && account.hasSessionLimit == account.plan.hasSessionLimit,
+          "observed: Account.hasSessionLimit is just its plan's answer: there is one definition")
+    let zeroReading = reading(#"{"utilization":0,"resets_at":null}"#).settingSession(for: ultra("zero"))
+    check(zeroReading.usage.fiveHour?.utilization == 0 && zeroReading.sessionLimitObserved == true,
+          "observed: a reading of 0% is a reading: it is kept and the account has a session limit")
+
+    // It stays while the reading keeps coming, and goes when the API stops sending one.
+    let again = real.settingSession(for: account)
+    check(again.usage.fiveHour?.utilization == 42 && again.sessionLimitObserved == true, "observed: a second real reading keeps it")
+    let cleared = nullWindow.settingSession(for: account)
+    check(cleared.usage.fiveHour == nil && cleared.sessionLimitObserved == nil, "observed: a later null five_hour clears it")
+    var back = account
+    back.sessionLimitObserved = cleared.sessionLimitObserved
+    check(!back.hasSessionLimit && back.plan == .ultra && back.displaySubscriptionType == "Ultra",
+          "observed: and the account is Ultra again (no 5-hour limit, badge Ultra)")
+    check(emptyObject.settingSession(for: account).sessionLimitObserved == nil && absent.settingSession(for: account).sessionLimitObserved == nil
+          && emptyObject.settingSession(for: account).usage.fiveHour == nil && absent.settingSession(for: account).usage.fiveHour == nil,
+          "observed: an empty object or an absent five_hour clears it just the same")
+
+    // With no flag yet, the empty shapes are still stripped, and the weekly reading comes through whole.
+    for (name, usage) in [("null", nullWindow), ("an object with a null utilization", emptyObject), ("absent", absent)] {
+        let outcome = usage.settingSession(for: ultra("plain"))
+        check(outcome.usage.fiveHour == nil && outcome.usage.sevenDay?.utilization == 15 && outcome.sessionLimitObserved == nil,
+              "observed: an Ultra-classed account's five_hour \(name) is stripped and nothing is remembered")
+    }
+
+    // An account the tier does not call Ultra is handed what the API sent, as before, and records nothing.
+    let five = max5x("five")
+    check(real.settingSession(for: five).usage.fiveHour?.utilization == 42 && real.settingSession(for: five).sessionLimitObserved == nil,
+          "observed: a Max 5x account's real reading is passed through and no flag is kept for it")
+    check(emptyObject.settingSession(for: five).usage.fiveHour != nil && nullWindow.settingSession(for: five).usage.fiveHour == nil,
+          "observed: a Max 5x account's reading is not touched at all (an empty object stays, as it always did)")
+    let unknown = Account(email: "u@x.com", displayName: "U", subscriptionType: "max")
+    check(real.settingSession(for: unknown).usage.fiveHour?.utilization == 42 && real.settingSession(for: unknown).sessionLimitObserved == nil,
+          "observed: nor an account whose tier is not known")
+    var downgraded = ultra("downgraded")
+    downgraded.sessionLimitObserved = true
+    downgraded.planTier = "max_5x"
+    check(downgraded.hasSessionLimit && real.settingSession(for: downgraded).sessionLimitObserved == nil && !downgraded.isClassedUltra,
+          "observed: once the tier says 5x the flag is no longer needed and is cleared on the next reading")
+
+    // The flag is saved, written only when true, and an old saved account decodes unchanged.
+    let flagged = (try? JSONEncoder().encode([account])).map { String(decoding: $0, as: UTF8.self) } ?? ""
+    check(flagged.contains(#""sessionLimitObserved":true"#), "observed: the flag is saved with the account", flagged)
+    let roundTrip = (try? JSONEncoder().encode([account])).flatMap { try? JSONDecoder().decode([Account].self, from: $0) }
+    check(roundTrip?.first?.sessionLimitObserved == true && roundTrip?.first?.hasSessionLimit == true, "observed: and it survives saving and loading, so a relaunch does not forget it")
+    let plain = (try? JSONEncoder().encode([ultra("plain")])).map { String(decoding: $0, as: UTF8.self) } ?? ""
+    check(!plain.contains("sessionLimitObserved"), "observed: an account with no flag saves no key, so an older build reads it unchanged", plain)
+    let old = #"[{"id":"CB7797E5-5257-402B-80D6-ADAE1220D368","email":"a@x.com","displayName":"A","provider":"Claude Code","subscriptionType":"max","planTier":"max_20x","isActive":true}]"#
+    let decoded = try? JSONDecoder().decode([Account].self, from: Data(old.utf8))
+    check(decoded?.first?.sessionLimitObserved == nil && decoded?.first?.plan == .ultra && decoded?.first?.hasSessionLimit == false,
+          "observed: an account saved before the flag existed decodes with none, and is classed exactly as it was")
+
+    // The CLI reporting the same tier again does not undo it, and neither does a change of tier text that means the same plan.
+    var refreshed = account
+    refreshed.planTier = AccountPlan.updatedTier(current: refreshed.planTier, reported: "max_20x")
+    check(refreshed.sessionLimitObserved == true && refreshed.hasSessionLimit, "observed: claude auth status reporting max_20x again does not flip it back")
+
+    // accountsChanged fires when the account gains or loses its session limit.
+    check(ControlSnapshots.AccountFields(ultra("same")) != ControlSnapshots.AccountFields(account) || ultra("same").email != account.email,
+          "observed: fixture: two different accounts")
+    var twin = ultra("twin")
+    let before = ControlSnapshots.AccountFields(twin)
+    twin.sessionLimitObserved = true
+    check(before != ControlSnapshots.AccountFields(twin), "observed: an account that gains a session limit changes its fields, so accountsChanged fires")
+
+    // The downgrade case through the engine: stored as 20x, downgraded to 5x while not active, so its 5-hour is real and exhausted.
+    let defaults = AutoSwitchEngine.WindowPair(session: 91, weekly: 97)
+    func plan(active: Account, candidates: [Account], _ usage: [UUID: UsageAPIResponse]) -> String {
+        let result = AutoSwitchEngine.planWindowed(
+            active: active, candidates: candidates, usageByAccount: usage,
+            isSwitchable: { _ in true }, activeSampledThisCycle: true,
+            rule: { AutoSwitchSettings.effectiveRule(for: $0, defaults: defaults) }, defaults: defaults,
+            hysteresisPct: AutoSwitchEngine.hysteresis, watchFable: true, strategy: .mostRoom, asOf: t0)
+        guard let result else { return "stay" }
+        return "\(result.limit.rawValue)/\(result.trigger.rawValue)/\(result.window?.rawValue ?? "-"): " + result.targets.map(\.displayName).joined(separator: ",")
+    }
+    let activeFive = max5x("active", active: true)
+    var stored = ultra("stored")
+    let exhausted = reading(#"{"utilization":99,"resets_at":"\#(iso(hours: 2))"}"#, weekly: 10)
+    let held = exhausted.settingSession(for: stored)
+    stored.sessionLimitObserved = held.sessionLimitObserved
+    let activeUsage = reading(#"{"utilization":10,"resets_at":"\#(iso(hours: 2))"}"#, weekly: 98)
+    check(plan(active: activeFive, candidates: [stored], [activeFive.id: activeUsage, stored.id: held.usage]) == "stay",
+          "downgrade: an account stored as 20x but now on 5x, with its 5-hour exhausted, is not chosen as a target: its real session reading is kept")
+    let stripped = exhausted.droppingEmptySession()
+    check(stripped.fiveHour?.utilization == 99, "downgrade: fixture: dropping only the empty window leaves the 99% in place")
+    var fresh = ultra("fresh")
+    let roomy = reading(#"{"utilization":20,"resets_at":"\#(iso(hours: 2))"}"#, weekly: 10)
+    let roomyHeld = roomy.settingSession(for: fresh)
+    fresh.sessionLimitObserved = roomyHeld.sessionLimitObserved
+    check(plan(active: activeFive, candidates: [fresh], [activeFive.id: activeUsage, fresh.id: roomyHeld.usage]) == "windows/threshold/weekly: fresh",
+          "downgrade: the same account with room on both windows is a target")
 }
 
 // MARK: - Reading the plan out of a saved login
@@ -219,6 +366,64 @@ private let ultraWireUsage = #"{"five_hour":null,"seven_day":{"utilization":15,"
           "saved login: only the tier text is returned, never a token")
 }
 
+// MARK: - The plan backfill's bookkeeping
+
+@MainActor private func backfillLedgerTests() {
+    func login(tier: String?) -> PlanSavedLogin {
+        let tierPart = tier.map { #","rateLimitTier":"\#($0)""# } ?? ""
+        return PlanSavedLogin(credential: #"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-DO-NOT-LEAK","subscriptionType":"max"\#(tierPart)}}"#, oauthAccount: nil)
+    }
+    func blank(_ name: String) -> Account { Account(email: "\(name)@x.com", displayName: name, subscriptionType: "max") }
+    let a = blank("a"), b = blank("b"), c = blank("c")
+    let known = ultra("known")
+
+    // Which accounts are looked at.
+    var ledger = PlanBackfillLedger()
+    check(ledger.wanted([a, b, known]).map(\.id) == [a.id, b.id], "backfill: only accounts with no tier are looked at")
+
+    // An unreadable store settles nothing, and is retried on a later refresh.
+    var tiers = ledger.record(wanted: [a, b], read: nil)
+    check(tiers.isEmpty && ledger.settled.isEmpty && ledger.unreadable == 1, "backfill: an unreadable store marks no account as tried")
+    check(ledger.wanted([a, b, known]).map(\.id) == [a.id, b.id], "backfill: so the same accounts are asked for again on the next refresh")
+
+    // A read that worked settles them: with a tier, with a backup that has none, and with no backup at all.
+    let read: [String: PlanSavedLogin] = [a.id.uuidString: login(tier: "default_claude_max_20x"), b.id.uuidString: login(tier: nil)]
+    tiers = ledger.record(wanted: [a, b, c], read: read)
+    check(tiers == [a.id: "default_claude_max_20x"], "backfill: a saved login with a tier gives that tier, and no other account gets one", "\(tiers)")
+    check(ledger.settled == [a.id, b.id, c.id], "backfill: a read that returned data settles every account it was asked about (a tier, no tier, and no backup at all)")
+    check(ledger.wanted([a, b, c]).isEmpty, "backfill: a settled account is not looked at again this launch")
+    let emptyStore = PlanBackfillLedger()
+    var viaEmpty = emptyStore
+    check(viaEmpty.record(wanted: [a], read: [:]).isEmpty && viaEmpty.settled == [a.id] && viaEmpty.unreadable == 0,
+          "backfill: a store that read fine but holds no backup for the account is a definitive no backup: settled")
+
+    // The bound: a store that stays unreadable is asked a few times per launch, not on every refresh for ever.
+    var stubborn = PlanBackfillLedger()
+    for attempt in 1...PlanBackfillLedger.unreadableLimit {
+        check(!stubborn.wanted([a]).isEmpty, "backfill: attempt \(attempt) is still made")
+        _ = stubborn.record(wanted: stubborn.wanted([a]), read: nil)
+    }
+    check(stubborn.wanted([a]).isEmpty && PlanBackfillLedger.unreadableLimit == 3, "backfill: after 3 unreadable reads it stops asking until the next launch")
+
+    // An unreadable read followed by a good one still fills the account.
+    var recovering = PlanBackfillLedger()
+    _ = recovering.record(wanted: [a], read: nil)
+    let later = recovering.record(wanted: recovering.wanted([a]), read: [a.id.uuidString: login(tier: "max_5x")])
+    check(later == [a.id: "max_5x"] && recovering.wanted([a]).isEmpty, "backfill: a store that recovers on the second refresh fills the account then")
+
+    // Filling only blanks: an account that has a tier, flagged or not, is never offered again, so the backfill cannot flip it back.
+    var flagged = ultra("flagged")
+    flagged.sessionLimitObserved = true
+    check(PlanBackfillLedger().wanted([flagged]).isEmpty && flagged.hasSessionLimit,
+          "backfill: an account whose session limit was observed has a tier, is not offered to the backfill, and keeps its session limit")
+    var viaBackfill = Account(email: "z@x.com", displayName: "Z", subscriptionType: "max", sessionLimitObserved: true)
+    viaBackfill.planTier = tiers[a.id]
+    check(viaBackfill.hasSessionLimit && viaBackfill.isClassedUltra,
+          "backfill: even if a tier is filled in later for an account that had the flag, the flag still holds the session limit")
+    check(login(tier: "default_claude_max_20x").credential?.contains("DO-NOT-LEAK") == true && !"\(tiers)".contains("DO-NOT-LEAK"),
+          "backfill: only tier text comes out of the saved login, never a token")
+}
+
 // MARK: - The unchanged engine, fed an account with no session window
 
 @MainActor private func engineTests() {
@@ -232,7 +437,7 @@ private let ultraWireUsage = #"{"five_hour":null,"seven_day":{"utilization":15,"
         let result = AutoSwitchEngine.planWindowed(
             active: active, candidates: candidates, usageByAccount: usage,
             isSwitchable: { _ in true }, activeSampledThisCycle: true,
-            rule: { AutoSwitchSettings.rule(for: $0, defaults: defaults) }, defaults: defaults,
+            rule: { AutoSwitchSettings.effectiveRule(for: $0, defaults: defaults) }, defaults: defaults,
             hysteresisPct: AutoSwitchEngine.hysteresis, watchFable: true, strategy: .mostRoom, asOf: t0)
         guard let result else { return "stay" }
         return "\(result.limit.rawValue)/\(result.trigger.rawValue)/\(result.window?.rawValue ?? "-"): " + result.targets.map(\.displayName).joined(separator: ",")
@@ -250,15 +455,86 @@ private let ultraWireUsage = #"{"five_hour":null,"seven_day":{"utilization":15,"
     check(plan(active: active, candidates: [five], [active.id: windowUsage(97), five.id: windowUsage(40, session: 20)]) == "windows/threshold/weekly: five",
           "engine: a Max 5x account with room on both windows is a target for an Ultra account")
 
-    // Why the strip matters: a session reading on a 5-hour-less account would fire a limit it does not have.
+    // A session reading that reaches the engine for an account with no session limit (it should not: see sessionObservedTests)
+    // is judged against that account's weekly number, never against the 91% session default.
     let objectOnUltra = windowUsage(50, session: 95)
-    check(plan(active: active, candidates: [other], [active.id: objectOnUltra, other.id: windowUsage(40)]) == "windows/threshold/session: other",
-          "engine: (the reason for the strip) an unstripped session reading of 95% would move an Ultra account off at the 91% default")
-    check(plan(active: active, candidates: [other], [active.id: objectOnUltra.droppingSession(), other.id: windowUsage(40)]) == "stay",
-          "engine: after the strip the same reading moves nothing, so a returning five_hour object cannot make an Ultra account switch on a limit it does not have")
+    check(plan(active: active, candidates: [other], [active.id: objectOnUltra, other.id: windowUsage(40)]) == "stay",
+          "engine: a stray session reading of 95% on an Ultra account does not move it: its one limit is the weekly 97%, not the 91% session default")
+    var observedActive = active
+    observedActive.sessionLimitObserved = true
+    check(plan(active: observedActive, candidates: [other], [active.id: objectOnUltra, other.id: windowUsage(40)]) == "windows/threshold/session: other",
+          "engine: an account whose session limit was observed leaves at it (91%), like any account with a session limit")
+    let emptyObject = decodeUsage(#"{"five_hour":{"utilization":null,"resets_at":null},"seven_day":{"utilization":50,"resets_at":"\#(iso(hours: 100))"}}"#)
+    check(plan(active: active, candidates: [other], [active.id: emptyObject.droppingEmptySession(), other.id: windowUsage(40)]) == "stay",
+          "engine: an empty five_hour object, once dropped, moves nothing")
     let ultraWire = decodeUsage(ultraWireUsage)
     check(plan(active: active, candidates: [other], [active.id: ultraWire, other.id: ultraWire]) == "stay",
           "engine: the real Max 20x reading (15% weekly, five_hour null) stays put")
+}
+
+// MARK: - The rule the engine is handed for an account with no session limit
+
+@MainActor private func effectiveRuleTests() {
+    // Weekly 80, session 91: the hidden session number is the higher one, which rule 9 (overflow) would raise the weekly limit to.
+    let defaults = AutoSwitchEngine.WindowPair(session: 91, weekly: 80)
+    func rule(_ account: Account) -> AutoSwitchEngine.WindowRule { AutoSwitchSettings.effectiveRule(for: account, defaults: defaults) }
+
+    let u = ultra("u")
+    check(rule(u) == AutoSwitchEngine.WindowRule(session: 80, weekly: 80, manualOnly: false) && rule(u).relaxed == rule(u),
+          "rule: an Ultra account's rule has its weekly number in both places, so the overflow rule (relaxed) changes nothing for it")
+    check(AutoSwitchSettings.rule(for: u, defaults: defaults).relaxed.weekly == 91,
+          "rule: fixture: the raw rule's relaxed weekly would be the 91 of the hidden session default")
+    let ownSession = ultra("own", session: 100, weekly: 60)
+    check(rule(ownSession) == AutoSwitchEngine.WindowRule(session: 60, weekly: 60, manualOnly: false) && ownSession.sessionThreshold == 100,
+          "rule: a session value stored on an Ultra account (pixelswitch accounts threshold --session 100) is kept on the account but never reaches the engine")
+    check(rule(ultra("m", switchThreshold: 0)) == .manualOnlyRule, "rule: a Manual only Ultra account stays Manual only")
+    let five = max5x("five", session: 91, weekly: 80)
+    check(rule(five) == AutoSwitchSettings.rule(for: five, defaults: defaults) && rule(five).relaxed.weekly == 91,
+          "rule: a Max 5x account's rule is exactly what it was")
+    var observed = ultra("observed")
+    observed.sessionLimitObserved = true
+    check(rule(observed) == AutoSwitchSettings.rule(for: observed, defaults: defaults), "rule: an Ultra-classed account whose session limit was observed keeps both windows")
+    check(rule(Account(email: "a@x.com", displayName: "A")) == AutoSwitchSettings.rule(for: Account(email: "a@x.com", displayName: "A"), defaults: defaults),
+          "rule: an account with no plan is unchanged")
+
+    // Through the real engine.
+    func plan(active: Account, candidates: [Account], _ usage: [UUID: UsageAPIResponse]) -> String {
+        let result = AutoSwitchEngine.planWindowed(
+            active: active, candidates: candidates, usageByAccount: usage,
+            isSwitchable: { _ in true }, activeSampledThisCycle: true,
+            rule: { rule($0) }, defaults: defaults,
+            hysteresisPct: AutoSwitchEngine.hysteresis, watchFable: true, strategy: .mostRoom, asOf: t0)
+        guard let result else { return "stay" }
+        return "\(result.limit.rawValue)/\(result.trigger.rawValue)/\(result.window?.rawValue ?? "-"): " + result.targets.map(\.displayName).joined(separator: ",") + (result.relaxed ? " (relaxed)" : "")
+    }
+    func usage(weekly: Double, session: Double? = nil) -> UsageAPIResponse {
+        let five = session.map { #"{"utilization":\#($0),"resets_at":"\#(iso(hours: 2))"}"# } ?? "null"
+        return decodeUsage(#"{"five_hour":"# + five + #","seven_day":{"utilization":\#(weekly),"resets_at":"\#(iso(hours: 100))"}}"#)
+    }
+
+    // F1: the active Ultra account is at 85% weekly; its limit is 80; nobody has room under their strict limits.
+    let active = ultra("active", active: true)
+    let roomyOnlyWhenRelaxed = max5x("five")   // weekly 85: over its strict ceiling (79), under its relaxed one (90)
+    let plain = [active.id: usage(weekly: 85), roomyOnlyWhenRelaxed.id: usage(weekly: 85, session: 20)]
+    check(plan(active: active, candidates: [roomyOnlyWhenRelaxed], plain) == "windows/threshold/weekly: five (relaxed)",
+          "rule: an active Ultra account at 85% with a weekly limit of 80 is left at its weekly number, by the overflow pass, not held until the hidden session number (91)")
+    check(AutoSwitchEngine.stayingPutKind(activeUsage: usage(weekly: 85), activeRule: rule(active), defaults: defaults, activeSampledThisCycle: true, watchFable: true, asOf: t0) == .noRoom,
+          "rule: with nobody to go to, the log says nobody has room, not that it is waiting for a session limit it does not have")
+    check(AutoSwitchEngine.stayingPutKind(activeUsage: usage(weekly: 85), activeRule: AutoSwitchSettings.rule(for: active, defaults: defaults), defaults: defaults,
+                                          activeSampledThisCycle: true, watchFable: true, asOf: t0) == .waitingForSessionLimit,
+          "rule: fixture: the raw rule would have said it was waiting for the session limit")
+    check(plan(active: active, candidates: [roomyOnlyWhenRelaxed], [active.id: usage(weekly: 79), roomyOnlyWhenRelaxed.id: usage(weekly: 85, session: 20)]) == "stay",
+          "rule: under its weekly limit (79%) it stays")
+
+    // The same number on the arrival side: an Ultra account is not taken up to the hidden session number either.
+    let activeFive = max5x("activeFive", active: true, session: 91, weekly: 80)
+    let target = ultra("target")
+    let against = [activeFive.id: usage(weekly: 95, session: 10), target.id: usage(weekly: 85)]
+    check(plan(active: activeFive, candidates: [target], against) == "stay",
+          "rule: an Ultra account at 85% (weekly limit 80) is not a target even when the overflow pass runs: its arrival ceiling is its weekly number, not the session 91")
+    let fiveTarget = max5x("fiveTarget", session: 91, weekly: 80)
+    check(plan(active: activeFive, candidates: [fiveTarget], [activeFive.id: usage(weekly: 95, session: 10), fiveTarget.id: usage(weekly: 85, session: 20)]) == "windows/threshold/weekly: fiveTarget (relaxed)",
+          "rule: the same reading on a Max 5x account is a target by the overflow rule, as before")
 }
 
 // MARK: - The control protocol
@@ -365,6 +641,19 @@ private let ultraWireUsage = #"{"five_hour":null,"seven_day":{"utilization":15,"
     let weeklyOnly = overTheWire(info(ultra("dan", weekly: 60)))
     check(CLIOutput.thresholdSet(weeklyOnly) == "dan@x.com now switches at 60%.", "cli: an Ultra account with its own weekly limit switches at that number")
     check(CLIOutput.leaveWords(ultraRow) == "97%", "cli: an Ultra account is left at one number in words")
+
+    // The decision the runner makes for `accounts threshold <account> --session N`, as a function of what was typed.
+    let typed = CLIOutput.windowThresholdsSet(ultraRow, session: .percent(80))
+    check(typed.contains("no 5-hour limit") && typed.contains("no effect") && typed == CLIOutput.thresholdSet(ultraRow, sessionWasSet: true),
+          "cli: --session 80 on an Ultra account gets the reply that says it has no effect", typed)
+    check(CLIOutput.windowThresholdsSet(ultraRow, session: .follow).contains("no effect"),
+          "cli: --session default on an Ultra account says so too (a session value was part of the command)")
+    check(CLIOutput.windowThresholdsSet(ultraRow, session: nil) == CLIOutput.thresholdSet(ultraRow) && !CLIOutput.windowThresholdsSet(ultraRow, session: nil).contains("no effect"),
+          "cli: --weekly alone on an Ultra account gets the ordinary reply")
+    check(CLIOutput.windowThresholdsSet(fiveRow, session: .percent(80)) == CLIOutput.thresholdSet(fiveRow)
+          && CLIOutput.windowThresholdsSet(overTheWire(info(max5x("noflag"))), session: .percent(80)) == CLIOutput.thresholdSet(overTheWire(info(max5x("noflag")))),
+          "cli: --session on a Max 5x account gets the ordinary reply")
+    check(CLIOutput.windowThresholdsSet(nil, session: .percent(80)) == "Threshold set.", "cli: no account in the reply, the plain reply")
 }
 
 // MARK: - The menu bar
@@ -381,6 +670,18 @@ private let ultraWireUsage = #"{"five_hour":null,"seven_day":{"utilization":15,"
     check(MenuBarModuleStore.decode(MenuBarModuleStore.encode(saved)) == saved, "menu bar: the user's saved module list is untouched (filtering returns a new list)")
     check(MenuBarModule.visibleModules([], activeHasSessionLimit: false).isEmpty && MenuBarModule.visibleModules([.weeklyBar], activeHasSessionLimit: false) == [.weeklyBar],
           "menu bar: an empty list and a list with no session module are unchanged")
+
+    // The decision the strip makes from the active account, with real accounts (nil, Ultra, Max 5x, an Ultra-classed account whose 5-hour limit was observed).
+    var observed = ultra("observed", active: true)
+    observed.sessionLimitObserved = true
+    check(MenuBarModule.visibleModules(saved, activeAccount: ultra("u", active: true)) == [.account, .weeklyBar, .fableBar],
+          "menu bar: with an Ultra account active the session modules are not drawn")
+    check(MenuBarModule.visibleModules(saved, activeAccount: nil) == saved,
+          "menu bar: with no active account every saved module is drawn")
+    check(MenuBarModule.visibleModules(saved, activeAccount: max5x("five", active: true)) == saved
+          && MenuBarModule.visibleModules(saved, activeAccount: observed) == saved
+          && MenuBarModule.visibleModules(saved, activeAccount: Account(email: "a@x.com", displayName: "A", subscriptionType: "max")) == saved,
+          "menu bar: with a Max 5x, an unknown-tier or a session-limited account active every saved module is drawn")
 }
 
 // MARK: - The widget
@@ -435,11 +736,17 @@ private func planMember(_ source: String, startingAt signature: String) -> Strin
     let engine = planSource("PixelSwitch/Services/AutoSwitchEngine.swift")
     check(!app.isEmpty && !engine.isEmpty, "ultra pins: the source files are found from the repo root")
 
-    // One strip point: the only place a usage request is made.
+    // One place a usage request is made, and it hands the reading to the pure decision (settingSession, tested above with real readings).
     let request = planMember(app, startingAt: "private func requestUsage(")
-    check(request.contains("getUsageLimits(accessToken:") && request.contains("droppingSession()") && request.contains("hasSessionLimit"),
-          "ultra pins: requestUsage, the one place a usage request is made, drops the session reading of an account with no 5-hour limit")
+    check(request.contains("getUsageLimits(accessToken:") && request.contains("recordSessionReading("),
+          "ultra pins: requestUsage, the one place a usage request is made, hands the reading to recordSessionReading")
     check(app.components(separatedBy: "getUsageLimits(accessToken:").count == 2, "ultra pins: requestUsage is still the only caller of getUsageLimits")
+    let recorder = planMember(app, startingAt: "private func recordSessionReading(")
+    check(recorder.contains("usage.settingSession(for: stored)") && recorder.contains("sessionLimitObserved") && recorder.contains("saveAccounts()"),
+          "ultra pins: recordSessionReading applies settingSession to the account as stored and saves a change of its observed flag")
+    let windowRule = planMember(app, startingAt: "func windowRule(for account: Account) -> AutoSwitchEngine.WindowRule {")
+    check(windowRule.contains("AutoSwitchSettings.effectiveRule(for: stored, defaults: windowDefaults)") && !windowRule.contains("AutoSwitchSettings.rule(for:"),
+          "ultra pins: the engine's rule for an account comes from effectiveRule (weekly in both windows for an account with no 5-hour limit)")
 
     // The plan is filled wherever the subscription type is copied.
     check(app.components(separatedBy: "planTier: status.planTier").count >= 4,
@@ -450,9 +757,10 @@ private func planMember(_ source: String, startingAt signature: String) -> Strin
     check(app.components(separatedBy: "accounts[index].planTier = AccountPlan.updatedTier(current: accounts[index].planTier, reported: status.planTier)").count == 3,
           "ultra pins: a re-sign updates the tier the same way")
     let backfill = planMember(app, startingAt: "private func backfillPlans() async {")
-    check(backfill.contains("allAccountBackups()") && backfill.contains("AccountPlan.tier(fromCredential:") && backfill.contains("planTier == nil")
-          && !backfill.contains("log.info(\"\\(backup") && !backfill.contains(".token)"),
-          "ultra pins: accounts with no tier get one from their saved login, filling only blanks, and the token is never logged")
+    check(backfill.contains("allAccountBackups()") && backfill.contains("planBackfill.wanted(accounts)") && backfill.contains("planBackfill.record(wanted:")
+          && backfill.contains("planTier == nil") && !backfill.contains("log.info(\"\\(backup") && !backfill.contains(".token)")
+          && !app.contains("planBackfillTried"),
+          "ultra pins: accounts with no tier get one from their saved login through the ledger (settled only after a read that worked), filling only blanks, and the token is never logged")
     let refresh = planMember(app, startingAt: "private func refreshData() async -> Bool {")
     check(refresh.contains("await backfillPlans()"), "ultra pins: the backfill runs from the refresh, after the active account's tier is known")
     let widget = planMember(app, startingAt: "private func updateWidgetData() {")
@@ -463,8 +771,8 @@ private func planMember(_ source: String, startingAt signature: String) -> Strin
 
     // Views the harness cannot compile.
     let strip = planSource("PixelSwitch/Views/MenuBarStripView.swift")
-    check(strip.contains("MenuBarModule.visibleModules(config.modules, activeHasSessionLimit:") && !strip.contains("ForEach(config.modules)"),
-          "ultra pins: the menu bar strip draws config.modules through visibleModules")
+    check(strip.contains("MenuBarModule.visibleModules(config.modules, activeHasSessionLimit: appState.activeAccount?.hasSessionLimit ?? true)") && !strip.contains("ForEach(config.modules)"),
+          "ultra pins: the menu bar strip draws config.modules through visibleModules, with no active account read as having a session limit")
     let dashboard = planSource("PixelSwitch/Views/UsageDashboardView.swift")
     check(dashboard.contains("usageBars(usage, showsSession: account.hasSessionLimit)") && dashboard.contains("if showsSession, let session = usage.fiveHour"),
           "ultra pins: the Usage card draws the Session row only for an account with a 5-hour limit")

@@ -383,7 +383,7 @@ struct StatusInfo: Codable, Equatable, Sendable {
     let autoSwitch: AutoSwitchInfo
     let signIn: SignInInfo?
     /// 2.0, all optional so an older app's reply decodes: the build's
-    /// `ControlProtocol.revision` (3), what it can do (`priority`,
+    /// `ControlProtocol.revision`, what it can do (`priority`,
     /// `splitThresholds`), `macos` or `linux`, and `true` only for a Linux
     /// daemon running in test mode.
     var protocolRevision: Int?
