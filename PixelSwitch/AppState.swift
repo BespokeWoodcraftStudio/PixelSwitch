@@ -839,7 +839,10 @@ final class AppState: ObservableObject {
     /// across an await) still gets the values saved most recently.
     func windowRule(for account: Account) -> AutoSwitchEngine.WindowRule {
         let stored = accounts.first(where: { $0.id == account.id }) ?? account
-        return AutoSwitchSettings.rule(for: stored, defaults: windowDefaults)
+        // An account with no 5-hour limit (Ultra) is handed its weekly number in
+        // both windows, so the engine's overflow rule cannot raise it to a hidden
+        // session number (`effectiveRule`).
+        return AutoSwitchSettings.effectiveRule(for: stored, defaults: windowDefaults)
     }
 
     /// Where auto-switch moves the user off `account`, per window.
@@ -1984,10 +1987,7 @@ final class AppState: ObservableObject {
     private func requestUsage(for account: Account, login: CredentialOwnership.Login, afterRenewal: Bool) async -> UsageAPIResponse? {
         do {
             let usage = try await claudeService.getUsageLimits(accessToken: login.accessToken)
-            // The one strip point: an account with no 5-hour limit (Ultra) never
-            // holds a session reading, so nothing downstream can show or act on one.
-            let stored = accounts.first(where: { $0.id == account.id }) ?? account
-            return stored.hasSessionLimit ? usage : usage.droppingSession()
+            return recordSessionReading(usage, for: account)
         } catch ClaudeService.UsageError.expired {
             requestGuard.recordRejected(account: account.id, accessToken: login.accessToken)
             log.warning("[fetchUsage] 401 for \(account.email) (token \(TokenFingerprint.forLog(TokenFingerprint.of(login.accessToken)))); it will not be sent again until it changes")
@@ -2054,32 +2054,57 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// The reading `requestUsage` hands on, and what it learns about the account's
+    /// 5-hour window from it. The API's own data wins over the stored tier: an
+    /// account the tier calls Ultra that is sent a real session reading is kept
+    /// that reading and marked as having a session limit until the API stops
+    /// sending one; a window with no number is dropped (`settingSession`). The
+    /// observed flag is saved when it changes, and the active account's copy kept
+    /// in step. Everything downstream (the engine's rule, the Usage card, the menu
+    /// bar, the widget, Settings, the control protocol) reads `hasSessionLimit`.
+    private func recordSessionReading(_ usage: UsageAPIResponse, for account: Account) -> UsageAPIResponse {
+        let stored = accounts.first(where: { $0.id == account.id }) ?? account
+        let outcome = usage.settingSession(for: stored)
+        if let index = accounts.firstIndex(where: { $0.id == account.id }),
+           accounts[index].sessionLimitObserved != outcome.sessionLimitObserved {
+            accounts[index].sessionLimitObserved = outcome.sessionLimitObserved
+            if activeAccount?.id == account.id { activeAccount = accounts[index] }
+            saveAccounts()
+            let sent = outcome.sessionLimitObserved == true
+            log.info("[plan] The usage API \(sent ? "sends" : "no longer sends") a 5-hour reading for an account classed Ultra: it \(sent ? "has" : "has no") session limit")
+        }
+        return outcome.usage
+    }
+
     // MARK: - Plans (Ultra has no 5-hour limit)
 
-    /// Accounts whose saved login has already been looked at for a plan this launch.
-    private var planBackfillTried: Set<UUID> = []
+    /// Which accounts have been looked at for a plan this launch, and how often
+    /// the store was unreadable (see `PlanBackfillLedger`).
+    private var planBackfill = PlanBackfillLedger()
 
     /// Gives an account that has no plan tier one, from its saved login (the
     /// credential's `rateLimitTier`, else the account block's tier or Claude
     /// Code's display name; see `AccountPlan.tier`). Only blanks are filled: a
-    /// tier `claude auth status` reported is never replaced, and each account is
-    /// looked at once per launch. The active account's tier is refreshed from
-    /// `claude auth status` on every refresh anyway; this is for the others, whose
-    /// plan would otherwise be unknown until each became active. Reads the tier
-    /// and name fields only: no token is returned, kept or logged.
+    /// tier `claude auth status` reported is never replaced. An account is marked
+    /// as looked at only after a read that worked (data, or a store that holds no
+    /// backup for it); an unreadable store is asked again on a later refresh, at
+    /// most once per refresh and `PlanBackfillLedger.unreadableLimit` times per
+    /// launch. The active account's tier is refreshed from `claude auth status`
+    /// on every refresh anyway; this is for the others, whose plan would otherwise
+    /// be unknown until each became active. Reads the tier and name fields only:
+    /// no token is returned, kept or logged.
     private func backfillPlans() async {
-        let wanted = accounts.filter { $0.planTier == nil && !planBackfillTried.contains($0.id) }
+        let wanted = planBackfill.wanted(accounts)
         guard !wanted.isEmpty else { return }
-        wanted.forEach { planBackfillTried.insert($0.id) }
         let keychain = self.keychain
-        guard let backups = await Task.detached(priority: .utility, operation: { keychain.allAccountBackups() }).value else { return }
+        let backups = await Task.detached(priority: .utility, operation: { keychain.allAccountBackups() }).value
+        let read = backups?.mapValues { PlanSavedLogin(credential: $0.token, oauthAccount: $0.oauthAccount.mapValues(\.value)) }
+        let tiers = planBackfill.record(wanted: wanted, read: read)
         var filled = 0
-        for account in wanted {
-            guard let index = accounts.firstIndex(where: { $0.id == account.id }), accounts[index].planTier == nil,
-                  let backup = backups[account.id.uuidString],
-                  let tier = AccountPlan.tier(fromCredential: backup.token, oauthAccount: backup.oauthAccount.mapValues(\.value)) else { continue }
+        for (id, tier) in tiers {
+            guard let index = accounts.firstIndex(where: { $0.id == id }), accounts[index].planTier == nil else { continue }
             accounts[index].planTier = tier
-            if activeAccount?.id == account.id { activeAccount = accounts[index] }
+            if activeAccount?.id == id { activeAccount = accounts[index] }
             filled += 1
         }
         if filled > 0 {

@@ -166,7 +166,7 @@ struct CLIRunner {
             if let session { params["session"] = session.parameter }
             if let weekly { params["weekly"] = weekly.parameter }
             let result = try call(.accountsSetThresholds, .object(params))
-            show(result) { CLIOutput.thresholdSet(try? result["account"]?.decode(AccountInfo.self), sessionWasSet: session != nil) }
+            show(result) { CLIOutput.windowThresholdsSet(try? result["account"]?.decode(AccountInfo.self), session: session) }
 
         case .priority(let reference, let priority):
             try Self.requireFeature(ControlProtocol.featurePriority, doing: "set priorities", app: app)
@@ -410,6 +410,13 @@ enum CLIOutput {
         let text = thresholdSetSentence(account)
         guard sessionWasSet, !hasSessionLimit(account) else { return text }
         return text + " This account has no 5-hour limit, so the session value is saved but has no effect."
+    }
+
+    /// What `accounts threshold <account> --session N --weekly N` prints: the
+    /// threshold reply, told whether the command carried a session value at all
+    /// (a number or `default`), which on an account with no 5-hour limit has no effect.
+    static func windowThresholdsSet(_ account: AccountInfo?, session: CLIWindowValue?) -> String {
+        thresholdSet(account, sessionWasSet: session != nil)
     }
 
     private static func thresholdSetSentence(_ account: AccountInfo) -> String {

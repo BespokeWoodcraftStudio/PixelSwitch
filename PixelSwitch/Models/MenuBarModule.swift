@@ -51,6 +51,12 @@ enum MenuBarModule: String, Codable, CaseIterable, Identifiable {
         activeHasSessionLimit ? modules : modules.filter { !$0.usesSessionWindow }
     }
 
+    /// The same, from the active account itself: no active account (nothing is
+    /// known) reads as having a 5-hour limit, so every saved module is drawn.
+    static func visibleModules(_ modules: [MenuBarModule], activeAccount: Account?) -> [MenuBarModule] {
+        visibleModules(modules, activeHasSessionLimit: activeAccount?.hasSessionLimit ?? true)
+    }
+
     /// Human-readable name shown in the Settings reorder list.
     var localizedDisplayName: String {
         switch self {

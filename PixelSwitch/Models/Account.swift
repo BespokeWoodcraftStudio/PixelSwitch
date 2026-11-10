@@ -63,6 +63,14 @@ struct Account: Identifiable, Codable, Hashable {
     /// account keeps the 5-hour limit. Accounts saved before it existed decode
     /// it as nil, and a nil is never written.
     var planTier: String?
+    /// True while the usage API itself sends a real 5-hour reading for this
+    /// account although its tier says Ultra (Max 20x, no 5-hour limit). The API's
+    /// own data wins: such an account HAS a session limit (the tier may be stale,
+    /// or Anthropic may have brought the limit back), and `AccountPlan.resolve`
+    /// answers that way until the API stops sending it. nil = not observed; only
+    /// ever written as true or nil, so a nil is never saved and accounts saved
+    /// before it existed decode it as nil (see `UsageAPIResponse.settingSession`).
+    var sessionLimitObserved: Bool?
 
     // The plan badge's text (`displaySubscriptionType`) and `hasSessionLimit`
     // live in AccountPlan.swift, so that there is one place that decides both.
@@ -119,7 +127,8 @@ struct Account: Identifiable, Codable, Hashable {
         weeklyThreshold: Double? = nil,
         priority: Int? = nil,
         prioritySetAt: Date? = nil,
-        planTier: String? = nil
+        planTier: String? = nil,
+        sessionLimitObserved: Bool? = nil
     ) {
         self.id = id
         self.email = email
@@ -136,6 +145,7 @@ struct Account: Identifiable, Codable, Hashable {
         self.priority = priority
         self.prioritySetAt = prioritySetAt
         self.planTier = planTier
+        self.sessionLimitObserved = sessionLimitObserved
     }
 }
 
