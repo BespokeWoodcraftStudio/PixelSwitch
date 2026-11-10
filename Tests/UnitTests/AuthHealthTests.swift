@@ -1,7 +1,7 @@
 // "Needs authentication": when Claude Code has given up on the live login
 // (AuthHealth), the two-read confirmation (LiveLoginWatch), what auto-switch
 // does about it (DeadLoginPolicy, fed to the unchanged engine as `isUnusable`),
-// and the renewal of a target that is about to expire (TargetRenewalPolicy).
+// and the renewal of every switch target before the switch (TargetRenewalPolicy).
 // Compiled into the unit harness by Tests/run-unit-tests.sh and run from
 // main.swift. Uses the global `check(_:_:_:)` defined there.
 //
@@ -24,6 +24,8 @@ import Foundation
     watchTests()
     replayTests()
     policyTests()
+    reactionTests()
+    probeMappingTests()
     engineTests()
     renewalTests()
     wiringPins()
@@ -327,19 +329,72 @@ private let blankedCredential = credential(access: "", refresh: "", expiresAt: 0
 
 @MainActor private func policyTests() {
     typealias Policy = DeadLoginPolicy
-    check(Policy.response(autoSwitchEnabled: true, activeIsManualOnly: false) == .leaveNow,
-          "auth policy: auto-switch on, an ordinary account: leave it now")
-    check(Policy.response(autoSwitchEnabled: false, activeIsManualOnly: false) == .stayAndShow(.autoSwitchOff),
+    check(Policy.response(autoSwitchEnabled: true) == .leaveNow,
+          "auth policy: auto-switch on: leave the dead account now, Manual only or not (CTO, 2026-11-10: Manual only means never move me for usage reasons, not keep me when I cannot work at all)")
+    check(Policy.response(autoSwitchEnabled: false) == .stayAndShow(.autoSwitchOff),
           "auth policy: auto-switch off: the user's choice stands; the account is only shown as needing sign-in")
-    check(Policy.response(autoSwitchEnabled: true, activeIsManualOnly: true) == .leaveNow,
-          "auth policy: a Manual only account with a dead login is left too (CTO, 2026-11-10: Manual only means never move me for usage reasons, not keep me when I cannot work at all)")
-    check(Policy.response(autoSwitchEnabled: false, activeIsManualOnly: true) == .stayAndShow(.autoSwitchOff),
-          "auth policy: auto-switch off stands for a Manual only account too: flagged and shown, nothing moves")
-    check(Policy.leavesAutomatically(autoSwitchEnabled: true, activeIsManualOnly: false)
-          && Policy.leavesAutomatically(autoSwitchEnabled: true, activeIsManualOnly: true)
-          && !Policy.leavesAutomatically(autoSwitchEnabled: false, activeIsManualOnly: false)
-          && !Policy.leavesAutomatically(autoSwitchEnabled: false, activeIsManualOnly: true),
-          "auth policy: under auto-switch every active account with a dead login is fed to the engine as unusable, Manual only or not; with auto-switch off none is")
+    check(Policy.leavesAutomatically(autoSwitchEnabled: true) && !Policy.leavesAutomatically(autoSwitchEnabled: false),
+          "auth policy: under auto-switch every active account with a dead login is fed to the engine as unusable; with auto-switch off none is")
+}
+
+// MARK: - What one 30-second look does about what it saw (the part AppState wires up)
+
+@MainActor private func reactionTests() {
+    typealias Policy = DeadLoginPolicy
+    let tries = Policy.evaluationsPerConfirmation
+
+    check(tries == 5, "auth reaction: a confirmation grants auto-switch five tries (the first, and four more about 30 seconds apart)")
+    check(Policy.reaction(to: .confirmed, autoSwitchEnabled: true) == Policy.Reaction(flagActive: true, evaluations: tries, refreshAfter: false),
+          "auth reaction: a confirmed dead login flags the active account AND asks auto-switch to leave it (delete either and the 'switch within a minute' is gone)")
+    check(Policy.reaction(to: .confirmed, autoSwitchEnabled: false) == Policy.Reaction(flagActive: true, evaluations: 0, refreshAfter: false),
+          "auth reaction: with auto-switch off a confirmation still flags the account but asks for no switch")
+    for enabled in [true, false] {
+        check(Policy.reaction(to: .none, autoSwitchEnabled: enabled) == Policy.Reaction()
+              && Policy.reaction(to: .firstSighting, autoSwitchEnabled: enabled) == Policy.Reaction(),
+              "auth reaction: nothing, or a first sighting, changes nothing (auto-switch \(enabled ? "on" : "off")): one read is never enough")
+        check(Policy.reaction(to: .recovered, autoSwitchEnabled: enabled) == Policy.Reaction(flagActive: false, evaluations: 0, refreshAfter: true),
+              "auth reaction: a recovery cancels the pending tries and runs a refresh, which proves whose login it is (auto-switch \(enabled ? "on" : "off"))")
+    }
+
+    // When a look may run auto-switch.
+    func may(_ left: Int = 3, leaves: Bool = true, refreshing: Bool = false, evaluating: Bool = false, switching: Bool = false, loggingIn: Bool = false) -> Bool {
+        Policy.mayEvaluateNow(evaluationsLeft: left, leavesActive: leaves, isRefreshing: refreshing, isEvaluating: evaluating, isSwitching: switching, isLoggingIn: loggingIn)
+    }
+    check(may(), "auth reaction: tries pending, the dead login is one auto-switch leaves, nothing else running: evaluate")
+    check(!may(0) && !may(leaves: false), "auth reaction: no tries pending, or a login auto-switch does not leave (auto-switch off): do not evaluate")
+    check(!may(refreshing: true) && !may(evaluating: true) && !may(switching: true) && !may(loggingIn: true),
+          "auth reaction: a refresh, another evaluation, a switch or a sign-in in progress: wait for the next look")
+
+    // The retry the look performs: each run uses one try; a run that moved nothing is repeated on the next look,
+    // five runs in all, then the 5-minute refresh carries on.
+    var left = Policy.reaction(to: .confirmed, autoSwitchEnabled: true).evaluations ?? 0
+    var runs = 0
+    while may(left) { left -= 1; runs += 1 }
+    check(runs == 5 && left == 0, "auth reaction: a verification that fails is retried on the next looks, five tries in all, never unbounded")
+}
+
+// MARK: - `claude auth status` that gives no answer
+
+@MainActor private func probeMappingTests() {
+    typealias Failure = AuthHealth.StatusFailure
+    check(AuthHealth.probe(after: .exitedNonZero) == .failed,
+          "auth probe: a CLI that ran and exited non-zero is failed: what a logged-out CLI does")
+    for failure in [Failure.timedOut, .couldNotStart, .unreadableOutput] {
+        check(AuthHealth.probe(after: failure) == .unavailable, "auth probe: \(failure) says nothing about the login, so it is unavailable and never failed")
+    }
+
+    // Behaviour: a CLI that times out can never make a blank login read as signed out; one that exits non-zero does.
+    let account = UUID()
+    func run(_ failure: Failure) -> (LiveLoginWatch.Change, UUID?) {
+        var watch = LiveLoginWatch()
+        _ = watch.observe(AuthHealth.judge(shape: .blank, cli: AuthHealth.probe(after: failure)), account: account, at: t0)
+        let change = watch.observe(AuthHealth.judge(shape: .blank, cli: AuthHealth.probe(after: failure)), account: account, at: t0.addingTimeInterval(30))
+        return (change, watch.confirmedDeadAccount)
+    }
+    check(run(.exitedNonZero) == (.confirmed, account), "auth probe: a blank login with a CLI that exits non-zero on both reads is confirmed dead")
+    for failure in [Failure.timedOut, .couldNotStart, .unreadableOutput] {
+        check(run(failure) == (.none, nil), "auth probe: a blank login with a CLI that \(failure) on both reads is never confirmed")
+    }
 }
 
 // MARK: - The unchanged engine, fed a dead live login through isUnusable
@@ -367,7 +422,7 @@ private func authSample(_ session: Double?, _ weekly: Double?) -> UsageAPIRespon
     func plan(active: Account, candidates: [Account], _ usage: [UUID: UsageAPIResponse], autoSwitch: Bool = true,
               unswitchable: Set<UUID> = [], noSubscription: Set<UUID> = [], strategy: AutoSwitchStrategy = .mostRoom) -> String {
         var dead = noSubscription
-        if DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: autoSwitch, activeIsManualOnly: active.switchThreshold == 0) { dead.insert(active.id) }
+        if DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: autoSwitch) { dead.insert(active.id) }
         let result = AutoSwitchEngine.planWindowed(
             active: active, candidates: candidates, usageByAccount: usage,
             isSwitchable: { !unswitchable.contains($0.id) }, isUnusable: { dead.contains($0.id) },
@@ -398,7 +453,7 @@ private func authSample(_ session: Double?, _ weekly: Double?) -> UsageAPIRespon
     check(plan(active: manualA, candidates: [b], [b.id: authSample(95, 95)]) == "stay"
           && plan(active: manualA, candidates: [b], [:]) == "stay"
           && plan(active: manualA, candidates: [b], [b.id: authSample(40, 40)], unswitchable: [b.id]) == "stay"
-          && DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: true, activeIsManualOnly: true),
+          && DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: true),
           "auth engine: a Manual only dead account with no healthy target stays put, and is the case AppState logs once per change (leavesDeadLogin routes it to noteDeadLoginStayingPut)")
     check(plan(active: manualA, candidates: [manualB, b, c], [manualB.id: authSample(0, 0), b.id: authSample(10, 10), c.id: authSample(40, 40)],
                unswitchable: [b.id], noSubscription: [c.id]) == "stay"
@@ -406,9 +461,9 @@ private func authSample(_ session: Double?, _ weekly: Double?) -> UsageAPIRespon
                   unswitchable: [b.id]) == "noSubscription: C",
           "auth engine: from a Manual only dead account the target is never Manual only, never one that needs sign-in, never one with no subscription")
     check(!AutoSwitchEngine.cooldownHolds(lastSwitchAt: now.addingTimeInterval(-60), cooldown: 300,
-                                          activeUnusable: DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: true, activeIsManualOnly: true), asOf: now)
+                                          activeUnusable: DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: true), asOf: now)
           && AutoSwitchEngine.cooldownHolds(lastSwitchAt: now.addingTimeInterval(-60), cooldown: 300,
-                                            activeUnusable: DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: false, activeIsManualOnly: true), asOf: now),
+                                            activeUnusable: DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: false), asOf: now),
           "auth engine: the cooldown is bypassed for a Manual only dead account under auto-switch, and not when auto-switch is off")
     check(plan(active: a, candidates: [b], [b.id: authSample(40, 40)], unswitchable: [b.id]) == "stay",
           "auth engine: an account that needs sign-in is never the target; with no other, stay put")
@@ -432,45 +487,75 @@ private func authSample(_ session: Double?, _ weekly: Double?) -> UsageAPIRespon
           "auth engine: the event still names the rule noSubscription (the engine is unchanged; the cause is in the log line)")
 }
 
-// MARK: - A target about to expire is renewed first
+// MARK: - Every switch target is renewed first
 
 @MainActor private func renewalTests() {
     typealias Policy = TargetRenewalPolicy
-    func expiring(in seconds: TimeInterval?) -> Double? { seconds.map { ms(t0.addingTimeInterval($0)) } }
+    let fingerprint = "ab12cd34ef567890"
+    let renewal = Policy.Renewal(accessTokenFingerprint: fingerprint, at: t0)
+    func must(_ saved: String?, _ last: Policy.Renewal?, after seconds: TimeInterval) -> Bool {
+        Policy.mustRenewBeforeSwitch(savedAccessTokenFingerprint: saved, lastRenewal: last, now: t0.addingTimeInterval(seconds))
+    }
 
-    check(Policy.renewWithin == 3600, "auth renewal: a target is renewed before the switch when its access token expires within 60 minutes")
-    check(Policy.mustRenewBeforeSwitch(expiresAt: expiring(in: 59 * 60 + 59), now: t0)
-          && Policy.mustRenewBeforeSwitch(expiresAt: expiring(in: 3600), now: t0),
-          "auth renewal: 59 minutes 59 seconds and exactly 60 minutes both count as within")
-    check(!Policy.mustRenewBeforeSwitch(expiresAt: expiring(in: 3601), now: t0) && !Policy.mustRenewBeforeSwitch(expiresAt: expiring(in: 5 * 3600), now: t0),
-          "auth renewal: more than 60 minutes left is left alone (no new calls)")
-    check(Policy.mustRenewBeforeSwitch(expiresAt: expiring(in: -600), now: t0) && Policy.mustRenewBeforeSwitch(expiresAt: expiring(in: 0), now: t0),
-          "auth renewal: an expired one is renewed too")
-    check(!Policy.mustRenewBeforeSwitch(expiresAt: nil, now: t0), "auth renewal: no expiresAt is not known to be near expiry")
+    check(Policy.recentRenewalWindow == 300, "auth renewal: a login this app renewed in the last 5 minutes is not renewed again for a switch")
+    check(must(fingerprint, nil, after: 0) && must(fingerprint, nil, after: 100_000),
+          "auth renewal: with no renewal on record every switch target is renewed, whatever its expiry (the old 60-minute window is gone: a token with hours left is renewed too)")
+    check(!must(fingerprint, renewal, after: 0) && !must(fingerprint, renewal, after: 120) && !must(fingerprint, renewal, after: 299),
+          "auth renewal: renewed by this app under 5 minutes ago: skip the second renewal (the verification read that renewed it, then the switch)")
+    check(must(fingerprint, renewal, after: 300) && must(fingerprint, renewal, after: 3600),
+          "auth renewal: 5 minutes after, the server has not answered for it lately: renew again")
+    check(must("0000000000000000", renewal, after: 10) && must(nil, renewal, after: 10),
+          "auth renewal: the saved login changed since (Claude Code rotated it while it was live, a sign-in): the record no longer applies, renew")
+    check(must(fingerprint, renewal, after: -5), "auth renewal: a clock that went backwards proves nothing about how long ago it was: renew")
 
     // What each way a renewal can end means for the switch.
     typealias O = BackupRefreshOutcome
     let table: [(O, Policy.Step, Policy.Step)] = [
-        // outcome,                       the access token is expired or refused, it is only near expiry
+        // outcome,                       the access token is expired or refused, it is still good
         (.refreshed("{}"),                .useRenewedLogin,                       .useRenewedLogin),
         (.grantRejected,                  .refuseNotRenewable,                    .refuseNeedsSignIn),
         (.rotationLost,                   .refuseNotRenewable,                    .refuseNeedsSignIn),
         (.belongsToAnotherAccount("o@x"), .refuseBelongsToAnother("o@x"),         .refuseBelongsToAnother("o@x")),
         (.sameGrantAsAnotherLogin,        .refuseNotRenewable,                    .switchWithoutRenewal),
-        (.noBackup,                       .refuseNotRenewable,                    .switchWithoutRenewal),
+        (.noBackup,                       .refuseNotRenewable,                    .refuseNotRenewable),
         (.unreachable,                    .switchWithoutRenewal,                  .switchWithoutRenewal),
         (.storeUnavailable,               .switchWithoutRenewal,                  .switchWithoutRenewal),
     ]
-    for (outcome, whenDead, whenNear) in table {
+    for (outcome, whenDead, whenGood) in table {
         check(Policy.step(after: outcome, loginIsDead: true) == whenDead, "auth renewal: \(outcome) with an expired or refused token -> \(whenDead)")
-        check(Policy.step(after: outcome, loginIsDead: false) == whenNear, "auth renewal: \(outcome) with a token only near expiry -> \(whenNear)")
+        check(Policy.step(after: outcome, loginIsDead: false) == whenGood, "auth renewal: \(outcome) with a token that is still good -> \(whenGood)")
     }
-    check(table.allSatisfy { outcome, _, _ in
-        let refuses = Policy.step(after: outcome, loginIsDead: false).refusesSwitch
-        return refuses == (outcome.requiresReauth)
-    }, "auth renewal: a switch to a near-expiry target is refused exactly when the server's verdict says the account must sign in again")
-    check(!BackupRefreshOutcome.unreachable.requiresReauth && !BackupRefreshOutcome.storeUnavailable.requiresReauth,
-          "auth renewal: no verdict from Anthropic (offline, 5xx, 429) never flags an account or blocks a switch to a near-expiry target")
+    check(table.filter { $0.0 != .noBackup }.allSatisfy { outcome, _, _ in
+        Policy.step(after: outcome, loginIsDead: false).refusesSwitch == outcome.requiresReauth
+    }, "auth renewal: a switch to a target whose token is still good is refused exactly when the server's verdict says the account must sign in again")
+    check(Policy.step(after: .noBackup, loginIsDead: false).refusesSwitch,
+          "auth renewal: a backup that vanished between the lookup and the renewal refuses the switch, in both cases (nothing is switched from a copy that may be stale)")
+    check(!BackupRefreshOutcome.unreachable.requiresReauth && !BackupRefreshOutcome.storeUnavailable.requiresReauth
+          && !Policy.step(after: .unreachable, loginIsDead: false).refusesSwitch && !Policy.step(after: .storeUnavailable, loginIsDead: false).refusesSwitch,
+          "auth renewal: no verdict from Anthropic (offline, 5xx, 429, timeout) never flags an account and never blocks the switch: it goes ahead as it always did")
+
+    // F2: after a renewal that succeeded, the switch carries on with the renewed pair, whatever the re-read of the store says.
+    typealias Saved = (token: String, details: String)
+    func after(reread: Saved?) -> Saved { Policy.savedLoginAfterRenewal(renewed: "RENEWED", detailsBefore: "details-before", reread: reread) }
+    check(after(reread: nil) == ("RENEWED", "details-before"),
+          "auth renewal: the store cannot be read back after a renewal that worked: the switch still writes the RENEWED login, never the spent pair read before")
+    check(after(reread: ("SPENT-BEFORE-THE-RENEWAL", "details-now")) == ("RENEWED", "details-now"),
+          "auth renewal: a re-read that still shows the old token cannot bring the spent pair back; only the identity details are taken from it")
+    check(after(reread: ("RENEWED", "details-now")) == ("RENEWED", "details-now"), "auth renewal: a re-read that agrees changes nothing")
+
+    // What auto-switch does once the switch to its target has come back.
+    let active = UUID(), target = UUID(), other = UUID()
+    func attempt(now: UUID?, switchable: Bool) -> Policy.AfterAttempt {
+        Policy.afterSwitchAttempt(activeNow: now, previousActive: active, target: target, targetStillSwitchable: switchable)
+    }
+    check(attempt(now: target, switchable: true) == .completed && attempt(now: target, switchable: false) == .completed,
+          "auth attempt: the target is live: completed")
+    check(attempt(now: active, switchable: false) == .targetNeedsSignIn,
+          "auth attempt: still on the old account and the target is no longer switchable (renewing it showed the server refused it): choose the next candidate")
+    check(attempt(now: active, switchable: true) == .didNotComplete,
+          "auth attempt: still on the old account for any other reason: stop, so a failing switch cannot loop")
+    check(attempt(now: other, switchable: false) == .didNotComplete && attempt(now: nil, switchable: false) == .didNotComplete,
+          "auth attempt: the user moved to a third account meanwhile, or none is active: stop")
 }
 
 // MARK: - AppState is not in the harness: pin the wiring in its source
@@ -493,11 +578,22 @@ private func authComesBefore(_ first: String, _ second: String, in text: String)
     return a.lowerBound < b.lowerBound
 }
 
+/// The text from `start` up to (not including) `end`, or to the end of `text` when `end` is nil or absent.
+private func authSlice(_ text: String, from start: String, to end: String? = nil) -> String {
+    guard let a = text.range(of: start) else { return "" }
+    let rest = text[a.lowerBound...]
+    guard let end, let b = rest.dropFirst(start.count).range(of: end) else { return String(rest) }
+    return String(rest[rest.startIndex..<b.lowerBound])
+}
+
+private func authCount(_ needle: String, in text: String) -> Int { text.components(separatedBy: needle).count - 1 }
+
 @MainActor private func wiringPins() {
     let app = authSource("PixelSwitch/AppState.swift")
     let claude = authSource("PixelSwitch/Services/ClaudeService.swift")
     let engine = authSource("PixelSwitch/Services/AutoSwitchEngine.swift")
-    check(!app.isEmpty && !claude.isEmpty && !engine.isEmpty, "auth pins: the source files are found from the repo root")
+    let health = authSource("PixelSwitch/Services/AuthHealth.swift")
+    check(!app.isEmpty && !claude.isEmpty && !engine.isEmpty && !health.isEmpty, "auth pins: the source files are found from the repo root")
 
     let evaluate = authMember(app, startingAt: "private func evaluateAutoSwitch() async {")
     check(evaluate.contains("isUnusable: { [unowned self] in self.isUnusable($0) }")
@@ -508,14 +604,15 @@ private func authComesBefore(_ first: String, _ second: String, in text: String)
     check(unusable.contains("hasNoSubscription(account)") && unusable.contains("leavesDeadLogin(account)"),
           "auth pins: unusable means no subscription or a dead live login the policy lets auto-switch leave")
     let stayingPutNote = authMember(app, startingAt: "private func noteDeadLoginStayingPut(_ active: Account) {")
-    check(evaluate.contains("if leavesDeadLogin(active) {") && evaluate.contains("noteDeadLoginStayingPut(active)")
+    check(evaluate.contains("if leavingDeadLogin {") && evaluate.contains("noteDeadLoginStayingPut(active)")
           && stayingPutNote.contains("if note != lastStayingPutNote"),
           "auth pins: a dead active account with no healthy target (Manual only included) is logged once per change, not on every evaluation")
     let leaves = authMember(app, startingAt: "private func leavesDeadLogin(_ account: Account) -> Bool {")
-    check(leaves.contains("DeadLoginPolicy.leavesAutomatically(") && leaves.contains("liveLoginWatch.confirmedDeadAccount == account.id")
-          && leaves.contains("windowRule(for: account).manualOnly") && leaves.contains("autoSwitchEnabled"),
-          "auth pins: a dead login is left only for the account the watch confirmed, under auto-switch, Manual only or not")
+    check(leaves.contains("DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: autoSwitchEnabled)") && leaves.contains("liveLoginWatch.confirmedDeadAccount == account.id")
+          && !leaves.contains("anualOnly"),
+          "auth pins: a dead login is left only for the account the watch confirmed, under auto-switch, and Manual only does not decide it")
 
+    // The 30-second look: what it wires up, as the F4 finding asked (deleting any of these leaves no switch within a minute).
     let tick = authMember(app, startingAt: "private func authWatchTick() async {")
     check(!tick.isEmpty && tick.contains("guard !isAuthWatchTicking, !isSwitching, !isLoggingIn")
           && tick.contains("isAuthWatchTicking = true") && tick.contains("defer { isAuthWatchTicking = false }"),
@@ -525,9 +622,23 @@ private func authComesBefore(_ first: String, _ second: String, in text: String)
           "auth pins: the watch reads the credential quietly, judges its shape, and only then may spawn the CLI")
     check(!tick.contains("refreshBackupInPlace") && !tick.contains("refreshOAuthCredentials") && !tick.contains("writeClaudeToken")
           && !tick.contains("performSwitch") && !tick.contains("switchTo("),
-          "auth pins: the watch never renews, rewrites or switches the live login itself")
+          "auth pins: the look itself never renews, rewrites or switches the live login; it only flags the account and asks auto-switch")
     check(tick.contains("guard !isSwitching, !isLoggingIn, activeAccount?.id == active.id"),
           "auth pins: after the CLI answers, the watch drops its read if a switch or sign-in began meanwhile")
+    check(tick.contains("let reaction = DeadLoginPolicy.reaction(to: change, autoSwitchEnabled: autoSwitchEnabled)")
+          && authComesBefore("liveLoginWatch.observe(", "DeadLoginPolicy.reaction(to: change", in: tick)
+          && tick.contains("if reaction.flagActive { flagNeedsReauth(active) }")
+          && tick.contains("if let evaluations = reaction.evaluations { deadLoginEvaluationsLeft = evaluations }")
+          && tick.contains("if reaction.refreshAfter, !isRefreshing { Task { await self.refresh() } }"),
+          "auth pins: the look flags the active account (flagNeedsReauth), grants auto-switch its tries, and refreshes on a recovery, each as the policy's reaction says")
+    check(tick.contains("DeadLoginPolicy.mayEvaluateNow(") && tick.contains("evaluationsLeft: deadLoginEvaluationsLeft")
+          && tick.contains("deadLoginEvaluationsLeft -= 1") && tick.contains("await evaluateAutoSwitch()")
+          && authComesBefore("DeadLoginPolicy.mayEvaluateNow(", "deadLoginEvaluationsLeft -= 1", in: tick)
+          && authComesBefore("deadLoginEvaluationsLeft -= 1", "await evaluateAutoSwitch()", in: tick)
+          && authComesBefore("if reaction.flagActive", "await evaluateAutoSwitch()", in: tick),
+          "auth pins: after flagging, the look runs auto-switch (evaluateAutoSwitch) now, using one try each time, so a failed verification is retried on the next look")
+    check(!tick.contains("manualOnly") && !tick.contains("anualOnly") && !app.contains("StayReason.manualOnly") && !app.contains(".stayAndShow(.manualOnly)"),
+          "auth pins: nothing in the look still branches on Manual only (the branch was unreachable)")
     let startRefresh = authMember(app, startingAt: "func startAutoRefresh(interval: TimeInterval = 300) {")
     let stopRefresh = authMember(app, startingAt: "func stopAutoRefresh() {")
     check(startRefresh.contains("startAuthWatch()") && stopRefresh.contains("stopAuthWatch()"),
@@ -541,25 +652,95 @@ private func authComesBefore(_ first: String, _ second: String, in text: String)
               "auth pins: \(signature.dropFirst(13).prefix(16)) (a usage 401, 429, 5xx or no network) never touches the live-login watch")
     }
 
-    let validated = authMember(app, startingAt: "private func validatedTargetBackup(for account: Account) async -> Result<AccountBackup, SwitchProblem> {")
-    check(validated.contains("TargetRenewalPolicy.mustRenewBeforeSwitch(") && validated.contains("TargetRenewalPolicy.step(after:")
-          && authComesBefore("LoginGate.targetProblem(", "TargetRenewalPolicy.mustRenewBeforeSwitch(", in: validated),
-          "auth pins: validatedTargetBackup renews a target that expires within 60 minutes, through the existing renew path, after the usable-login check")
-    check(!validated.contains("claudeService.refreshOAuthCredentials"), "auth pins: and never calls the token endpoint itself")
+    // F1: a sign-in, a switch and an adoption each replace the live login, so each forgets what the watch confirmed about the old one.
+    let replaced = authMember(app, startingAt: "private func liveLoginReplaced() {")
+    check(replaced.contains("liveLoginWatch.reset()") && replaced.contains("deadLoginEvaluationsLeft = 0"),
+          "auth pins: liveLoginReplaced forgets the confirmed-dead login and the tries auto-switch had left")
+    let newSignIn = authMember(app, startingAt: "private func finishNewAccountSignIn() async -> SignInState {")
+    let existingCase = authSlice(newSignIn, from: "case .existing(let existingId):", to: "case .new(let email):")
+    let newCase = authSlice(newSignIn, from: "case .new(let email):")
+    check(existingCase.contains("liveLoginReplaced()") && authComesBefore("liveLoginReplaced()", "lastAutoSwitchAt = Date()", in: existingCase),
+          "auth pins: signing in as an account that already exists forgets the dead-login state before the grace period starts")
+    check(newCase.contains("liveLoginReplaced()") && authComesBefore("liveLoginReplaced()", "await refresh()", in: newCase),
+          "auth pins: adding a new account forgets the dead-login state before the refresh")
+    let reauth = authMember(app, startingAt: "private func finishReauthentication(accountId: UUID, expectedEmail: String) async -> SignInState {")
+    check(reauth.contains("liveLoginReplaced()") && authComesBefore("liveLoginReplaced()", "await refresh()", in: reauth)
+          && authComesBefore("liveLoginReplaced()", "lastAutoSwitchAt = Date()", in: reauth),
+          "auth pins: re-signing the dead account forgets the confirmed-dead state before the refresh, so auto-switch does not move you off the account you just repaired")
+    let adopt = authMember(app, startingAt: "private func adoptActive(_ account: Account) {")
+    check(adopt.contains("liveLoginReplaced()"), "auth pins: following the live login to another account forgets the dead-login state")
 
+    // F3: renew before EVERY switch (not only a login about to expire), through the existing path, in one place.
+    let validated = authMember(app, startingAt: "private func validatedTargetBackup(for account: Account) async -> Result<AccountBackup, SwitchProblem> {")
+    check(validated.contains("TargetRenewalPolicy.mustRenewBeforeSwitch(")
+          && validated.contains("savedAccessTokenFingerprint: TokenFingerprint.of(login.accessToken)") && validated.contains("lastRenewal: lastRenewals[account.id]")
+          && validated.contains("TargetRenewalPolicy.step(after:")
+          && authComesBefore("LoginGate.targetProblem(", "TargetRenewalPolicy.mustRenewBeforeSwitch(", in: validated),
+          "auth pins: validatedTargetBackup renews the target before every switch unless this app renewed that login minutes ago, after the usable-login check")
+    check(!validated.contains("renewWithin") && !validated.contains("mustRenewSoon") && !validated.contains("expires within an hour"),
+          "auth pins: the 60-minute window is gone from the switch path")
+    check(!validated.contains("claudeService.refreshOAuthCredentials"), "auth pins: and never calls the token endpoint itself")
+    check(authCount("TargetRenewalPolicy.mustRenewBeforeSwitch(", in: app) == 1 && !authMember(app, startingAt: "func startAutoRefresh(interval: TimeInterval = 300) {").contains("lastRenewals")
+          && !authMember(app, startingAt: "private func startAuthWatch() {").contains("lastRenewals"),
+          "auth pins: the renewal is asked in one place, the switch (no timer renews inactive accounts)")
+    let refreshInPlace = authMember(app, startingAt: "private func refreshBackupInPlace(for account: Account) async -> BackupRefreshOutcome {")
+    check(refreshInPlace.contains("lastRenewals[account.id] = TargetRenewalPolicy.Renewal(") && refreshInPlace.contains("TokenFingerprint.of("),
+          "auth pins: a renewal this app completes is remembered by the access token it produced (a fingerprint), so the switch can skip a second one")
+
+    // F2: never write the spent pair after a renewal that worked.
+    check(validated.contains("TargetRenewalPolicy.savedLoginAfterRenewal(") && validated.contains("backup = AccountBackup(token: saved.token, oauthAccount: saved.details)")
+          && !validated.contains("{ backup = current }"),
+          "auth pins: after a renewal the switch carries on with the renewed login, even when the store cannot be read back (never the spent pair)")
+
+    // The switch off a dead login.
     let perform = authMember(app, startingAt: "func performSwitch(to account: Account) async throws {")
-    check(perform.contains("settleLeftLiveLogin(") && authComesBefore("noteCredentialChanged(for: account)", "settleLeftLiveLogin(", in: perform)
-          && authComesBefore("settleLeftLiveLogin(", "await refresh()", in: perform),
-          "auth pins: after a switch off a dead login, the account just left gets the server's verdict before the refresh")
+    check(perform.contains("let leftDeadLogin = liveLoginWatch.confirmedDeadAccount") && perform.contains("liveLoginReplaced()")
+          && authComesBefore("let leftDeadLogin = liveLoginWatch.confirmedDeadAccount", "liveLoginReplaced()", in: perform)
+          && authComesBefore("noteCredentialChanged(for: account)", "settleLeftLiveLogin(", in: perform),
+          "auth pins: a switch off a dead login remembers which account it left, then forgets the dead-login state, after the credentials changed")
+    check(perform.contains("Task { await self.settleLeftLiveLogin(leftDeadLogin) }") && !perform.contains("await settleLeftLiveLogin("),
+          "auth pins: the check of the account just left runs after the switching flag is released, not inside it (it could hold the flag for 75 seconds)")
     let settle = authMember(app, startingAt: "private func settleLeftLiveLogin(")
     check(settle.contains("refreshBackupInPlace(for:") && !settle.contains("keychain.readClaudeToken()"),
           "auth pins: the verdict is the saved login's renewal through the existing path; the live login is not touched")
+    check(settle.contains("noteCredentialChanged(for: left)") && !settle.contains("readNext: false"),
+          "auth pins: a settle that renewed the account clears its 'expired' card and has it read next, so it is switchable again at once")
+    check(!settle.contains("Not assumed: the server decides"), "auth pins: the settle comment no longer claims the server always decides")
 
-    check(evaluate.contains("!isSwitchable(target)") && evaluate.contains("trying next"),
-          "auth pins: when a switch fails because the target needs sign-in, auto-switch moves on to the next candidate")
+    // The cause in the log for a dead-login switch; the event keeps the engine's trigger.
+    check(evaluate.contains("let leavingDeadLogin = leavesDeadLogin(active)") && evaluate.contains("let ruleName = ")
+          && evaluate.contains("Rule \\(ruleName)") && evaluate.contains("Switching to \\(target.id) by rule \\(ruleName)")
+          && evaluate.contains("needs sign-in, and no candidate verified; staying put")
+          && !evaluate.contains("case .noSubscription: log.info(\"[autoSwitch] No subscription on the active account, and no candidate verified; staying put\")"),
+          "auth pins: a switch off a dead login says needsSignIn in the log, not 'No subscription'")
+    check(evaluate.contains("AutoSwitchRecord(from: active.id, to: target.id, limit: limit, trigger: trigger,"),
+          "auth pins: the autoSwitched event still carries the engine's trigger (the remote-control schema is unchanged)")
+
+    // When the switch to a candidate fails because its saved login was refused, auto-switch moves on to the next one.
+    let afterAttempt = authSlice(evaluate, from: "switch TargetRenewalPolicy.afterSwitchAttempt(")
+    let needsSignInCase = authSlice(afterAttempt, from: "case .targetNeedsSignIn:", to: "case .didNotComplete:")
+    check(afterAttempt.contains("activeNow: activeAccount?.id") && afterAttempt.contains("targetStillSwitchable: isSwitchable(target)")
+          && needsSignInCase.contains("freshRequestBudget += 1") && needsSignInCase.contains("continue")
+          && authSlice(afterAttempt, from: "case .completed:", to: "case .targetNeedsSignIn:").contains("lastAutoSwitch = AutoSwitchRecord("),
+          "auth pins: a refused candidate (flagged by renewing it) is skipped and the next one is tried, with one more fresh reading allowed")
+
+    // The CLI's errors are sorted into the pure StatusFailure by an exhaustive switch (no `default`).
+    let probeBody = authMember(claude, startingAt: "func probeAuthStatus() async -> AuthHealth.CLIProbe {")
+    check(probeBody.contains("AuthHealth.probe(exitedZeroLoggedIn: status.loggedIn)") && probeBody.contains("AuthHealth.probe(after: Self.authStatusFailure(of: error))"),
+          "auth pins: probeAuthStatus maps a CLI that answered by what it said, and one that did not by AuthHealth.probe(after:)")
+    let mapping = authMember(claude, startingAt: "static func authStatusFailure(of error: Error) -> AuthHealth.StatusFailure {")
+    check(mapping.contains("case .cliError: return .exitedNonZero") && mapping.contains("case .timedOut: return .timedOut")
+          && mapping.contains("case .processLaunchFailed: return .couldNotStart") && mapping.contains("case .invalidOutput: return .unreadableOutput")
+          && mapping.contains("guard let failure = error as? ClaudeServiceError else { return .unreadableOutput }") && !mapping.contains("default:"),
+          "auth pins: only a CLI that exited non-zero is exitedNonZero; a timeout, a launch failure and unreadable output are their own, and an unlisted error cannot compile")
 
     // The engine, the conformance vectors and the Python port are not touched by this work.
     check(!engine.contains("needsSignIn") && !engine.contains("deadLogin") && !engine.contains("AuthHealth"),
           "auth pins: AutoSwitchEngine.swift knows nothing of this (the 150 conformance vectors stay frozen)")
     check(claude.contains("func probeAuthStatus() async -> AuthHealth.CLIProbe"), "auth pins: ClaudeService maps the CLI's answer to a CLIProbe")
+
+    // Stale API and comments removed.
+    check(!health.contains("activeIsManualOnly") && !health.contains("case manualOnly") && !app.contains("activeIsManualOnly")
+          && !app.contains("not Manual only") && !health.contains("so the switch in AppState needs no edit"),
+          "auth pins: the unused StayReason.manualOnly, the ignored activeIsManualOnly parameter and the 'not Manual only' comments are gone")
 }
