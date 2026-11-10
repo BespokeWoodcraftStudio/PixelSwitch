@@ -331,14 +331,15 @@ private let blankedCredential = credential(access: "", refresh: "", expiresAt: 0
           "auth policy: auto-switch on, an ordinary account: leave it now")
     check(Policy.response(autoSwitchEnabled: false, activeIsManualOnly: false) == .stayAndShow(.autoSwitchOff),
           "auth policy: auto-switch off: the user's choice stands; the account is only shown as needing sign-in")
-    check(Policy.response(autoSwitchEnabled: true, activeIsManualOnly: true) == .stayAndShow(.manualOnly),
-          "auth policy: a Manual only account is not left on the app's own say-so: flagged and shown only")
+    check(Policy.response(autoSwitchEnabled: true, activeIsManualOnly: true) == .leaveNow,
+          "auth policy: a Manual only account with a dead login is left too (CTO, 2026-11-10: Manual only means never move me for usage reasons, not keep me when I cannot work at all)")
     check(Policy.response(autoSwitchEnabled: false, activeIsManualOnly: true) == .stayAndShow(.autoSwitchOff),
-          "auth policy: auto-switch off wins over Manual only as the reason")
+          "auth policy: auto-switch off stands for a Manual only account too: flagged and shown, nothing moves")
     check(Policy.leavesAutomatically(autoSwitchEnabled: true, activeIsManualOnly: false)
-          && !Policy.leavesAutomatically(autoSwitchEnabled: true, activeIsManualOnly: true)
-          && !Policy.leavesAutomatically(autoSwitchEnabled: false, activeIsManualOnly: false),
-          "auth policy: only an ordinary account under auto-switch is fed to the engine as unusable")
+          && Policy.leavesAutomatically(autoSwitchEnabled: true, activeIsManualOnly: true)
+          && !Policy.leavesAutomatically(autoSwitchEnabled: false, activeIsManualOnly: false)
+          && !Policy.leavesAutomatically(autoSwitchEnabled: false, activeIsManualOnly: true),
+          "auth policy: under auto-switch every active account with a dead login is fed to the engine as unusable, Manual only or not; with auto-switch off none is")
 }
 
 // MARK: - The unchanged engine, fed a dead live login through isUnusable
@@ -364,8 +365,9 @@ private func authSample(_ session: Double?, _ weekly: Double?) -> UsageAPIRespon
     /// whether the active account is fed as unusable; `unswitchable` stands for
     /// accounts flagged needsReauth (`isSwitchable` is false for them).
     func plan(active: Account, candidates: [Account], _ usage: [UUID: UsageAPIResponse], autoSwitch: Bool = true,
-              unswitchable: Set<UUID> = [], strategy: AutoSwitchStrategy = .mostRoom) -> String {
-        let dead: Set<UUID> = DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: autoSwitch, activeIsManualOnly: active.switchThreshold == 0) ? [active.id] : []
+              unswitchable: Set<UUID> = [], noSubscription: Set<UUID> = [], strategy: AutoSwitchStrategy = .mostRoom) -> String {
+        var dead = noSubscription
+        if DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: autoSwitch, activeIsManualOnly: active.switchThreshold == 0) { dead.insert(active.id) }
         let result = AutoSwitchEngine.planWindowed(
             active: active, candidates: candidates, usageByAccount: usage,
             isSwitchable: { !unswitchable.contains($0.id) }, isUnusable: { dead.contains($0.id) },
@@ -387,8 +389,27 @@ private func authSample(_ session: Double?, _ weekly: Double?) -> UsageAPIRespon
           "auth engine: a dead login bypasses the 5-minute cooldown; a live one does not")
     check(plan(active: a, candidates: [b], [b.id: authSample(40, 40)], autoSwitch: false) == "stay",
           "auth engine: with auto-switch off the dead account is not fed to the engine, so nothing moves")
-    check(plan(active: manualA, candidates: [b], [b.id: authSample(40, 40)]) == "stay",
-          "auth engine: a Manual only dead account is not left by the engine")
+    // Manual only: left for a healthy target, like the 1.6 noSubscription rule.
+    check(plan(active: manualA, candidates: [b], [b.id: authSample(40, 40)]) == "noSubscription: B"
+          && plan(active: manualA, candidates: [b], [a.id: authSample(5, 5), b.id: authSample(40, 40)]) == "noSubscription: B",
+          "auth engine: a Manual only account with a dead login IS left for a healthy target, with no reading for it at all")
+    check(plan(active: manualA, candidates: [b], [b.id: authSample(40, 40)], autoSwitch: false) == "stay",
+          "auth engine: a Manual only dead account with auto-switch off is not moved")
+    check(plan(active: manualA, candidates: [b], [b.id: authSample(95, 95)]) == "stay"
+          && plan(active: manualA, candidates: [b], [:]) == "stay"
+          && plan(active: manualA, candidates: [b], [b.id: authSample(40, 40)], unswitchable: [b.id]) == "stay"
+          && DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: true, activeIsManualOnly: true),
+          "auth engine: a Manual only dead account with no healthy target stays put, and is the case AppState logs once per change (leavesDeadLogin routes it to noteDeadLoginStayingPut)")
+    check(plan(active: manualA, candidates: [manualB, b, c], [manualB.id: authSample(0, 0), b.id: authSample(10, 10), c.id: authSample(40, 40)],
+               unswitchable: [b.id], noSubscription: [c.id]) == "stay"
+          && plan(active: manualA, candidates: [manualB, b, c], [manualB.id: authSample(0, 0), b.id: authSample(10, 10), c.id: authSample(40, 40)],
+                  unswitchable: [b.id]) == "noSubscription: C",
+          "auth engine: from a Manual only dead account the target is never Manual only, never one that needs sign-in, never one with no subscription")
+    check(!AutoSwitchEngine.cooldownHolds(lastSwitchAt: now.addingTimeInterval(-60), cooldown: 300,
+                                          activeUnusable: DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: true, activeIsManualOnly: true), asOf: now)
+          && AutoSwitchEngine.cooldownHolds(lastSwitchAt: now.addingTimeInterval(-60), cooldown: 300,
+                                            activeUnusable: DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: false, activeIsManualOnly: true), asOf: now),
+          "auth engine: the cooldown is bypassed for a Manual only dead account under auto-switch, and not when auto-switch is off")
     check(plan(active: a, candidates: [b], [b.id: authSample(40, 40)], unswitchable: [b.id]) == "stay",
           "auth engine: an account that needs sign-in is never the target; with no other, stay put")
     check(plan(active: a, candidates: [b, c], [b.id: authSample(10, 10), c.id: authSample(40, 40)], unswitchable: [b.id]) == "noSubscription: C",
@@ -486,10 +507,14 @@ private func authComesBefore(_ first: String, _ second: String, in text: String)
     let unusable = authMember(app, startingAt: "private func isUnusable(_ account: Account) -> Bool {")
     check(unusable.contains("hasNoSubscription(account)") && unusable.contains("leavesDeadLogin(account)"),
           "auth pins: unusable means no subscription or a dead live login the policy lets auto-switch leave")
+    let stayingPutNote = authMember(app, startingAt: "private func noteDeadLoginStayingPut(_ active: Account) {")
+    check(evaluate.contains("if leavesDeadLogin(active) {") && evaluate.contains("noteDeadLoginStayingPut(active)")
+          && stayingPutNote.contains("if note != lastStayingPutNote"),
+          "auth pins: a dead active account with no healthy target (Manual only included) is logged once per change, not on every evaluation")
     let leaves = authMember(app, startingAt: "private func leavesDeadLogin(_ account: Account) -> Bool {")
     check(leaves.contains("DeadLoginPolicy.leavesAutomatically(") && leaves.contains("liveLoginWatch.confirmedDeadAccount == account.id")
           && leaves.contains("windowRule(for: account).manualOnly") && leaves.contains("autoSwitchEnabled"),
-          "auth pins: a dead login is left only for the account the watch confirmed, under auto-switch, and never for a Manual only one")
+          "auth pins: a dead login is left only for the account the watch confirmed, under auto-switch, Manual only or not")
 
     let tick = authMember(app, startingAt: "private func authWatchTick() async {")
     check(!tick.isEmpty && tick.contains("guard !isAuthWatchTicking, !isSwitching, !isLoggingIn")

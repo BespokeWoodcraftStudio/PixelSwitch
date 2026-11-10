@@ -211,15 +211,19 @@ struct LiveLoginWatch {
 /// What auto-switch does when the ACTIVE account's live login is confirmed dead.
 ///
 /// The account is always flagged (`needsReauth`), logged once per change and
-/// shown as needing sign-in. Whether the app also moves you off it follows the
-/// user's own settings: with auto-switch off, or the account set to Manual only,
-/// their choice stands. Otherwise it is left at once, through the unchanged
-/// engine's `isUnusable` input, which bypasses the 5-minute cooldown, never picks
-/// an account that needs sign-in or has no subscription or is Manual only, and
-/// takes the user's strategy for the ordering (the 1.6 `noSubscription` rule).
+/// shown as needing sign-in. With auto-switch off the user's choice stands and
+/// nothing moves. With it on, the account is left at once, Manual only or not
+/// (CTO decision, 2026-11-10: Manual only means "never move me for usage
+/// reasons", not "keep me when I cannot work at all"), through the unchanged
+/// engine's `isUnusable` input, exactly like the 1.6 `noSubscription` rule: it
+/// bypasses the 5-minute cooldown, never picks an account that needs sign-in,
+/// has no subscription, is parked or is Manual only, and takes the user's
+/// strategy for the ordering.
 enum DeadLoginPolicy {
     enum StayReason: Equatable {
         case autoSwitchOff
+        /// No longer returned (Manual only is left, see above); kept so the
+        /// switch in AppState needs no edit.
         case manualOnly
     }
 
@@ -228,10 +232,10 @@ enum DeadLoginPolicy {
         case stayAndShow(StayReason)
     }
 
+    /// `activeIsManualOnly` no longer changes the answer; it stays in the
+    /// signature so callers need no edit.
     static func response(autoSwitchEnabled: Bool, activeIsManualOnly: Bool) -> Response {
-        if !autoSwitchEnabled { return .stayAndShow(.autoSwitchOff) }
-        if activeIsManualOnly { return .stayAndShow(.manualOnly) }
-        return .leaveNow
+        autoSwitchEnabled ? .leaveNow : .stayAndShow(.autoSwitchOff)
     }
 
     /// Whether the engine is told the active account is unusable.
