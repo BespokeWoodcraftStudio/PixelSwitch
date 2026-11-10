@@ -416,3 +416,118 @@ enum TargetRenewalPolicy {
         return .didNotComplete
     }
 }
+
+/// What a refresh request that came back does to the saved login it was made for.
+///
+/// Two findings of the re-review of the auth-expiry work (2026-11-10), both about
+/// the time the renewal spends waiting on the network:
+///
+/// - A refresh that WORKED has rotated the refresh token, so the pair read before
+///   it is spent and the new pair is the account's only valid login. Until it is
+///   saved, a crash, a Quit or an update relaunch loses it. It is therefore saved
+///   FIRST, and only then is the API asked whose it is (that lookup can take 15
+///   seconds).
+/// - A renewal belongs to the saved login it was made for. When the user signs
+///   that account in again while the request is in flight, a late refusal must not
+///   flag the fresh login, and a late success must not overwrite it.
+enum RenewalPersistence {
+    /// The saved login for one account, read after the request came back.
+    enum StoredLogin: Equatable {
+        /// A login is saved; the fingerprint of its access token (nil when it has none).
+        case login(accessTokenFingerprint: String?)
+        /// Nothing is saved any more (the account or its login was removed).
+        case missing
+        /// The store could not be read just now. Says nothing about whether it changed.
+        case unreadable
+    }
+
+    /// Whether the answer to a request made with the access token `madeFor` still
+    /// applies to what is saved now. It does not when the saved login is another
+    /// one (a sign-in replaced it) or gone. An unreadable store proves nothing, so
+    /// the answer stands: dropping a rotated pair that could still be written
+    /// would lose the account's only valid login.
+    static func stillApplies(madeFor: String?, stored: StoredLogin) -> Bool {
+        switch stored {
+        case .unreadable: return true
+        case .missing: return false
+        case .login(let now): return madeFor == nil || now == madeFor
+        }
+    }
+
+    /// Finishes a refresh that worked. `renewed` is the rotated credential,
+    /// `madeFor` the fingerprint of the access token the request was made with,
+    /// and `renewedFingerprint` the one of the access token it brought back. The
+    /// steps, in this order:
+    ///
+    /// 1. Is the saved login still the one the request was made for? If not, the
+    ///    answer is dropped (nil): nothing is saved, nothing asked.
+    /// 2. Save the rotated pair under the same account (`save` is the store's own
+    ///    save, which refuses a blank or partial login). One retry after a pause,
+    ///    checking again before it; two failures are `rotationLost`.
+    /// 3. Only then ask whose login it is (`otherOwner`: the email of ANOTHER
+    ///    account, or nil when it is this one's or the API cannot say). A login that
+    ///    is another account's is removed from this one, as it always was; if the
+    ///    saved login changed during that lookup, it is left alone (nil).
+    @MainActor
+    static func settleRotation(renewed: String, renewedFingerprint: String?, madeFor: String?,
+                               storedNow: () -> StoredLogin,
+                               save: () -> Bool,
+                               pauseBeforeRetry: () async -> Void,
+                               otherOwner: () async -> String?,
+                               removeEntry: () -> Void) async -> BackupRefreshOutcome? {
+        guard stillApplies(madeFor: madeFor, stored: storedNow()) else { return nil }
+        if !save() {
+            await pauseBeforeRetry()
+            guard stillApplies(madeFor: madeFor, stored: storedNow()) else { return nil }
+            guard save() else { return .rotationLost }
+        }
+        guard let owner = await otherOwner() else { return .refreshed(renewed) }
+        guard stillApplies(madeFor: renewedFingerprint, stored: storedNow()) else { return nil }
+        removeEntry()
+        return .belongsToAnotherAccount(owner)
+    }
+}
+
+/// The refresh request itself (the POST to the OAuth token endpoint) and what its
+/// answer means for the grant.
+enum RenewalRequest {
+    /// Seconds without an answer before the request gives up. A switch waits for
+    /// this request (the dead-login rescue included), so the default of 60 seconds
+    /// would leave "Switching..." up for a minute. Same as the profile lookup.
+    static let timeout: TimeInterval = 15
+
+    static func urlRequest(url: URL, refreshToken: String, clientID: String) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": clientID,
+        ])
+        return request
+    }
+
+    /// What the server's answer says about the refresh token. `grantDead` means the
+    /// grant can never work again; `noVerdict` says nothing about it.
+    enum Verdict: Equatable {
+        case grantDead
+        case noVerdict
+    }
+
+    /// A reply that was not a success. A 200 that failed to parse is a schema change,
+    /// not a dead grant. Otherwise only a grant-terminal OAuth error means the
+    /// refresh token is dead (RFC 6749 section 5.2: `invalid_grant` covers expired,
+    /// revoked and invalid refresh tokens). Everything else (5xx, 429, 408, an
+    /// `invalid_request` from a request-shape mismatch) says nothing about the
+    /// token, and demanding re-authentication for it would be a pointless login.
+    static func verdict(httpStatus: Int, oauthError: String?) -> Verdict {
+        if httpStatus == 200 { return .noVerdict }
+        return oauthError == "invalid_grant" ? .grantDead : .noVerdict
+    }
+
+    /// No reply at all: a timeout, no connection, a cancelled request. Never a
+    /// verdict, so it never flags an account.
+    static func verdict(afterTransportError error: Error) -> Verdict { .noVerdict }
+}

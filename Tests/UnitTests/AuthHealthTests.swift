@@ -28,6 +28,8 @@ import Foundation
     probeMappingTests()
     engineTests()
     renewalTests()
+    rotationTests()
+    renewalRequestTests()
     wiringPins()
 }
 
@@ -558,6 +560,193 @@ private func authSample(_ session: Double?, _ weekly: Double?) -> UsageAPIRespon
           "auth attempt: the user moved to a third account meanwhile, or none is active: stop")
 }
 
+// MARK: - The rotated pair is saved first, and a renewal belongs to the login it was made for
+
+/// A saved login and a store, as the renewal sees them: what is saved, what the
+/// calls were, and a hook for whatever happens while the profile lookup or the
+/// retry pause is waiting.
+@MainActor private final class RotationRig {
+    var storedPair = "OLD-PAIR"
+    var stored: RenewalPersistence.StoredLogin = .login(accessTokenFingerprint: "old")
+    var saveResults: [Bool] = [true]
+    var owner: String?
+    var calls: [String] = []
+    /// What the store held at the moment the profile lookup began: what a crash there would leave.
+    var storeAtLookup: String?
+    var duringLookup: (() -> Void)?
+    var duringPause: (() -> Void)?
+    var finished = false
+
+    func run(madeFor: String? = "old") -> BackupRefreshOutcome? {
+        let result = ControlTestKit.wait { [self] in
+            let outcome = await RenewalPersistence.settleRotation(
+                renewed: "NEW-PAIR", renewedFingerprint: "new", madeFor: madeFor,
+                storedNow: { self.stored },
+                save: {
+                    self.calls.append("save")
+                    let ok = self.saveResults.isEmpty ? true : self.saveResults.removeFirst()
+                    if ok { self.storedPair = "NEW-PAIR"; self.stored = .login(accessTokenFingerprint: "new") }
+                    return ok
+                },
+                pauseBeforeRetry: { self.calls.append("pause"); self.duringPause?() },
+                otherOwner: { self.calls.append("lookup"); self.storeAtLookup = self.storedPair; self.duringLookup?(); return self.owner },
+                removeEntry: { self.calls.append("remove"); self.storedPair = "(removed)"; self.stored = .missing })
+            self.finished = true
+            return outcome
+        }
+        return result ?? nil
+    }
+}
+
+@MainActor private func rotationTests() {
+    typealias P = RenewalPersistence
+
+    // The pure decision: does the answer still belong to what is saved?
+    check(P.stillApplies(madeFor: "a", stored: .login(accessTokenFingerprint: "a")),
+          "auth rotation: the saved login is still the one the request was made for: the answer applies")
+    check(!P.stillApplies(madeFor: "a", stored: .login(accessTokenFingerprint: "b")),
+          "auth rotation: the saved login is another one now (a sign-in replaced it): the answer is dropped")
+    check(!P.stillApplies(madeFor: "a", stored: .login(accessTokenFingerprint: nil)) && !P.stillApplies(madeFor: "a", stored: .missing),
+          "auth rotation: the saved login has no access token or is gone (the account was removed): the answer is dropped")
+    check(P.stillApplies(madeFor: "a", stored: .unreadable),
+          "auth rotation: an unreadable store proves nothing, so a rotated pair is not thrown away on its account")
+    check(P.stillApplies(madeFor: nil, stored: .login(accessTokenFingerprint: "x")) && !P.stillApplies(madeFor: nil, stored: .missing),
+          "auth rotation: a request with no recorded token cannot be compared, but a removed login still drops it")
+
+    // A: the rotated pair is the account's only valid login, so it is saved BEFORE the 15-second profile lookup.
+    let crash = RotationRig()
+    let crashOutcome = crash.run()
+    check(crash.finished && crash.storeAtLookup == "NEW-PAIR",
+          "auth rotation: when the profile lookup begins the store already holds the rotated pair, so a crash, a Quit or a relaunch there loses nothing",
+          "the store held \(crash.storeAtLookup ?? "nil") when the lookup began")
+    check(crashOutcome == .refreshed("NEW-PAIR") && crash.calls == ["save", "lookup"],
+          "auth rotation: a renewal that worked saves, then asks whose login it is, and reports the renewed login",
+          "\(String(describing: crashOutcome)) \(crash.calls)")
+
+    let unsure = RotationRig()
+    check(unsure.run() == .refreshed("NEW-PAIR") && unsure.storedPair == "NEW-PAIR" && !unsure.calls.contains("remove"),
+          "auth rotation: the lookup cannot say whose it is: the saved rotated pair stays, nothing is removed")
+
+    let foreign = RotationRig()
+    foreign.owner = "other@example.com"
+    let foreignOutcome = foreign.run()
+    check(foreignOutcome == .belongsToAnotherAccount("other@example.com") && foreign.calls == ["save", "lookup", "remove"] && foreign.storedPair == "(removed)",
+          "auth rotation: a login the API says is another account's is removed from this account, as before (after the rotated pair was saved)",
+          "\(String(describing: foreignOutcome)) \(foreign.calls)")
+
+    // The save-check still decides: a pair that cannot be saved is never reported as renewed.
+    let lost = RotationRig()
+    lost.saveResults = [false, false]
+    let lostOutcome = lost.run()
+    check(lostOutcome == .rotationLost && lost.calls == ["save", "pause", "save"] && lost.storedPair == "OLD-PAIR",
+          "auth rotation: a save that fails twice (the store, or the refusal of a blank or partial login) is rotationLost, and no profile lookup is spent on it",
+          "\(String(describing: lostOutcome)) \(lost.calls)")
+    let blip = RotationRig()
+    blip.saveResults = [false, true]
+    check(blip.run() == .refreshed("NEW-PAIR") && blip.calls == ["save", "pause", "save", "lookup"],
+          "auth rotation: one failed save is retried once after a pause, as before")
+
+    // C: a renewal belongs to the login it was made for.
+    let resigned = RotationRig()
+    resigned.stored = .login(accessTokenFingerprint: "resigned")
+    resigned.storedPair = "RESIGNED-PAIR"
+    check(resigned.run() == nil && resigned.finished && resigned.calls.isEmpty && resigned.storedPair == "RESIGNED-PAIR",
+          "auth rotation: the user signed the account in again while the request was in flight: a late success writes nothing over the fresh login and asks nothing",
+          "\(resigned.calls) \(resigned.storedPair)")
+    let removed = RotationRig()
+    removed.stored = .missing
+    removed.storedPair = "(removed)"
+    check(removed.run() == nil && removed.calls.isEmpty && removed.storedPair == "(removed)",
+          "auth rotation: the account was removed while the request was in flight: no orphan credential is saved")
+    let unreadable = RotationRig()
+    unreadable.stored = .unreadable
+    check(unreadable.run() == .refreshed("NEW-PAIR") && unreadable.storedPair == "NEW-PAIR",
+          "auth rotation: an unreadable store at the check does not stop the rotated pair being saved")
+    let resignedDuringPause = RotationRig()
+    resignedDuringPause.saveResults = [false, false]
+    resignedDuringPause.duringPause = {
+        resignedDuringPause.stored = .login(accessTokenFingerprint: "resigned")
+        resignedDuringPause.storedPair = "RESIGNED-PAIR"
+    }
+    check(resignedDuringPause.run() == nil && resignedDuringPause.calls == ["save", "pause"] && resignedDuringPause.storedPair == "RESIGNED-PAIR",
+          "auth rotation: a re-sign during the retry pause drops the answer; it is not reported as a lost rotation, which would flag the repaired account")
+    let resignedDuringLookup = RotationRig()
+    resignedDuringLookup.owner = "other@example.com"
+    resignedDuringLookup.duringLookup = {
+        resignedDuringLookup.stored = .login(accessTokenFingerprint: "resigned")
+        resignedDuringLookup.storedPair = "RESIGNED-PAIR"
+    }
+    check(resignedDuringLookup.run() == nil && !resignedDuringLookup.calls.contains("remove") && resignedDuringLookup.storedPair == "RESIGNED-PAIR",
+          "auth rotation: a re-sign during the profile lookup: the fresh login is not removed on account of the old one's owner")
+}
+
+// MARK: - The refresh request
+
+/// A TCP listener on 127.0.0.1 that accepts connections (the kernel does) and never answers.
+private func silentServer() -> (port: UInt16, stop: () -> Void)? {
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    guard fd >= 0 else { return nil }
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_addr.s_addr = inet_addr("127.0.0.1")
+    let size = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, size) } }
+    var length = size
+    let named = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) } }
+    guard bound == 0, named == 0, listen(fd, 4) == 0 else { close(fd); return nil }
+    return (UInt16(bigEndian: address.sin_port), { close(fd) })
+}
+
+@MainActor private func renewalRequestTests() {
+    let url = URL(string: "https://example.invalid/v1/oauth/token")!
+    let request = RenewalRequest.urlRequest(url: url, refreshToken: "fake-refresh-token", clientID: "fake-client")
+    let body = (request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) }) as? [String: String] ?? [:]
+    check(request.httpMethod == "POST" && request.value(forHTTPHeaderField: "Content-Type") == "application/json"
+          && body == ["grant_type": "refresh_token", "refresh_token": "fake-refresh-token", "client_id": "fake-client"],
+          "auth request: the refresh request is a JSON POST of the refresh-token grant")
+    check(request.timeoutInterval == 15 && RenewalRequest.timeout == 15,
+          "auth request: the refresh request gives up after 15 seconds, not the default 60 (a switch waits for it)",
+          "timeoutInterval = \(request.timeoutInterval)")
+
+    // What a reply that is not a success says about the grant.
+    typealias V = RenewalRequest.Verdict
+    check(RenewalRequest.verdict(httpStatus: 400, oauthError: "invalid_grant") == .grantDead
+          && RenewalRequest.verdict(httpStatus: 401, oauthError: "invalid_grant") == .grantDead,
+          "auth request: only an invalid_grant refusal is a verdict on the grant")
+    let noVerdictReplies: [(Int, String?)] = [(200, nil), (200, "invalid_grant"), (400, "invalid_request"), (400, nil), (401, nil), (403, nil), (408, nil), (429, nil), (500, nil), (502, nil), (503, "overloaded_error")]
+    check(noVerdictReplies.allSatisfy { RenewalRequest.verdict(httpStatus: $0.0, oauthError: $0.1) == V.noVerdict },
+          "auth request: a 200 that did not parse, a 4xx that is not invalid_grant, a 408, a 429 and a 5xx say nothing about the grant")
+
+    // No reply at all: never a verdict, so never a flag.
+    let transportErrors: [Error] = [URLError(.timedOut), URLError(.notConnectedToInternet), URLError(.networkConnectionLost),
+                                    URLError(.cannotConnectToHost), URLError(.cancelled), NSError(domain: "x", code: 1)]
+    check(transportErrors.allSatisfy { RenewalRequest.verdict(afterTransportError: $0) == .noVerdict },
+          "auth request: a timeout, no connection or a cancelled request is no verdict on the grant")
+
+    // The real thing: a server that never answers, a request built the way the app builds it, a real URLSession.
+    guard let server = silentServer() else {
+        check(false, "auth request: a local listener could not be opened for the timeout test")
+        return
+    }
+    defer { server.stop() }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.connectionProxyDictionary = [:]
+    let session = URLSession(configuration: configuration)
+    var shortRequest = RenewalRequest.urlRequest(url: URL(string: "http://127.0.0.1:\(server.port)/v1/oauth/token")!, refreshToken: "fake-refresh-token", clientID: "fake-client")
+    shortRequest.timeoutInterval = 1
+    let silent = shortRequest
+    let started = Date()
+    let failure: Error?? = ControlTestKit.wait { () async -> Error? in
+        do { _ = try await session.data(for: silent); return nil } catch { return error }
+    }
+    let waited = Date().timeIntervalSince(started)
+    let timedOut = (failure ?? nil).map { ($0 as? URLError)?.code == .timedOut } ?? false
+    check(timedOut && waited < 5, "auth request: a request nobody answers ends as a timeout, not a hang", "waited \(waited)s, error: \(String(describing: failure))")
+    check((failure ?? nil).map { RenewalRequest.verdict(afterTransportError: $0) == .noVerdict } ?? false,
+          "auth request: and that timeout is no verdict on the grant (the switch goes ahead, nothing is flagged)")
+}
+
 // MARK: - AppState is not in the harness: pin the wiring in its source
 
 private func authSource(_ path: String) -> String {
@@ -683,7 +872,7 @@ private func authCount(_ needle: String, in text: String) -> Int { text.componen
     check(authCount("TargetRenewalPolicy.mustRenewBeforeSwitch(", in: app) == 1 && !authMember(app, startingAt: "func startAutoRefresh(interval: TimeInterval = 300) {").contains("lastRenewals")
           && !authMember(app, startingAt: "private func startAuthWatch() {").contains("lastRenewals"),
           "auth pins: the renewal is asked in one place, the switch (no timer renews inactive accounts)")
-    let refreshInPlace = authMember(app, startingAt: "private func refreshBackupInPlace(for account: Account) async -> BackupRefreshOutcome {")
+    let refreshInPlace = authMember(app, startingAt: "private func refreshBackupInPlace(for account: Account) async -> BackupRefreshOutcome? {")
     check(refreshInPlace.contains("lastRenewals[account.id] = TargetRenewalPolicy.Renewal(") && refreshInPlace.contains("TokenFingerprint.of("),
           "auth pins: a renewal this app completes is remembered by the access token it produced (a fingerprint), so the switch can skip a second one")
 
@@ -706,6 +895,29 @@ private func authCount(_ needle: String, in text: String) -> Int { text.componen
     check(settle.contains("noteCredentialChanged(for: left)") && !settle.contains("readNext: false"),
           "auth pins: a settle that renewed the account clears its 'expired' card and has it read next, so it is switchable again at once")
     check(!settle.contains("Not assumed: the server decides"), "auth pins: the settle comment no longer claims the server always decides")
+    let settleComment = authSlice(app, from: "/// After a switch off a live login that was confirmed dead.", to: "private func settleLeftLiveLogin(")
+    check(!settleComment.isEmpty && !settleComment.contains("joins the renewal in flight") && settleComment.contains("`.needsReauth`") && settleComment.contains("RenewalPersistence"),
+          "auth pins: the settle comment says what the code does: a switch back is refused while the account is flagged, and an answer for a login that changed is dropped")
+    check(settle.contains("guard let outcome = await refreshBackupInPlace(for: left) else {"),
+          "auth pins: the settle drops an answer for a saved login that changed meanwhile")
+
+    // A rotated pair is saved before anything else is asked about it; a renewal belongs to the login it was made for.
+    let renewInPlace = authMember(app, startingAt: "private func renewBackupInPlace(for account: Account) async -> BackupRefreshOutcome? {")
+    check(renewInPlace.contains("RenewalPersistence.settleRotation(") && renewInPlace.contains("madeFor: madeFor")
+          && renewInPlace.contains("RenewalPersistence.stillApplies(madeFor: madeFor, stored: storedLoginNow(accountId))")
+          && !renewInPlace.contains("self.keychain.saveAccountBackup(token: backup.token"),
+          "auth pins: the renewal saves through RenewalPersistence (save first, then the profile lookup) and checks the saved login again after the request")
+    check(authCount("accountIdentity(", in: renewInPlace) == 1 && authComesBefore("RenewalPersistence.settleRotation(", "accountIdentity(", in: renewInPlace),
+          "auth pins: the renewal's only profile lookup runs inside settleRotation, after the save")
+    let usageRenewal = authMember(app, startingAt: "private func renewThenRequest(_ account: Account) async -> UsageAPIResponse? {")
+    check(usageRenewal.contains("case nil:"), "auth pins: a usage read whose renewal was dropped (the login changed meanwhile) shows nothing on the card")
+    check(authSlice(validated, from: "func renewAndIdentify(", to: "case .useRenewedLogin:").contains("guard let outcome = await refreshBackupInPlace(for: account) else {"),
+          "auth pins: a switch whose target's saved login changed during the renewal is refused, not made from the copy read before")
+    let refreshOAuth = authMember(claude, startingAt: "func refreshOAuthCredentials(_ credentialsJSON: String) async -> OAuthRefreshResult {")
+    check(refreshOAuth.contains("RenewalRequest.urlRequest(url: url, refreshToken: refreshToken, clientID: Self.oauthClientID)")
+          && !refreshOAuth.contains("URLRequest(url:") && refreshOAuth.contains("RenewalRequest.verdict(httpStatus: status, oauthError: oauthError)")
+          && refreshOAuth.contains("RenewalRequest.verdict(afterTransportError: error)"),
+          "auth pins: the refresh request is built by RenewalRequest (15-second timeout) and its answers are sorted by RenewalRequest.verdict")
 
     // The cause in the log for a dead-login switch; the event keeps the engine's trigger.
     check(evaluate.contains("let leavingDeadLogin = leavesDeadLogin(active)") && evaluate.contains("let ruleName = ")
