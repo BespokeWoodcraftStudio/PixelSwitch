@@ -56,11 +56,16 @@ struct Account: Identifiable, Codable, Hashable {
     /// 2.0: when `priority` was last set, so that among equal numbers the one
     /// set most recently goes first (spec D2). nil = never set by the user.
     var prioritySetAt: Date?
+    /// The plan's rate-limit tier, as `claude auth status` prints it in
+    /// `planTier` ("max_20x") or a saved login holds it ("default_claude_max_20x").
+    /// With `subscriptionType` it tells Max 20x, called Ultra, which has no
+    /// 5-hour limit, from Max 5x (see `AccountPlan`). nil = not known: such an
+    /// account keeps the 5-hour limit. Accounts saved before it existed decode
+    /// it as nil, and a nil is never written.
+    var planTier: String?
 
-    /// Subscription type with first letter capitalized (e.g., "max" → "Max").
-    var displaySubscriptionType: String? {
-        subscriptionType?.prefix(1).uppercased().appending(subscriptionType?.dropFirst() ?? "")
-    }
+    // The plan badge's text (`displaySubscriptionType`) and `hasSessionLimit`
+    // live in AccountPlan.swift, so that there is one place that decides both.
 
     var obfuscatedEmail: String {
         // This field IS an address — mask structurally, no detection step, so
@@ -113,7 +118,8 @@ struct Account: Identifiable, Codable, Hashable {
         sessionThreshold: Double? = nil,
         weeklyThreshold: Double? = nil,
         priority: Int? = nil,
-        prioritySetAt: Date? = nil
+        prioritySetAt: Date? = nil,
+        planTier: String? = nil
     ) {
         self.id = id
         self.email = email
@@ -129,6 +135,7 @@ struct Account: Identifiable, Codable, Hashable {
         self.weeklyThreshold = weeklyThreshold
         self.priority = priority
         self.prioritySetAt = prioritySetAt
+        self.planTier = planTier
     }
 }
 
@@ -153,6 +160,11 @@ struct AuthStatus: Codable {
     let orgId: String?
     let orgName: String?
     let subscriptionType: String?
+    /// The plan's rate-limit tier ("max_20x" for Max 20x, called Ultra). Newer
+    /// `claude` builds print it; older ones do not, and it then decodes as nil.
+    /// A `var` with an optional type, not a `let`, so the memberwise initialiser
+    /// keeps working without it.
+    var planTier: String?
 
     /// True when the CLI reports the identity of the stored claude.ai login,
     /// i.e. when `email` is meaningful.

@@ -86,8 +86,8 @@ enum ControlTestKit {
                                    threshold: nil, effectiveThreshold: 90, manualOnly: false, usage: nil)
     check(ControlProtocol.version == 2 && (try? JSONValue.encode(plainAccount))?["manualOnly"] == .bool(false),
           "control protocol: version 2 (accounts carry manualOnly)")
-    check(ControlProtocol.revision == 3 && ControlProtocol.features == ["priority", "splitThresholds"] && ControlProtocol.platform == "macos",
-          "control protocol: 2.0 stays protocol 2 and says revision 3 with its two features")
+    check(ControlProtocol.revision == 4 && ControlProtocol.features == ["priority", "splitThresholds"] && ControlProtocol.platform == "macos",
+          "control protocol: stays protocol 2 and says revision 4 (Ultra's hasSessionLimit) with 2.0's two features")
     check(JSONValue.bool(true).compactText == "true" && JSONValue.number(1).compactText == "1", "control protocol: true stays a boolean and 1 a number")
 
     let success = RPCResponse.success(.int(7), .object(["ok": .bool(true)])).line

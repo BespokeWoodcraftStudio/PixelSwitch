@@ -83,11 +83,12 @@ struct SettingsAccountsTab: View {
             isActive: account.isActive,
             activeBadge: String(localized: "Active", bundle: L10n.bundle),
             resetNote: weeklyReset(for: account),
-            manualNote: autoSwitchEnabled && account.isActive && isManualOnly(account) ? manualNote : nil,
+            manualNote: autoSwitchEnabled && account.isActive && isManualOnly(account) ? manualNote(for: account) : nil,
             priority: AccountOrder.validPriority(account.priority),
             sessionOwn: AccountRowThresholds.own(.session, of: account),
             weeklyOwn: AccountRowThresholds.own(.weekly, of: account),
             manualOnly: isManualOnly(account),
+            hasSessionLimit: account.hasSessionLimit,
             defaults: defaults,
             help: thresholdHelp(for: account),
             onPriority: { appState.setPriority($0, for: account) },
@@ -154,8 +155,12 @@ struct SettingsAccountsTab: View {
         }
     }
 
-    /// The line under a Manual only account that is in use.
-    private var manualNote: Text {
+    /// The line under a Manual only account that is in use. An account with no
+    /// 5-hour limit (Ultra) is left at the weekly default alone.
+    private func manualNote(for account: Account) -> Text {
+        if !account.hasSessionLimit {
+            return Text("You're using it now. Auto-switch moves you off it at \(Self.percent(defaults.weekly)) and won't move you back to it.")
+        }
         if defaults.session == defaults.weekly {
             return Text("You're using it now. Auto-switch moves you off it at \(Self.percent(defaults.session)) and won't move you back to it.")
         }
@@ -167,12 +172,19 @@ struct SettingsAccountsTab: View {
     private func thresholdHelp(for account: Account) -> Text {
         let rule = AutoSwitchSettings.rule(for: account, defaults: defaults)
         if rule.manualOnly {
-            if defaults.session == defaults.weekly {
-                return Text("Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default threshold (\(Self.percent(defaults.session))).")
+            // An account with no 5-hour limit (Ultra) is left at the weekly default alone.
+            if defaults.session == defaults.weekly || !account.hasSessionLimit {
+                let single = account.hasSessionLimit ? defaults.session : defaults.weekly
+                return Text("Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default threshold (\(Self.percent(single))).")
             }
             return Text("Auto-switch never moves you to this account. You can still switch to it yourself; while you're on it, auto-switch moves you off it at the default thresholds (\(Self.percent(defaults.session)) of its session or \(Self.percent(defaults.weekly)) of its week).")
         }
         guard let numbers = AutoSwitchSettings.windowExplanation(rule: rule, defaults: defaults) else { return Text(verbatim: "") }
+        // No 5-hour limit (Ultra): only the weekly numbers mean anything, so it
+        // reads as the one-limit sentence.
+        if !account.hasSessionLimit {
+            return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt.weekly)), and moves you to it only while it is at \(Self.percent(numbers.arriveAt.weekly)) or less.")
+        }
         if rule.session == rule.weekly {
             return Text("Auto-switch moves you off this account at \(Self.percent(numbers.leaveAt.session)), and moves you to it only while it is at \(Self.percent(numbers.arriveAt.session)) or less.")
         }

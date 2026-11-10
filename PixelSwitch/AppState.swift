@@ -209,6 +209,9 @@ final class AppState: ObservableObject {
             }
         }
 
+        // Accounts saved before the plan was stored get it from their saved logins.
+        await backfillPlans()
+
         // Passive token health check (no CLI calls, keychain reads only)
         diagnoseTokenHealth()
 
@@ -442,7 +445,8 @@ final class AppState: ObservableObject {
             provider: .claudeCode,
             orgName: status.orgName,
             subscriptionType: status.subscriptionType,
-            isActive: accounts.isEmpty
+            isActive: accounts.isEmpty,
+            planTier: status.planTier
         )
         log.info("[addAccount] Created account model, id=\(account.id)")
 
@@ -675,7 +679,8 @@ final class AppState: ObservableObject {
                 provider: .claudeCode,
                 orgName: status.orgName,
                 subscriptionType: status.subscriptionType,
-                isActive: true
+                isActive: true,
+                planTier: status.planTier
             )
             log.info("[loginNewAccount] Step 5: Created account, id=\(account.id)")
 
@@ -770,6 +775,7 @@ final class AppState: ObservableObject {
             if let index = accounts.firstIndex(where: { $0.id == account.id }) {
                 accounts[index].orgName = status.orgName
                 accounts[index].subscriptionType = status.subscriptionType
+                accounts[index].planTier = AccountPlan.updatedTier(current: accounts[index].planTier, reported: status.planTier)
 
                 // Mark this account as active (it's what the CLI is now using)
                 for i in accounts.indices {
@@ -1977,7 +1983,11 @@ final class AppState: ObservableObject {
     /// The one place a usage request is made.
     private func requestUsage(for account: Account, login: CredentialOwnership.Login, afterRenewal: Bool) async -> UsageAPIResponse? {
         do {
-            return try await claudeService.getUsageLimits(accessToken: login.accessToken)
+            let usage = try await claudeService.getUsageLimits(accessToken: login.accessToken)
+            // The one strip point: an account with no 5-hour limit (Ultra) never
+            // holds a session reading, so nothing downstream can show or act on one.
+            let stored = accounts.first(where: { $0.id == account.id }) ?? account
+            return stored.hasSessionLimit ? usage : usage.droppingSession()
         } catch ClaudeService.UsageError.expired {
             requestGuard.recordRejected(account: account.id, accessToken: login.accessToken)
             log.warning("[fetchUsage] 401 for \(account.email) (token \(TokenFingerprint.forLog(TokenFingerprint.of(login.accessToken)))); it will not be sent again until it changes")
@@ -2041,6 +2051,40 @@ final class AppState: ObservableObject {
             // later cycle. Keep the stale sample.
             accountUsageErrors[account.id] = UsageErrorState(isExpired: false, isRateLimited: false, message: String(localized: "Could not save the refreshed sign-in; will retry automatically.", bundle: L10n.bundle))
             return nil
+        }
+    }
+
+    // MARK: - Plans (Ultra has no 5-hour limit)
+
+    /// Accounts whose saved login has already been looked at for a plan this launch.
+    private var planBackfillTried: Set<UUID> = []
+
+    /// Gives an account that has no plan tier one, from its saved login (the
+    /// credential's `rateLimitTier`, else the account block's tier or Claude
+    /// Code's display name; see `AccountPlan.tier`). Only blanks are filled: a
+    /// tier `claude auth status` reported is never replaced, and each account is
+    /// looked at once per launch. The active account's tier is refreshed from
+    /// `claude auth status` on every refresh anyway; this is for the others, whose
+    /// plan would otherwise be unknown until each became active. Reads the tier
+    /// and name fields only: no token is returned, kept or logged.
+    private func backfillPlans() async {
+        let wanted = accounts.filter { $0.planTier == nil && !planBackfillTried.contains($0.id) }
+        guard !wanted.isEmpty else { return }
+        wanted.forEach { planBackfillTried.insert($0.id) }
+        let keychain = self.keychain
+        guard let backups = await Task.detached(priority: .utility, operation: { keychain.allAccountBackups() }).value else { return }
+        var filled = 0
+        for account in wanted {
+            guard let index = accounts.firstIndex(where: { $0.id == account.id }), accounts[index].planTier == nil,
+                  let backup = backups[account.id.uuidString],
+                  let tier = AccountPlan.tier(fromCredential: backup.token, oauthAccount: backup.oauthAccount.mapValues(\.value)) else { continue }
+            accounts[index].planTier = tier
+            if activeAccount?.id == account.id { activeAccount = accounts[index] }
+            filled += 1
+        }
+        if filled > 0 {
+            saveAccounts()
+            log.info("[plan] Filled the plan of \(filled) account(s) from their saved logins")
         }
     }
 
@@ -2397,7 +2441,8 @@ final class AppState: ObservableObject {
                 weeklyResetTime: usage?.sevenDay?.resetTimeString,
                 extraUsageEnabled: usage?.extraUsage?.isEnabled,
                 hasError: error != nil,
-                errorMessage: error?.message
+                errorMessage: error?.message,
+                hasSessionLimit: account.hasSessionLimit
             )
         }
 
@@ -2477,6 +2522,7 @@ final class AppState: ObservableObject {
             }
             accounts[index].orgName = status.orgName
             accounts[index].subscriptionType = status.subscriptionType
+            accounts[index].planTier = AccountPlan.updatedTier(current: accounts[index].planTier, reported: status.planTier)
             activeAccount = accounts[index]
             forgetRemovedLogins()
             saveAccounts()
@@ -2489,7 +2535,8 @@ final class AppState: ObservableObject {
                 provider: .claudeCode,
                 orgName: status.orgName,
                 subscriptionType: status.subscriptionType,
-                isActive: true
+                isActive: true,
+                planTier: status.planTier
             )
             accounts.append(account)
             activeAccount = account

@@ -89,6 +89,10 @@ struct SettingsAccountRow: View {
     var sessionOwn: Double?
     var weeklyOwn: Double?
     var manualOnly = false
+    /// False for an account on a plan with no 5-hour limit (Ultra): the Session
+    /// menu is replaced by a caption saying so. Defaulted, so every caller that
+    /// predates it (and the offscreen renders) compiles as it was.
+    var hasSessionLimit = true
     /// What the two windows follow while the account has no value of its own.
     let defaults: AutoSwitchEngine.WindowPair
     /// What the account's setting does, in numbers.
@@ -173,8 +177,12 @@ struct SettingsAccountRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            windowControl(.session, own: sessionOwn, caption: Text("Session"), spoken: Text("Session limit for \(title)"),
-                          width: columnWidth, choose: onSession)
+            if hasSessionLimit {
+                windowControl(.session, own: sessionOwn, caption: Text("Session"), spoken: Text("Session limit for \(title)"),
+                              width: columnWidth, choose: onSession)
+            } else {
+                noSessionLimit(width: columnWidth)
+            }
             windowControl(.weekly, own: weeklyOwn, caption: Text("Weekly"), spoken: Text("Weekly limit for \(title)"),
                           width: columnWidth, choose: onWeekly)
         }
@@ -282,6 +290,23 @@ struct SettingsAccountRow: View {
     }
 
     // MARK: - Session and Weekly
+
+    /// Where the Session menu would be, for an account with no 5-hour limit.
+    /// Static text, read by VoiceOver as one line ("Session, No 5-hour limit").
+    private func noSessionLimit(width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Session")
+                .font(.caption2)
+                .foregroundStyle(.textSecondary)
+            Text("No 5-hour limit")
+                .font(.callout)
+                .foregroundStyle(.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .accessibilityElement(children: .combine)
+        .frame(width: width, alignment: .leading)
+    }
 
     private func windowControl(_ window: AutoSwitchEngine.Window, own: Double?, caption: Text, spoken: Text, width: CGFloat,
                                choose: @escaping @MainActor (ThresholdMenuChoice) -> Void) -> some View {

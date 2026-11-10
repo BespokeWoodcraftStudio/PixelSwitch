@@ -48,7 +48,9 @@ struct MenuBarStripView: View {
                     .foregroundStyle(iconFilled ? Color.brand : Color.primary)
             }
 
-            ForEach(config.modules) { module in
+            // The session modules are left out while the active account has no
+            // 5-hour limit (Ultra); the saved list is not touched.
+            ForEach(MenuBarModule.visibleModules(config.modules, activeHasSessionLimit: appState.activeAccount?.hasSessionLimit ?? true)) { module in
                 MenuBarModuleView(
                     module: module,
                     appState: appState,

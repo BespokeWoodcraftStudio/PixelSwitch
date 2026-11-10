@@ -334,3 +334,6 @@
 "Priority for %@" = "%@ の優先度";
 "Session limit for %@" = "%@ のセッション上限";
 "Weekly limit for %@" = "%@ の週間上限";
+
+/* Ultra (Max 20x) has no 5-hour limit: what the Session column of its Settings row says */
+"No 5-hour limit" = "5時間の上限なし";

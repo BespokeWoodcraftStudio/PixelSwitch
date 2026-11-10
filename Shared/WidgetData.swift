@@ -17,6 +17,13 @@ struct WidgetAccountData: Codable {
     let extraUsageEnabled: Bool?
     let hasError: Bool
     let errorMessage: String?
+    /// False for an account on a plan with no 5-hour limit (Ultra): the Session
+    /// views are hidden. Optional with a default, so widget data written by an
+    /// older app (which has no such key) still decodes and shows them.
+    var hasSessionLimit: Bool? = nil
+
+    /// Whether to draw the Session bars and ring (anything but a plan with no 5-hour limit).
+    var showsSession: Bool { hasSessionLimit != false }
 }
 
 struct WidgetData: Codable {

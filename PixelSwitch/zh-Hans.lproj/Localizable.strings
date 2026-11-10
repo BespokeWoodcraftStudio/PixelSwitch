@@ -334,3 +334,6 @@
 "Priority for %@" = "%@ 的优先级";
 "Session limit for %@" = "%@ 的会话上限";
 "Weekly limit for %@" = "%@ 的每周上限";
+
+/* Ultra (Max 20x) has no 5-hour limit: what the Session column of its Settings row says */
+"No 5-hour limit" = "无 5 小时上限";

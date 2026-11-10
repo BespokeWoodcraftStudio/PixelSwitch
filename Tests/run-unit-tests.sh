@@ -18,6 +18,7 @@ swiftc -swift-version 6 \
   PixelSwitch/Models/BrandColor.swift \
   PixelSwitch/Models/AccountPalette.swift \
   PixelSwitch/Models/Account.swift \
+  PixelSwitch/Models/AccountPlan.swift \
   PixelSwitch/Models/AccountOrder.swift \
   PixelSwitch/Models/String+Obfuscation.swift \
   PixelSwitch/Models/EmailDisplay.swift \
@@ -58,6 +59,8 @@ swiftc -swift-version 6 \
   Tests/UnitTests/UsageGuardTests.swift \
   PixelSwitch/Services/AuthHealth.swift \
   Tests/UnitTests/AuthHealthTests.swift \
+  Shared/WidgetData.swift \
+  Tests/UnitTests/AccountPlanTests.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
 "$OUT/pixelswitch-unit-tests"

@@ -16,7 +16,9 @@ enum ControlProtocol {
     static let version = 2
 
     /// 3 = 2.0: separate session and weekly thresholds, priority numbers.
-    static let revision = 3
+    /// 4 = Ultra: `AccountInfo.hasSessionLimit` (an optional field, so a
+    /// shipped CLI keeps working and no feature string is announced for it).
+    static let revision = 4
 
     /// What this build can do beyond protocol 2's first methods, sent in
     /// `status.get`. A CLI checks it before it sends a method an older app
@@ -446,6 +448,13 @@ struct AccountInfo: Codable, Equatable, Sendable {
     /// lower of the two.
     var effectiveSessionThreshold: Double?
     var effectiveWeeklyThreshold: Double?
+    /// Revision 4. False for an account on a plan with no 5-hour limit (Ultra,
+    /// which `subscription` then names): it has no session reading, no session
+    /// threshold and no effective session threshold, and `effectiveThreshold`
+    /// is its weekly one. True for every other account, including one whose
+    /// plan is not known. Absent from an app older than revision 4: read that
+    /// as true.
+    var hasSessionLimit: Bool?
 }
 
 /// Cost and activity for this Mac as a whole (all accounts together).
