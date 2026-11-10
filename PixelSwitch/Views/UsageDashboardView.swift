@@ -236,7 +236,7 @@ struct UsageDashboardView: View {
             VStack(alignment: .leading, spacing: 10) {
                 accountHeader(account, swatch: swatch)
             if let usage = usage {
-                usageBars(usage)
+                usageBars(usage, showsSession: account.hasSessionLimit)
                 extraUsageRow(usage.extraUsage)
                 // A failed request that kept the last reading (the server's
                 // trouble, no connection): the bars stay, with what went wrong
@@ -478,8 +478,9 @@ struct UsageDashboardView: View {
     }
 
     @ViewBuilder
-    private func usageBars(_ usage: UsageAPIResponse) -> some View {
-        if let session = usage.fiveHour {
+    private func usageBars(_ usage: UsageAPIResponse, showsSession: Bool) -> some View {
+        // No Session row for an account on a plan with no 5-hour limit (Ultra).
+        if showsSession, let session = usage.fiveHour {
             usageRow(title: "Session", resetText: session.resetTimeString,
                      resetIsAbsolute: session.resetIsAbsolute,
                      utilization: session.utilization ?? 0, kind: .session)

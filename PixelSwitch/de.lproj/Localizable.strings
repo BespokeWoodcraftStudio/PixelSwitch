@@ -334,3 +334,6 @@
 "Priority for %@" = "Priorität für %@";
 "Session limit for %@" = "Sitzungslimit für %@";
 "Weekly limit for %@" = "Wochenlimit für %@";
+
+/* Ultra (Max 20x) has no 5-hour limit: what the Session column of its Settings row says */
+"No 5-hour limit" = "Kein 5-Stunden-Limit";

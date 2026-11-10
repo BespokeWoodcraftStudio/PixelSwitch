@@ -33,6 +33,24 @@ enum MenuBarModule: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// True for the three modules that read the 5-hour (session) window. An
+    /// account on a plan with no 5-hour limit (Ultra) has no such window, so they
+    /// are not drawn while it is the active account (`visibleModules`).
+    var usesSessionWindow: Bool {
+        switch self {
+        case .sessionBar, .sessionBarPlain, .sessionReset: return true
+        case .account, .weeklyBar, .weeklyBarPlain, .fableBar, .dailyCost, .weeklyReset: return false
+        }
+    }
+
+    /// The modules to draw: `modules` as the user saved them, less the session
+    /// modules while the active account has no 5-hour limit. Returns a new list;
+    /// the saved list is never edited, so the modules come back as soon as an
+    /// account with a 5-hour limit is active.
+    static func visibleModules(_ modules: [MenuBarModule], activeHasSessionLimit: Bool) -> [MenuBarModule] {
+        activeHasSessionLimit ? modules : modules.filter { !$0.usesSessionWindow }
+    }
+
     /// Human-readable name shown in the Settings reorder list.
     var localizedDisplayName: String {
         switch self {

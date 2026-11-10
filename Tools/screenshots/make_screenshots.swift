@@ -18,7 +18,8 @@
 //     PixelSwitch/Views/Components/UsageLimitRow.swift \
 //     PixelSwitch/Views/Components/AccountGlyph.swift \
 //     PixelSwitch/Views/Components/Badge.swift \
-//     PixelSwitch/Models/Account.swift PixelSwitch/Models/String+Obfuscation.swift \
+//     PixelSwitch/Models/Account.swift PixelSwitch/Models/AccountPlan.swift PixelSwitch/Models/UsageData.swift \
+//     PixelSwitch/Models/String+Obfuscation.swift \
 //     PixelSwitch/Models/MenuBarConfig.swift PixelSwitch/Models/MenuBarModule.swift \
 //     PixelSwitch/Models/AppStyle.swift PixelSwitch/Models/BrandColor.swift \
 //     PixelSwitch/Models/AccountPalette.swift PixelSwitch/Services/L10n.swift \
@@ -36,6 +37,8 @@ private struct SampleAccount {
     let fable: Double
     let sessionReset: String
     let weekReset: String
+    /// False for an account on a plan with no 5-hour limit (Ultra): no Session row.
+    var hasSessionLimit = true
 }
 
 // Invented accounts on example.com, the domain reserved for documentation
@@ -52,6 +55,15 @@ private let sample: [SampleAccount] = [
     .init(email: "side-project@example.com", swatch: 8, plan: "Pro", active: false,
           session: 40, weekly: 30, fable: 20, sessionReset: "1 hr 10 min", weekReset: "Wed 8:00 AM"),
 ]
+
+/// An Ultra account (Max 20x), built through the real `Account`, so its badge and
+/// whether it has a Session row come from `AccountPlan`, the same code the app runs.
+private let ultraSample: SampleAccount = {
+    let account = Account(email: "ultra@example.com", displayName: "Ultra", subscriptionType: "max", planTier: "max_20x")
+    return SampleAccount(email: account.email, swatch: 2, plan: account.displaySubscriptionType ?? "", active: false,
+                         session: 0, weekly: 42, fable: 74, sessionReset: "", weekReset: "Fri 9:00 AM",
+                         hasSessionLimit: account.hasSessionLimit)
+}()
 
 private struct Card: View {
     let account: SampleAccount
@@ -92,7 +104,9 @@ private struct Card: View {
                     Spacer(minLength: 4)
                     Badge(text: account.plan, color: .brand)
                 }
-                row(.session, "Session", account.session, account.sessionReset)
+                if account.hasSessionLimit {
+                    row(.session, "Session", account.session, account.sessionReset)
+                }
                 row(.weekly, "Weekly", account.weekly, account.weekReset)
                 row(.fable, "Fable", account.fable, account.weekReset)
 
@@ -327,6 +341,16 @@ enum Screenshots {
                       width: 380, scheme: scheme, to: "\(out)/limits-\(name).png")
 
                 write(Chrome(), width: 360, scheme: scheme, to: "\(out)/chrome-\(name).png")
+
+                // Ultra has no 5-hour limit: its card has the Ultra badge and no Session row,
+                // next to a Max account that keeps one.
+                write(VStack(alignment: .leading, spacing: 12) {
+                        Text("Ultra (Max 20x): no 5-hour limit").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Card(account: ultraSample, config: config, logo: logo)
+                        Text("Max: Session, Weekly and Fable").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Card(account: sample[1], config: config, logo: logo)
+                      },
+                      width: 380, scheme: scheme, to: "\(out)/ultra-\(name).png")
 
                 write(autoSwitch(config: config, logo: logo, scheme: scheme),
                       width: 420, scheme: scheme, to: "\(out)/auto-switch-\(name).png")

@@ -333,9 +333,9 @@ private func kind(_ response: RPCResponse?) -> String? { response?.error.map { C
           "events: a window default change alters the accountsChanged key")
 
     let status = Kit.call(api, "status.get")?.result.flatMap { try? $0.decode(StatusInfo.self) }
-    check(status?.protocolVersion == 2 && status?.protocolRevision == 3 && status?.features == ["priority", "splitThresholds"]
+    check(status?.protocolVersion == 2 && status?.protocolRevision == 4 && status?.features == ["priority", "splitThresholds"]
           && status?.platform == "macos" && status?.testMode == nil,
-          "status: protocol 2, revision 3, both features, macos, no testMode on the Mac")
+          "status: protocol 2, revision 4, both features, macos, no testMode on the Mac")
     app.autoSwitch.defaultSessionThreshold = 90
     app.autoSwitch.defaultWeeklyThreshold = 50
     let split = Kit.call(api, "status.get")?.result?["autoSwitch"]

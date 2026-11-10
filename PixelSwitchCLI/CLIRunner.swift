@@ -166,7 +166,7 @@ struct CLIRunner {
             if let session { params["session"] = session.parameter }
             if let weekly { params["weekly"] = weekly.parameter }
             let result = try call(.accountsSetThresholds, .object(params))
-            show(result) { CLIOutput.thresholdSet(try? result["account"]?.decode(AccountInfo.self)) }
+            show(result) { CLIOutput.thresholdSet(try? result["account"]?.decode(AccountInfo.self), sessionWasSet: session != nil) }
 
         case .priority(let reference, let priority):
             try Self.requireFeature(ControlProtocol.featurePriority, doing: "set priorities", app: app)
@@ -328,7 +328,7 @@ enum CLIOutput {
                 account.isActive ? "*" : (account.isSwitchable ? "" : "!"),
                 String(account.position),
                 name(account),
-                percent(usage?.session?.utilization),
+                sessionCell(account),
                 percent(usage?.weekly?.utilization),
                 percent(usage?.fable?.utilization),
                 at,
@@ -340,7 +340,23 @@ enum CLIOutput {
         if accounts.contains(where: \.manualOnly) {
             text += "\nmanual only: auto-switch never moves you to it; switch to it yourself with pixelswitch switch <account>"
         }
+        if accounts.contains(where: { !hasSessionLimit($0) }) {
+            text += "\nn/a: this account's plan (Ultra) has no 5-hour limit; its one limit is the weekly one"
+        }
         return text
+    }
+
+    /// Whether the account has a 5-hour (session) limit. An app older than
+    /// revision 4 never sends the flag, so absent means yes: its Session
+    /// numbers are real.
+    static func hasSessionLimit(_ account: AccountInfo) -> Bool {
+        account.hasSessionLimit != false
+    }
+
+    /// The Session cell: the reading, a dash while there is none yet, and n/a
+    /// for an account with no 5-hour limit (there will never be one).
+    static func sessionCell(_ account: AccountInfo) -> String {
+        hasSessionLimit(account) ? percent(account.usage?.session?.utilization) : "n/a"
     }
 
     /// The "Switches at" cell: where auto-switch moves off the account.
@@ -386,9 +402,17 @@ enum CLIOutput {
         return text
     }
 
-    /// What `accounts threshold` prints once the app has saved it.
-    static func thresholdSet(_ account: AccountInfo?) -> String {
+    /// What `accounts threshold` prints once the app has saved it. `sessionWasSet`:
+    /// the command carried a `--session` value. On an account with no 5-hour limit
+    /// (Ultra) that value is saved but has no effect, and the reply says so.
+    static func thresholdSet(_ account: AccountInfo?, sessionWasSet: Bool = false) -> String {
         guard let account else { return "Threshold set." }
+        let text = thresholdSetSentence(account)
+        guard sessionWasSet, !hasSessionLimit(account) else { return text }
+        return text + " This account has no 5-hour limit, so the session value is saved but has no effect."
+    }
+
+    private static func thresholdSetSentence(_ account: AccountInfo) -> String {
         if account.manualOnly {
             var text = "\(account.email) is now manual only: auto-switch never switches to it. You can still switch to it yourself."
             if account.isActive {
@@ -420,7 +444,9 @@ enum CLIOutput {
         for account in report.accounts {
             lines.append("\(account.position). \(name(account))\(account.isActive ? "  [active]" : "")")
             if let usage = account.usage {
-                lines.append("   Session \(percent(usage.session?.utilization))\(reset(usage.session?.resetsAt))")
+                if hasSessionLimit(account) {
+                    lines.append("   Session \(percent(usage.session?.utilization))\(reset(usage.session?.resetsAt))")
+                }
                 lines.append("   Weekly  \(percent(usage.weekly?.utilization))\(reset(usage.weekly?.resetsAt))")
                 if let fable = usage.fable { lines.append("   Fable   \(percent(fable.utilization))\(reset(fable.resetsAt))") }
                 if let error = usage.error { lines.append("   Note: \(error)") }

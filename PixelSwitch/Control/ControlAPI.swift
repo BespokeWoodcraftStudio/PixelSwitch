@@ -348,8 +348,12 @@ final class ControlAPI {
 enum ControlSnapshots {
     /// `leaveAt`: where auto-switch moves off the account while it is active,
     /// per window. `effectiveThreshold` (what a 1.9 reader sees) is the lower.
+    /// An account with no 5-hour limit (Ultra) has one number: its weekly
+    /// leave-at, with no session threshold at all (a stored one is kept but not
+    /// reported), and `hasSessionLimit` false.
     static func accountInfo(_ account: Account, position: Int, isSwitchable: Bool, leaveAt: AutoSwitchEngine.WindowPair, usage: UsageInfo?) -> AccountInfo {
-        AccountInfo(
+        let hasSessionLimit = account.hasSessionLimit
+        return AccountInfo(
             id: account.id.uuidString,
             email: account.email,
             label: account.customLabel.flatMap { $0.isEmpty ? nil : $0 },
@@ -358,14 +362,15 @@ enum ControlSnapshots {
             isSwitchable: isSwitchable,
             position: position,
             threshold: account.switchThreshold,
-            effectiveThreshold: min(leaveAt.session, leaveAt.weekly),
+            effectiveThreshold: hasSessionLimit ? min(leaveAt.session, leaveAt.weekly) : leaveAt.weekly,
             manualOnly: AutoSwitchSettings.isManualOnly(own: account.switchThreshold),
             usage: usage,
             priority: AccountOrder.validPriority(account.priority),
-            sessionThreshold: AutoSwitchSettings.normalizedWindowThreshold(account.sessionThreshold),
+            sessionThreshold: hasSessionLimit ? AutoSwitchSettings.normalizedWindowThreshold(account.sessionThreshold) : nil,
             weeklyThreshold: AutoSwitchSettings.normalizedWindowThreshold(account.weeklyThreshold),
-            effectiveSessionThreshold: leaveAt.session,
-            effectiveWeeklyThreshold: leaveAt.weekly
+            effectiveSessionThreshold: hasSessionLimit ? leaveAt.session : nil,
+            effectiveWeeklyThreshold: leaveAt.weekly,
+            hasSessionLimit: hasSessionLimit
         )
     }
 
@@ -376,10 +381,12 @@ enum ControlSnapshots {
     struct AccountFields: Equatable {
         let id: UUID, email: String, label: String?, subscription: String?, isActive: Bool
         let threshold: Double?, session: Double?, weekly: Double?, priority: Int?
+        /// What the plan resolves to, so a change of plan (Ultra or not) is an event.
+        let plan: AccountPlan
         init(_ account: Account) {
             id = account.id; email = account.email; label = account.customLabel; subscription = account.subscriptionType
             isActive = account.isActive; threshold = account.switchThreshold; session = account.sessionThreshold
-            weekly = account.weeklyThreshold; priority = account.priority
+            weekly = account.weeklyThreshold; priority = account.priority; plan = account.plan
         }
     }
 

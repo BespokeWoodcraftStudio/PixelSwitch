@@ -163,7 +163,10 @@ private struct SmallWidgetView: View {
                         }
                     }
                 } else {
-                    compactUsageBar(label: "Session", utilization: account.sessionUtilization)
+                    // No Session bar for an account on a plan with no 5-hour limit (Ultra).
+                    if account.showsSession {
+                        compactUsageBar(label: "Session", utilization: account.sessionUtilization)
+                    }
                     compactUsageBar(label: "Weekly", utilization: account.weeklyUtilization)
                 }
 
@@ -279,8 +282,10 @@ private struct MediumWidgetView: View {
                             Spacer(minLength: 0)
                         } else {
                             Spacer(minLength: 0)
-                            usageBar(label: "Session", utilization: account.sessionUtilization, resetTime: account.sessionResetTime)
-                            Spacer(minLength: 4)
+                            if account.showsSession {
+                                usageBar(label: "Session", utilization: account.sessionUtilization, resetTime: account.sessionResetTime)
+                                Spacer(minLength: 4)
+                            }
                             usageBar(label: "Weekly", utilization: account.weeklyUtilization, resetTime: account.weeklyResetTime)
 
                             if let extra = account.extraUsageEnabled {
@@ -509,7 +514,9 @@ private struct LargeWidgetView: View {
                     }
                 }
             } else {
-                accountUsageBar(label: "Session", utilization: account.sessionUtilization, resetTime: account.sessionResetTime)
+                if account.showsSession {
+                    accountUsageBar(label: "Session", utilization: account.sessionUtilization, resetTime: account.sessionResetTime)
+                }
                 accountUsageBar(label: "Weekly", utilization: account.weeklyUtilization, resetTime: account.weeklyResetTime)
             }
         }
@@ -583,12 +590,14 @@ private struct CircleWidgetView: View {
 
             if let account = activeAccount, !account.hasError {
                 HStack(spacing: 12) {
-                    ringStat(
-                        label: "Session",
-                        resetTime: account.sessionResetTime,
-                        utilization: account.sessionUtilization,
-                        accent: colorForUtilization(account.sessionUtilization ?? 0)
-                    )
+                    if account.showsSession {
+                        ringStat(
+                            label: "Session",
+                            resetTime: account.sessionResetTime,
+                            utilization: account.sessionUtilization,
+                            accent: colorForUtilization(account.sessionUtilization ?? 0)
+                        )
+                    }
                     ringStat(
                         label: "Weekly",
                         resetTime: account.weeklyResetTime,
