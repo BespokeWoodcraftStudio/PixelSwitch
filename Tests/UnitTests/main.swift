@@ -601,6 +601,7 @@ runControlTests()
 runAutoUpdateTests()
 runUsageErrorTests()
 runUsageGuardTests()
+runAuthHealthTests()
 
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)
