@@ -52,3 +52,9 @@ that file for the full entry. Start here to get up to speed on the project.
 
 ## 2026-10-25
 - [WL-2026-10-25-001](./2026-10-25.md) — 2.0 confirmed on every client; records brought up to date (README Linux, AGENTS, ARCHITECTURE, spec and lanes marked released, investigation index) — _docs/done_
+
+## 2026-11-10
+- [WL-2026-11-10-001](./2026-11-10.md) — 2.1: the menu bar popover is readable in light and dark (solid popover, cards and bars; stronger text) — _fix/done_
+- [WL-2026-11-10-002](./2026-11-10.md) — 2.1: never switch to an account that needs signing in, and leave a live login that dies (30-second watch); two reviews — _feature/partial_
+- [WL-2026-11-10-003](./2026-11-10.md) — 2.1: Ultra (Max 20x) accounts have no 5-hour limit; the badge says Ultra; first-pass review and fixes — _feature/done_
+- [WL-2026-11-10-004](./2026-11-10.md) — 2.1 session: how the work was run, and the lessons (fetch first, real Xcode build, typecheck gaps, hand checks) — _note/partial_
