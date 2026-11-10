@@ -31,7 +31,7 @@ struct SettingsAccountsTab: View {
                         .font(.headline)
                     Text("Add your current Claude Code account to get started.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -66,7 +66,7 @@ struct SettingsAccountsTab: View {
                 }
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.textSecondary)
             .fixedSize(horizontal: false, vertical: true)
 
             SettingsSignInButtons()

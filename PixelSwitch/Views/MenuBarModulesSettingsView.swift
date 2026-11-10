@@ -19,7 +19,7 @@ struct MenuBarModulesSettingsView: View {
 
             Text(String(localized: "Drag to reorder, toggle to enable. Disabled modules sit at the bottom.", bundle: L10n.bundle))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.textSecondary)
 
             List {
                 ForEach($rows) { $row in
@@ -28,7 +28,7 @@ struct MenuBarModulesSettingsView: View {
                             .labelsHidden()
                             .toggleStyle(.checkbox)
                         Image(systemName: "line.3.horizontal")
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.textSecondary)
                         Text(row.module.localizedDisplayName)
                             .font(.callout)
                         Spacer(minLength: 8)
@@ -59,7 +59,7 @@ struct MenuBarModulesSettingsView: View {
                 systemImage: "info.circle"
             )
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.textSecondary)
             .padding(.top, 2)
 
             Divider()
@@ -67,7 +67,7 @@ struct MenuBarModulesSettingsView: View {
             HStack(spacing: 8) {
                 Text(String(localized: "Preview", bundle: L10n.bundle))
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
                 previewBar
             }
             .padding(.top, 2)

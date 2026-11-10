@@ -1,17 +1,23 @@
 // Renders PixelSwitch's real views into the README's images, with sample data.
 //
-// These are the app's own SwiftUI views (UsageLimitRow, the card chrome, the
-// account palette, the limit colours), not mock-ups and not hand-drawn art, so
-// a picture in the README cannot drift from what the app draws. Sample accounts
-// and numbers are invented; nothing here reads a real login or a real usage
-// figure.
+// These are the app's own SwiftUI views (UsageLimitRow, Badge, the card chrome,
+// the account palette, the limit colours), not mock-ups and not hand-drawn art,
+// so a picture in the README cannot drift from what the app draws. Sample
+// accounts and numbers are invented; nothing here reads a real login or a real
+// usage figure.
 //
-// Run from the repo root:
+// Every picture sits on `Color.popoverBackground`, the popover's own solid
+// background, so what you see here is the surface the real popover paints. It
+// is also the harness for checking contrast: render, then sample the PNG.
+//
+// Run from the repo root (give the output folder as the last argument; with no
+// argument it writes assets/screenshots, which are the README's pictures):
 //
 //   swiftc -swift-version 6 -target arm64-apple-macos14.0 -parse-as-library \
 //     -o /tmp/pixelshots \
 //     PixelSwitch/Views/Components/UsageLimitRow.swift \
 //     PixelSwitch/Views/Components/AccountGlyph.swift \
+//     PixelSwitch/Views/Components/Badge.swift \
 //     PixelSwitch/Models/Account.swift PixelSwitch/Models/String+Obfuscation.swift \
 //     PixelSwitch/Models/MenuBarConfig.swift PixelSwitch/Models/MenuBarModule.swift \
 //     PixelSwitch/Models/AppStyle.swift PixelSwitch/Models/BrandColor.swift \
@@ -81,18 +87,10 @@ private struct Card: View {
                         .font(.subheadline.weight(.medium))
                         .lineLimit(1)
                     if account.active {
-                        Text("Active")
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(Capsule().fill(Color.green.opacity(0.22)))
-                            .foregroundStyle(.green)
+                        Badge(text: "Active", color: .green)
                     }
                     Spacer(minLength: 4)
-                    Text(account.plan)
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Capsule().fill(Color.orange.opacity(0.22)))
-                        .foregroundStyle(.orange)
+                    Badge(text: account.plan, color: .brand)
                 }
                 row(.session, "Session", account.session, account.sessionReset)
                 row(.weekly, "Weekly", account.weekly, account.weekReset)
@@ -103,18 +101,18 @@ private struct Card: View {
                         Image(systemName: "clock").font(.caption2)
                         Text("Updated 1 min ago").font(.caption2)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
                     Spacer(minLength: 4)
                     if interaction == "switching" {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.triangle.2.circlepath").font(.caption2)
                             Text("Switching…").font(.caption2.weight(.semibold))
                         }
-                        .foregroundStyle(Color.activeAccountRing)
+                        .foregroundStyle(Color.brandText)
                     } else if interaction == "hover" {
                         Text("Double-click to switch")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.textSecondary)
                     }
                 }
                 .frame(minHeight: 14)
@@ -133,7 +131,7 @@ private func write<V: View>(_ view: V, width: CGFloat, scheme: ColorScheme, to p
     let framed = view
         .padding(14)
         .frame(width: width)
-        .background(scheme == .dark ? Color(white: 0.11) : Color(white: 0.97))
+        .background(Color.popoverBackground)
         .environment(\.colorScheme, scheme)
 
     let renderer = ImageRenderer(content: framed)
@@ -167,7 +165,7 @@ private func autoSwitch(config: MenuBarConfig, logo: Image, scheme: ColorScheme)
     return VStack(alignment: .leading, spacing: 10) {
         Text("Fable ran out on the account you were using")
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.textSecondary)
         Card(account: exhausted, config: config, logo: logo)
 
         HStack(spacing: 8) {
@@ -177,10 +175,125 @@ private func autoSwitch(config: MenuBarConfig, logo: Image, scheme: ColorScheme)
                 .font(.caption)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.textSecondary)
         .padding(.vertical, 2)
 
         Card(account: chosen, config: config, logo: logo)
+    }
+}
+
+/// The rest of the popover's colours: header, promo banner, tab bar, an Accounts
+/// row, a cost-history row and the footer error. MainMenuView, AccountSwitcherView
+/// and CostDetailView need AppState, so this is hand-copied markup that uses the
+/// same tokens; it exists to check those colours, not to be shipped as a picture.
+/// Keep it in step with those views by hand.
+private struct Chrome: View {
+    private func tab(_ symbol: String, _ title: String, selected: Bool) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: symbol).font(.system(size: 12))
+            Text(title).font(.caption2.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .foregroundStyle(selected ? .textOnFill : .textSecondary)
+    }
+
+    private func accountRow(_ email: String, active: Bool) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(email).font(.subheadline.weight(.medium))
+                    if active { Badge(text: "Active", color: .green) }
+                }
+                Text("Max").font(.caption2).foregroundStyle(.textSecondary)
+            }
+            Spacer()
+            Image(systemName: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.limitWarn)
+            Image(systemName: "trash").font(.caption).foregroundStyle(.red)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(active ? .cardFillStrong : .cardFill)
+                .strokeBorder(active ? Color.activeAccountRing : .cardBorder, lineWidth: active ? 2 : 1)
+                .shadow(color: AppStyle.cardShadowColor, radius: AppStyle.cardShadowRadius, x: 0, y: AppStyle.cardShadowY)
+        )
+    }
+
+    private func costRow(_ date: String, _ amount: String, ratio: Double, today: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text(date).font(.caption2.monospacedDigit())
+                .foregroundStyle(today ? .brandText : .textSecondary).frame(width: 40, alignment: .leading)
+            Text(amount).font(.caption2.weight(.medium).monospacedDigit())
+                .foregroundStyle(today ? .brandText : .primary).frame(width: 56, alignment: .trailing)
+            GeometryReader { geo in
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(today ? Color.brandText : Color.blue.opacity(0.85))
+                    .frame(width: max(2, geo.size.width * ratio), height: 8)
+            }.frame(height: 8)
+        }
+        .padding(.vertical, 4).padding(.horizontal, 8)
+        .background(today ? .rowTile : .clear)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 6) {
+                Text(verbatim: "work@example.com").font(.headline)
+                Badge(text: "Max", color: .brand)
+                Spacer()
+            }
+            HStack {
+                Image(systemName: "gift.fill").foregroundStyle(.brandText)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Double Usage Active").font(.caption).fontWeight(.medium)
+                    Text("Until 5:00 PM today").font(.caption2).foregroundStyle(.textSecondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(.subtleBrand)
+
+            ZStack {
+                Capsule().fill(.tabFill).overlay(Capsule().stroke(.tabBorder, lineWidth: 1))
+                GeometryReader { geo in
+                    Capsule().fill(Color.brand).padding(2).frame(width: geo.size.width / 3)
+                }
+                HStack(spacing: 0) {
+                    tab("chart.bar", "Usage", selected: true)
+                    tab("person.2", "Accounts", selected: false)
+                    tab("dollarsign.circle", "Cost", selected: false)
+                }
+            }
+            .frame(width: 260, height: 44)
+
+            accountRow("personal@example.com", active: true)
+            accountRow("studio@example.com", active: false)
+
+            VStack(spacing: 4) {
+                costRow("Nov 10", "$12.40", ratio: 0.9, today: true)
+                costRow("Nov 9", "$7.10", ratio: 0.5, today: false)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: AppStyle.cardCornerRadius).fill(.cardFill)
+                    .strokeBorder(.cardBorder, lineWidth: 1)
+            )
+
+            HStack(spacing: 6) {
+                Image(systemName: "dollarsign.circle").font(.subheadline).foregroundStyle(.costGreen)
+                Text("$12.40").font(.title.weight(.semibold).monospacedDigit()).foregroundStyle(.costGreen)
+                Spacer()
+                Image(systemName: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.limitWarn)
+                Text("Could not reach the server").font(.caption2).foregroundStyle(.textSecondary)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: AppStyle.cardCornerRadius).fill(.cardFill)
+                    .strokeBorder(.cardBorder, lineWidth: 1)
+            )
+        }
     }
 }
 
@@ -213,15 +326,17 @@ enum Screenshots {
                 write(Card(account: sample[0], config: config, logo: logo),
                       width: 380, scheme: scheme, to: "\(out)/limits-\(name).png")
 
+                write(Chrome(), width: 360, scheme: scheme, to: "\(out)/chrome-\(name).png")
+
                 write(autoSwitch(config: config, logo: logo, scheme: scheme),
                       width: 420, scheme: scheme, to: "\(out)/auto-switch-\(name).png")
 
                 write(VStack(alignment: .leading, spacing: 12) {
-                        Text("Resting").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text("Resting").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
                         Card(account: sample[2], config: config, logo: logo)
-                        Text("Pointer over it").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text("Pointer over it").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
                         Card(account: sample[2], config: config, logo: logo, interaction: "hover")
-                        Text("Double-clicked").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text("Double-clicked").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
                         Card(account: sample[2], config: config, logo: logo, interaction: "switching")
                       },
                       width: 400, scheme: scheme, to: "\(out)/switch-states-\(name).png")

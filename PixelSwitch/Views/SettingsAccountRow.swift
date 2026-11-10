@@ -137,7 +137,7 @@ struct SettingsAccountRow: View {
         let columnWidth = WindowColumnMetrics.width(bundle: L10n.bundle)
         return HStack(spacing: 10) {
             Image(systemName: "line.3.horizontal")
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.textSecondary)
                 .accessibilityHidden(true)
 
             priorityControl
@@ -157,17 +157,17 @@ struct SettingsAccountRow: View {
                 if let subtitle {
                     Text(verbatim: subtitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
                 resetNote
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
                 if let manualNote {
                     manualNote
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -230,7 +230,7 @@ struct SettingsAccountRow: View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Priority")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.textSecondary)
                 .accessibilityHidden(true)
             HStack(spacing: 4) {
                 Menu {
@@ -298,7 +298,7 @@ struct SettingsAccountRow: View {
         return VStack(alignment: .leading, spacing: 2) {
             caption
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.textSecondary)
                 .accessibilityHidden(true)
             HStack(spacing: 4) {
                 Menu {

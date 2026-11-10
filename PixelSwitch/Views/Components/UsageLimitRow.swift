@@ -3,7 +3,7 @@ import SwiftUI
 /// One limit's row on an account's Usage card.
 ///
 /// Which limit a row is and how full it is are shown by different things, on
-/// purpose. The chip, its symbol and the row's tint are the limit's identity
+/// purpose. The chip and its symbol are the limit's identity
 /// and never change with usage; the bar fill turns red as a limit runs out.
 /// Before this, a card's three bars were coloured only by how full they were,
 /// so Weekly and Fable were both blue, and both red once they were nearly out.
@@ -12,7 +12,7 @@ import SwiftUI
 /// drawn in the limit's own colour, on a row tinted with that same colour, and
 /// the founder's verdict was blunt: "the text is the same color as the
 /// background... I want you to make the text black." So every figure and label
-/// here is plain text, and the colour lives in the chip, the tint and the bar,
+/// here is plain text, and the colour lives in the chip and the bar,
 /// which are shapes rather than type. The one exception is the used-percentage
 /// when a limit is nearly gone: red on a green, blue or purple tint is the
 /// opposite of camouflage, and losing that alarm would cost more than it saved.
@@ -90,12 +90,9 @@ struct UsageLimitRow: View {
         .padding(.vertical, 7)
         .padding(.horizontal, 8)
         .background(
-            // Two layers: a neutral inset so the row keeps its contrast on a
-            // coloured account card, then the limit's own tint on top.
-            ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(.cardFill)
-                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(identityColor.opacity(0.10))
-            }
+            // One solid tile, so every word and bar sits on a known colour. The
+            // limit's own colour stays in the chip.
+            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(.rowTile)
         )
     }
 

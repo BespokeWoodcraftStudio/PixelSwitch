@@ -18,7 +18,7 @@ struct RemoteControlSection: View {
                     Text("Command-line tool")
                     Text(statusText)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
@@ -36,14 +36,14 @@ struct RemoteControlSection: View {
                     .foregroundStyle(isListening ? .green : .red)
                 Text(listeningText)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("To let Claude on another Mac control PixelSwitch, add this to its MCP settings. That Mac must be able to reach this one with SSH.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(verbatim: snippet)
                     .font(.caption.monospaced())
@@ -62,7 +62,7 @@ struct RemoteControlSection: View {
                     Spacer()
                     Text(verbatim: CommandLineToolInstaller.sshExample(host: host))
                         .font(.caption2.monospaced())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.textSecondary)
                         .textSelection(.enabled)
                         .lineLimit(1)
                         .truncationMode(.middle)

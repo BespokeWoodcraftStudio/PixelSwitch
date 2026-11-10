@@ -46,7 +46,7 @@ struct SignInView: View {
                     .font(.headline)
                 Text("Sign in as \(displayed(email)).")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
             }
         }
     }
@@ -90,16 +90,16 @@ struct SignInView: View {
                 .disabled(!isWaiting)
                 Text("Paste it into any browser on this Mac. It finishes by itself.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
             } else if let notice = session.notice {
                 Text(verbatim: notice)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if !session.state.isFinished {
                 Text("Waiting for the link…")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
             }
         }
     }
@@ -111,7 +111,7 @@ struct SignInView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Open the link on the other device and sign in. The page then shows a code: paste it here.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
                     if let link = session.manualLink { copy(link, as: .manual) }
@@ -133,7 +133,7 @@ struct SignInView: View {
                 }
                 Text("Also works on this Mac if the page doesn't finish by itself.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.textSecondary)
             }
             .padding(.top, 6)
         } label: {
@@ -164,7 +164,7 @@ struct SignInView: View {
             statusIcon
             statusText
                 .font(.caption)
-                .foregroundStyle(statusIsError ? Color.red : Color.secondary)
+                .foregroundStyle(statusIsError ? Color.red : Color.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
             if session.state.isFinished {
@@ -188,7 +188,7 @@ struct SignInView: View {
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         case .cancelled:
-            Image(systemName: "xmark.circle").foregroundStyle(.secondary)
+            Image(systemName: "xmark.circle").foregroundStyle(.textSecondary)
         }
     }
 

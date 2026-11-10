@@ -107,7 +107,7 @@ struct UsageDashboardView: View {
             HStack(spacing: 8) {
                 Image(systemName: "dollarsign.circle")
                     .font(.subheadline)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(.costGreen)
                 Text("Today's API-Equivalent Cost")
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
@@ -117,7 +117,7 @@ struct UsageDashboardView: View {
             StatWithTooltip(tooltip: Self.costDisclaimer) {
                 Text(cost >= 1 ? String(format: "$%.2f", cost) : String(format: "$%.4f", cost))
                     .font(.title.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.green)
+                    .foregroundStyle(.costGreen)
             }
         }
         .cardStyle()
@@ -189,14 +189,14 @@ struct UsageDashboardView: View {
             VStack(spacing: 3) {
                 Text("\(count)")
                     .font(.subheadline.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(count > 0 ? .primary : .quaternary)
+                    .foregroundStyle(count > 0 ? Color.primary : Color.textSecondary)
                 HStack(spacing: 3) {
                     Circle()
                         .fill(modelColor(name))
                         .frame(width: 7, height: 7)
                     Text(name)
                         .font(.caption2)
-                        .foregroundStyle(count > 0 ? .tertiary : .quaternary)
+                        .foregroundStyle(.textSecondary)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -244,7 +244,7 @@ struct UsageDashboardView: View {
                 if let errorState = appState.accountUsageErrors[account.id] {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "exclamationmark.triangle")
-                            .foregroundStyle(.yellow)
+                            .foregroundStyle(.limitWarn)
                             .font(.caption)
                         Text(errorState.message)
                             .font(.caption2)
@@ -259,7 +259,7 @@ struct UsageDashboardView: View {
             } else if let errorState = appState.accountUsageErrors[account.id] {
                 HStack(alignment: .top) {
                     Image(systemName: errorState.isRateLimited ? "timer" : (errorState.isExpired ? "exclamationmark.triangle" : "xmark.circle"))
-                        .foregroundStyle(errorState.isExpired ? .yellow : .red)
+                        .foregroundStyle(errorState.isExpired ? .limitWarn : .limitCrit)
                     Text(errorState.message)
                         .font(.caption)
                         .foregroundStyle(.textSecondary)
@@ -275,7 +275,7 @@ struct UsageDashboardView: View {
                 // text here made healthy accounts look broken.
                 HStack {
                     Image(systemName: "hourglass")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                     Text("Waiting for usage data...")
                         .font(.caption)
                         .foregroundStyle(.textSecondary)
@@ -416,7 +416,7 @@ struct UsageDashboardView: View {
                     Text("Switching…")
                         .font(.caption2.weight(.semibold))
                 }
-                .foregroundStyle(.activeAccountRing)
+                .foregroundStyle(.brandText)
                 .transition(.opacity)
             } else if hoveredAccount == account.id && canSwitch(to: account) {
                 Text("Double-click to switch")
@@ -453,7 +453,7 @@ struct UsageDashboardView: View {
         HStack(spacing: 8) {
             AccountGlyph(
                 provider: account.provider,
-                tint: colorCodeAccounts ? AccountPalette.color(swatch) : (account.isActive ? Color.brand : Color.secondary),
+                tint: colorCodeAccounts ? AccountPalette.color(swatch) : (account.isActive ? Color.brand : Color.textSecondary),
                 size: 17
             )
 
@@ -503,8 +503,8 @@ struct UsageDashboardView: View {
     private func extraUsageRow(_ extra: ExtraUsage?) -> some View {
         if let extra {
             let enabled = extra.isEnabled == true
-            let iconColor: Color = enabled ? .orange : .gray
-            let statusColor: Color = enabled ? .orange : .gray
+            let iconColor: Color = enabled ? .limitWarn : .textSecondary
+            let statusColor: Color = enabled ? .limitWarn : .textSecondary
             HStack(spacing: 6) {
                 Image(systemName: enabled ? "bolt.fill" : "bolt.slash")
                     .font(.caption)

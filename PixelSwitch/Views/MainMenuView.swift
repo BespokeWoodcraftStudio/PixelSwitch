@@ -148,7 +148,7 @@ struct MainMenuView: View {
                     }
             }
         )
-        .background(.ultraThinMaterial)
+        .background(Color.popoverBackground)
         .onAppear {
             popoverLog.info("[appear] tab=\(self.selectedTab.rawValue) chrome=\(self.chromeHeight) usage=\(self.usageContentHeight) popover=\(self.popoverHeight)")
         }
@@ -192,7 +192,7 @@ struct MainMenuView: View {
     private var promoBannerView: some View {
         HStack {
             Image(systemName: "gift.fill")
-                .foregroundStyle(.brand)
+                .foregroundStyle(.brandText)
             
             VStack(alignment: .leading, spacing: 2) {
                 Text("Double Usage Active")
@@ -322,7 +322,7 @@ struct MainMenuView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
-                    .foregroundStyle(selectedTab == tab ? .white : .textSecondary)
+                    .foregroundStyle(selectedTab == tab ? .textOnFill : .textSecondary)
                     .contentShape(Rectangle())
                     .onTapGesture {
                         withAnimation(.easeInOut(duration: 0.15)) {
@@ -343,7 +343,7 @@ struct MainMenuView: View {
         HStack {
             if let error = appState.errorMessage {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.limitWarn)
                     .font(.caption)
                 Text(error)
                     .font(.caption2)

@@ -85,7 +85,7 @@ struct SettingsView: View {
                 }
                 Text("How far back to parse Claude session transcripts for cost and activity stats. Memory use grows with the window; longer windows also lengthen the first scan after launch.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
             }
 
             Section("Auto-switch") {
@@ -100,7 +100,7 @@ struct SettingsView: View {
                     Toggle("Also switch when Fable runs out", isOn: $autoSwitchOnFable)
                     Text("Fable uses the weekly limit.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                     Picker("Choose the next account by", selection: $autoSwitchStrategy) {
                         Text("Most room left").tag(AutoSwitchStrategy.mostRoom)
                         Text("Priority (lowest number first)").tag(AutoSwitchStrategy.myOrder)
@@ -108,7 +108,7 @@ struct SettingsView: View {
                     }
                     Text(strategyExplanation)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                     if autoSwitchStrategy == .resetsSoonest {
                         Toggle("Switch early to use quota before it resets", isOn: $autoSwitchDrainEarly)
                         if autoSwitchDrainEarly {
@@ -118,15 +118,15 @@ struct SettingsView: View {
                             }
                             Text("Switches before the active account reaches its threshold when another account's weekly quota resets within this many hours, sooner than the active account's, and that account still has room.")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.textSecondary)
                         }
                     }
                     Text("When the active account's 5-hour, weekly or Fable usage reaches its threshold, PixelSwitch switches to another account that is under its own threshold (at least a point under) and is not Manual only. Turn off the Fable switch above to leave Fable as a reading only, while the 5-hour and weekly limits keep switching. Checked on every refresh; a 5-minute cooldown prevents rapid flip-flopping.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                     Text("If the account you're using has no active subscription, PixelSwitch moves you right away to another account that still has room and is not Manual only.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                 }
             }
 
@@ -134,11 +134,11 @@ struct SettingsView: View {
                 Toggle("Hide part of each email address", isOn: $maskEmails)
                 Text("Off by default, so you can see exactly which account is which. Turn it on to mask addresses (cla*@*.com) before sharing your screen or sending a screenshot.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
                 Toggle("Give each account its own color", isOn: $colorCodeAccounts)
                 Text("Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
             }
 
             Section("Appearance") {
@@ -191,13 +191,13 @@ struct SettingsView: View {
                             Text("Low remaining threshold")
                             Spacer()
                             Text("\(Int(menuBarConfig.lowRemainingWarningThreshold))%")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.textSecondary)
                                 .monospacedDigit()
                         }
                         Slider(value: $menuBarConfig.lowRemainingWarningThreshold, in: 0...100, step: 5)
                         Text("Warns when this much quota or less is left. At 30%, bars turn at 70% used.")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.textSecondary)
                     }
                 }
             }
@@ -226,10 +226,10 @@ struct SettingsView: View {
                         .font(.title.weight(.semibold))
                     Text("Claude Code Account Switcher")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                     Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
                         .font(.caption.monospaced())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.textSecondary)
                 }
             }
 
@@ -256,7 +256,7 @@ struct SettingsView: View {
                     Text("Update automatically")
                     Text("Checks every 6 hours and installs new versions by itself, restarting PixelSwitch when no switch or sign-in is running. Off: it asks before installing.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -273,7 +273,7 @@ struct SettingsView: View {
                     pixelVenturesWordmark
                     Text(verbatim: "© 2026 Pixel Ventures")
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.textSecondary)
                     // A copyright notice, not a tagline. Most of the code in
                     // this app was written by other people and no licence has
                     // been granted over it, so naming them is not optional and
@@ -283,7 +283,7 @@ struct SettingsView: View {
                         Text(verbatim: "Includes code © Xueshi Qiao and contributors")
                     }
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.textSecondary)
                 }
 
                 Spacer()

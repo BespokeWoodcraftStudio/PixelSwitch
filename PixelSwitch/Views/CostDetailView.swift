@@ -38,7 +38,7 @@ struct CostDetailView: View {
             Text(formatCost(summary.todayCost))
                 .font(.system(size: 36, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(.green)
+                .foregroundStyle(.costGreen)
 
             if let today, !today.modelBreakdown.isEmpty {
                 Divider()
@@ -203,17 +203,17 @@ struct CostDetailView: View {
         return HStack(spacing: 8) {
             Text(shortDate(day.date))
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(isToday ? .brand : .secondary)
+                .foregroundStyle(isToday ? .brandText : .textSecondary)
                 .frame(width: 40, alignment: .leading)
 
             Text(formatCost(day.totalCost))
                 .font(.caption2.weight(.medium).monospacedDigit())
-                .foregroundStyle(isToday ? .brand : .primary)
+                .foregroundStyle(isToday ? .brandText : .primary)
                 .frame(width: 56, alignment: .trailing)
 
             GeometryReader { geo in
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(isToday ? Color.brand : Color.blue.opacity(0.6))
+                    .fill(isToday ? Color.brandText : Color.blue.opacity(0.85))
                     .frame(width: max(2, geo.size.width * barRatio), height: 8)
             }
             .frame(height: 8)
@@ -227,7 +227,7 @@ struct CostDetailView: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
-        .background(isToday ? .cardFillStrong : .clear)
+        .background(isToday ? .rowTile : .clear)
         .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 
@@ -253,7 +253,7 @@ struct CostDetailView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.seal.fill")
                             .font(.caption2)
-                            .foregroundStyle(.green)
+                            .foregroundStyle(.costGreen)
                         Text("Verified against ccusage \(v.ccusageVersion) on \(v.verifiedOn) — \(v.windowDays)-day total matched to the cent.")
                             .font(.caption2)
                             .foregroundStyle(.textSecondary)

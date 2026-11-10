@@ -22,10 +22,10 @@ struct SettingsThresholdDefaults: View {
             slider("Weekly default", value: weekly, set: onWeekly)
             Text("When no account under its weekly limit can take you, the session limit decides.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.textSecondary)
             Text("Any account can have its own threshold in Settings → Accounts, from 1% to 100%, or be Manual only so auto-switch never moves you to it. 100% uses an account until it is empty.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.textSecondary)
         }
     }
 
@@ -36,7 +36,7 @@ struct SettingsThresholdDefaults: View {
                 Spacer()
                 Text("\(Int(value))%")
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.textSecondary)
             }
             Slider(value: Binding(get: { value }, set: { set($0) }), in: AutoSwitchSettings.thresholdRange, step: 1)
         }

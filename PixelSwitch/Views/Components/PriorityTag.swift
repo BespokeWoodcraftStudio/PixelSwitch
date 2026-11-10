@@ -10,7 +10,7 @@ struct PriorityTag: View {
         Text(verbatim: "P\(priority)")
             .font(.caption2.weight(.semibold))
             .monospacedDigit()
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.textSecondary)
             .fixedSize()
             .help(Text("Priority"))
     }

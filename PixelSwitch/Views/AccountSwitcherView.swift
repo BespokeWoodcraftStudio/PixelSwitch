@@ -11,8 +11,6 @@ struct AccountSwitcherView: View {
     @State private var editingAccountId: UUID?
     @State private var editingLabel = ""
 
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -76,7 +74,7 @@ struct AccountSwitcherView: View {
             // The PixelSwitch mark, in the account's colour
             AccountGlyph(
                 provider: account.provider,
-                tint: colorCodeAccounts ? AccountPalette.color(swatch) : (account.isActive ? Color.brand : Color.secondary),
+                tint: colorCodeAccounts ? AccountPalette.color(swatch) : (account.isActive ? Color.brand : Color.textSecondary),
                 size: 20
             )
             .frame(width: 22, height: 22)
@@ -94,7 +92,7 @@ struct AccountSwitcherView: View {
                             commitLabelEdit(account)
                         } label: {
                             Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
+                                .foregroundStyle(.costGreen)
                         }
                         .buttonStyle(.plain)
 
@@ -161,12 +159,12 @@ struct AccountSwitcherView: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
                             .layoutPriority(1)
-                        Text(verbatim: "·").foregroundStyle(.quaternary).fixedSize()
+                        Text(verbatim: "·").foregroundStyle(.textSecondary).fixedSize()
                     }
                     if let sub = account.displaySubscriptionType {
                         Text(sub).fixedSize()
                         if !hasLabel {
-                            Text(verbatim: "·").foregroundStyle(.quaternary).fixedSize()
+                            Text(verbatim: "·").foregroundStyle(.textSecondary).fixedSize()
                         }
                     }
                     // Dropped when a label has pushed the address down here:
@@ -213,7 +211,7 @@ struct AccountSwitcherView: View {
             } label: {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.limitWarn)
             }
             .buttonStyle(.plain)
             .help("Re-authenticate (fix stale token)")
@@ -231,7 +229,7 @@ struct AccountSwitcherView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(account.isActive ? .cardFillStrong : .clear)
+                .fill(account.isActive ? .cardFillStrong : .cardFill)
                 // Same orange ring as the Usage tab, so "this is the one you
                 // are signed in to" looks identical wherever you are looking.
                 .strokeBorder(account.isActive ? Color.activeAccountRing : .cardBorder,
@@ -269,7 +267,7 @@ struct AccountSwitcherView: View {
                     .foregroundStyle(.textSecondary)
                 Text("Finish in the sign-in window.")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.textSecondary)
                     .multilineTextAlignment(.center)
                 Button("Show sign-in window") {
                     NotificationCenter.default.post(name: .pixelswitchShowSignIn, object: nil)
@@ -342,9 +340,7 @@ struct AccountSwitcherView: View {
                         .background(
                             RoundedRectangle(cornerRadius: 8)
                                 .strokeBorder(
-                                    colorScheme == .dark
-                                        ? Color.gray.opacity(0.4)
-                                        : Color.white.opacity(0.22),
+                                    Color.cardBorder,
                                     lineWidth: 1
                                 )
                         )

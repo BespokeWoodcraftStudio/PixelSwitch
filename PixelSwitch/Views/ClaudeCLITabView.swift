@@ -51,7 +51,7 @@ struct ClaudeCLITabView: View {
                     } else if !customInput.isEmpty {
                         Text("Press Return to apply.")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.textSecondary)
                     }
                 }
 
@@ -60,7 +60,7 @@ struct ClaudeCLITabView: View {
                         .foregroundStyle(.green)
                     Text("Currently using: \(ClaudeService.shared.claudePath)")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -71,14 +71,14 @@ struct ClaudeCLITabView: View {
                     Text("Installed")
                     Spacer()
                     Text(installedVersion ?? (isLoading ? "Checking…" : "—"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                         .monospacedDigit()
                 }
                 HStack {
                     Text("Latest")
                     Spacer()
                     Text(latestVersion ?? (isLoading ? "Checking…" : "—"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.textSecondary)
                         .monospacedDigit()
                     if let installed = installedVersion, let latest = latestVersion, installed != latest {
                         Text("Update available")

@@ -225,9 +225,12 @@ final class MenuBarConfig: ObservableObject {
         }
     }
 
-    /// The built-in palettes, kept verbatim from before the colors were
-    /// configurable. `.menuBar` is monochrome on purpose: it has to adapt to a
-    /// light or dark menu bar, which no fixed hex can do.
+    /// The built-in palettes. `.menuBar` is kept verbatim from before the colors
+    /// were configurable, and is monochrome on purpose: it has to adapt to a
+    /// light or dark menu bar, which no fixed hex can do. `.dashboard` keeps the
+    /// same green, orange and red at the same thresholds, but as deeper shades in
+    /// light appearance (the system ones were 2.0:1 to 3.2:1 as text on the
+    /// limit's tile); see `Color.limitOK`, `limitWarn` and `limitCrit`.
     private static func stockColor(utilization: Double?, context: LimitBarContext) -> Color {
         switch context {
         case .menuBar:
@@ -235,9 +238,9 @@ final class MenuBarConfig: ObservableObject {
             return .red
         case .dashboard:
             let pct = utilization ?? 0
-            if pct >= 90 { return .red }
-            if pct >= 60 { return .orange }
-            return .green
+            if pct >= 90 { return .limitCrit }
+            if pct >= 60 { return .limitWarn }
+            return .limitOK
         }
     }
 
