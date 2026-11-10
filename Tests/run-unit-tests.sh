@@ -56,6 +56,8 @@ swiftc -swift-version 6 \
   PixelSwitch/Services/UsageRequestError.swift \
   Tests/UnitTests/UsageErrorTests.swift \
   Tests/UnitTests/UsageGuardTests.swift \
+  PixelSwitch/Services/AuthHealth.swift \
+  Tests/UnitTests/AuthHealthTests.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
 "$OUT/pixelswitch-unit-tests"

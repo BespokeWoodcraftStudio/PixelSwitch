@@ -128,6 +128,30 @@ final class KeychainService: Sendable {
         }
     }
 
+    /// The same read as `readClaudeToken`, without its log lines: the live-login
+    /// watch (`AuthHealth`) reads the credential every 30 seconds, and a log line
+    /// each time would bury everything else. Nil when nothing could be read.
+    /// Reads the pipe before waiting (a credential of tens of kilobytes would
+    /// otherwise fill it and stall `security`), because this runs on a timer.
+    func readClaudeTokenQuietly() -> String? {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", claudeService, "-a", claudeAccount, "-w"]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
     /// Writes Claude Code's credential and confirms the stored bytes match.
     /// See `ClaudeTokenWriter` for how the secret reaches `/usr/bin/security`.
     func writeClaudeToken(_ token: String) -> Bool {

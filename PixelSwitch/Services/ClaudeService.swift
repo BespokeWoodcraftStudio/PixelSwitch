@@ -213,6 +213,22 @@ final class ClaudeService: @unchecked Sendable {
         return status
     }
 
+    /// What `claude auth status` says about the live login, for the live-login
+    /// watch (`AuthHealth`). Read-only; it spends no token. A non-zero exit is
+    /// what a logged-out CLI does (observed 2026-11-10: exit 1, 36 times in a row
+    /// while the credential was blank); a timeout, a CLI that will not start or
+    /// output that cannot be read says nothing about the login.
+    func probeAuthStatus() async -> AuthHealth.CLIProbe {
+        do {
+            let status = try await getAuthStatus()
+            return AuthHealth.probe(exitedZeroLoggedIn: status.loggedIn)
+        } catch ClaudeServiceError.cliError {
+            return .failed
+        } catch {
+            return .unavailable
+        }
+    }
+
     func isClaudeAvailable() async -> Bool {
         do {
             let version = try await runClaude(args: ["--version"], timeout: 30)
