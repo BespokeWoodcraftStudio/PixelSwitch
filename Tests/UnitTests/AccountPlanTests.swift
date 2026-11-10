@@ -771,8 +771,10 @@ private func planMember(_ source: String, startingAt signature: String) -> Strin
 
     // Views the harness cannot compile.
     let strip = planSource("PixelSwitch/Views/MenuBarStripView.swift")
-    check(strip.contains("MenuBarModule.visibleModules(config.modules, activeHasSessionLimit: appState.activeAccount?.hasSessionLimit ?? true)") && !strip.contains("ForEach(config.modules)"),
-          "ultra pins: the menu bar strip draws config.modules through visibleModules, with no active account read as having a session limit")
+    check(strip.contains("ForEach(MenuBarModule.visibleModules(config.modules, activeAccount: appState.activeAccount)) { module in")
+          && !strip.contains("ForEach(config.modules)") && !strip.contains("activeHasSessionLimit") && !strip.contains("hasSessionLimit")
+          && !strip.contains("usesSessionWindow") && !strip.contains(".filter"),
+          "ultra pins: the menu bar strip draws config.modules through the tested MenuBarModule.visibleModules(_:activeAccount:) and has no filter of its own")
     let dashboard = planSource("PixelSwitch/Views/UsageDashboardView.swift")
     check(dashboard.contains("usageBars(usage, showsSession: account.hasSessionLimit)") && dashboard.contains("if showsSession, let session = usage.fiveHour"),
           "ultra pins: the Usage card draws the Session row only for an account with a 5-hour limit")
