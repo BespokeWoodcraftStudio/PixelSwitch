@@ -148,10 +148,18 @@ final class AppState: ObservableObject {
     private var isAuthWatchTicking = false
     /// The two-read confirmation that the active account's live login is dead.
     private var liveLoginWatch = LiveLoginWatch()
-    /// A confirmed-dead login auto-switch has not yet had its chance to leave:
-    /// set on confirmation, cleared when auto-switch is evaluated (the timer
-    /// retries if a refresh or another evaluation was running at that moment).
-    private var deadLoginNeedsEvaluation = false
+    /// How many more times the 30-second look may ask auto-switch to leave the
+    /// confirmed-dead login: `DeadLoginPolicy.evaluationsPerConfirmation` on
+    /// confirmation, one used per evaluation (a refresh or another evaluation
+    /// running at that moment uses none), cleared by a switch, a sign-in or a
+    /// recovery. A try that moved nothing, because the best candidate's fresh
+    /// reading failed, is made again on the next look rather than at the next
+    /// 5-minute refresh.
+    private var deadLoginEvaluationsLeft = 0
+    /// The last renewal this app did of each saved login, by account id, tied to
+    /// the access token it produced: a switch that follows within
+    /// `TargetRenewalPolicy.recentRenewalWindow` does not renew it a second time.
+    private var lastRenewals: [UUID: TargetRenewalPolicy.Renewal] = [:]
 
     // MARK: - Initialization
 
@@ -308,7 +316,9 @@ final class AppState: ObservableObject {
             liveLoginWatch.noteProbe(at: Date())
         }
 
-        switch liveLoginWatch.observe(AuthHealth.judge(shape: shape, cli: probe), account: active.id, at: Date()) {
+        let change = liveLoginWatch.observe(AuthHealth.judge(shape: shape, cli: probe), account: active.id, at: Date())
+        let reaction = DeadLoginPolicy.reaction(to: change, autoSwitchEnabled: autoSwitchEnabled)
+        switch change {
         case .none:
             break
         case .firstSighting:
@@ -316,39 +326,49 @@ final class AppState: ObservableObject {
         case .confirmed:
             lastStayingPutNote = nil
             log.warning("[authWatch] Active \(active.id): the live login is signed out (credential blank, claude auth status failed on two looks); marking it as needing sign-in")
-            flagNeedsReauth(active)
-            switch DeadLoginPolicy.response(autoSwitchEnabled: autoSwitchEnabled, activeIsManualOnly: windowRule(for: active).manualOnly) {
-            case .leaveNow:
-                log.info("[authWatch] Auto-switch will move you off \(active.id) to an account that is signed in")
-                deadLoginNeedsEvaluation = true
-            case .stayAndShow(.autoSwitchOff):
+            if reaction.evaluations == 0 {
                 log.info("[authWatch] Auto-switch is off, so PixelSwitch stays on \(active.id); it is shown as needing sign-in")
-            case .stayAndShow(.manualOnly):
-                log.info("[authWatch] \(active.id) is Manual only, so PixelSwitch does not move you off it; it is shown as needing sign-in")
+            } else {
+                log.info("[authWatch] Auto-switch will move you off \(active.id) to an account that is signed in")
             }
         case .recovered:
-            deadLoginNeedsEvaluation = false
             lastStayingPutNote = nil
             log.info("[authWatch] Active \(active.id): the live login is back; a refresh will prove whose it is")
             // The refresh proves the owner of the new login (`reconcileLiveLogin`) and clears the
             // flag on whichever account holds it. Not cleared here: a login that came back as
             // ANOTHER account's must not make this account's dead saved login look healthy.
-            if !isRefreshing { Task { await self.refresh() } }
         }
+        if reaction.flagActive { flagNeedsReauth(active) }
+        if let evaluations = reaction.evaluations { deadLoginEvaluationsLeft = evaluations }
+        if reaction.refreshAfter, !isRefreshing { Task { await self.refresh() } }
 
         // Give auto-switch its chance, now and not at the next 5-minute refresh. When a
-        // refresh or another evaluation is running, the next look tries again.
-        if deadLoginNeedsEvaluation, leavesDeadLogin(active), !isRefreshing, !isEvaluatingAutoSwitch, !isSwitching, !isLoggingIn {
-            deadLoginNeedsEvaluation = false
+        // refresh or another evaluation is running, the next look tries again; so it does
+        // when this try moved nothing (the best candidate's reading failed).
+        if DeadLoginPolicy.mayEvaluateNow(
+            evaluationsLeft: deadLoginEvaluationsLeft, leavesActive: leavesDeadLogin(active),
+            isRefreshing: isRefreshing, isEvaluating: isEvaluatingAutoSwitch, isSwitching: isSwitching, isLoggingIn: isLoggingIn) {
+            deadLoginEvaluationsLeft -= 1
             await evaluateAutoSwitch()
         }
     }
 
     /// Whether the account's live login is confirmed dead and the user's settings
-    /// let auto-switch leave it (`DeadLoginPolicy`: auto-switch on, not Manual only).
+    /// let auto-switch leave it (`DeadLoginPolicy`: auto-switch on; Manual only
+    /// does not matter, a login that cannot work is left either way).
     private func leavesDeadLogin(_ account: Account) -> Bool {
         liveLoginWatch.confirmedDeadAccount == account.id
-            && DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: autoSwitchEnabled, activeIsManualOnly: windowRule(for: account).manualOnly)
+            && DeadLoginPolicy.leavesAutomatically(autoSwitchEnabled: autoSwitchEnabled)
+    }
+
+    /// The live login was replaced, by a switch, a sign-in or another account's
+    /// login being followed: what the watch confirmed about the old one (and the
+    /// tries auto-switch had left to leave it) no longer applies. Without this a
+    /// just re-signed account still reads as dead until the next 30-second look,
+    /// and the refresh that follows the sign-in could move you off it.
+    private func liveLoginReplaced() {
+        liveLoginWatch.reset()
+        deadLoginEvaluationsLeft = 0
     }
 
     /// What the engine's `isUnusable` input and the cooldown bypass act on: no
@@ -371,13 +391,24 @@ final class AppState: ObservableObject {
     /// After a switch off a live login that was confirmed dead. The saved copy of
     /// the account just left shares the dead grant's lineage but still holds an
     /// unexpired access token, so it would look healthy and, five minutes later,
-    /// be the best target. Not assumed: the server decides. The saved login is
-    /// renewed through the existing path; `invalid_grant` flags it, a renewal
-    /// that works clears the flag, and no answer leaves it flagged.
+    /// be the best target. The server is asked: the saved login is renewed through
+    /// the existing path. `invalid_grant` keeps it flagged; a renewal that works
+    /// clears the flag AND the "expired" card, so the account is switchable at
+    /// once. When Anthropic gives no answer (offline, a 5xx) the flag stays, which
+    /// is the safe side: Claude Code itself blanked this login a minute ago, so a
+    /// refusal is by far the likelier answer, and signing in again clears it.
+    ///
+    /// Runs on its own, after the switch has released the switching flag, because
+    /// the renewal can take a minute or more offline and must not hold up another
+    /// switch or a sign-in. Nothing is lost by that: a switch back to this account
+    /// renews it first (`validatedTargetBackup`) and joins the renewal in flight.
     private func settleLeftLiveLogin(_ accountId: UUID) async {
         guard let left = accounts.first(where: { $0.id == accountId }) else { return }
         let outcome = await refreshBackupInPlace(for: left)
         if case .refreshed = outcome {
+            // The flag went with the old token; the card's re-sign state does not, and would keep
+            // the account unswitchable until its round-robin visit. Clear it and read it next.
+            noteCredentialChanged(for: left)
             log.info("[authWatch] \(left.id)'s saved login still renews, so it is not marked as needing sign-in")
         } else if outcome.requiresReauth {
             log.info("[authWatch] \(left.id)'s saved login was refused by the server; it stays marked as needing sign-in")
@@ -656,6 +687,9 @@ final class AppState: ObservableObject {
             accounts[existing].lastUsed = Date()
             activeAccount = accounts[existing]
             forgetRemovedLogins()
+            // The live login is a new one: forget what the watch confirmed about the
+            // old, or the next refresh could move you off the account just signed in.
+            liveLoginReplaced()
             // A login is a deliberate account choice; grant it the same
             // auto-switch grace period a manual switch gets.
             lastAutoSwitchAt = Date()
@@ -702,6 +736,8 @@ final class AppState: ObservableObject {
             UserDefaults.standard.removeObject(forKey: removedLastAccountKey)
             forgetRemovedLogins()
             activeAccount = account
+            // The live login is a new one: forget what the watch confirmed about the old.
+            liveLoginReplaced()
             // A login is a deliberate account choice; grant it the same
             // auto-switch grace period a manual switch gets.
             lastAutoSwitchAt = Date()
@@ -766,6 +802,11 @@ final class AppState: ObservableObject {
             // A new login: forget the old one's park, refusal, cool-down and
             // needs-reauth flag, and read this account on the next cycle.
             if captured { noteCredentialChanged(for: account) }
+            // The CLI really is on this account now, so the live login is a new one:
+            // forget what the watch confirmed about the old (when this account's login
+            // was the dead one, the refresh below must not see it as dead and move you
+            // off the account just repaired). Done even when the capture failed.
+            liveLoginReplaced()
 
             // 5. Update account metadata. Done even when the capture failed —
             // the CLI really is on this account now — but a failed capture must
@@ -1307,12 +1348,11 @@ final class AppState: ObservableObject {
             noteCredentialChanged(for: account)
             if let liveOwner, liveOwner.id != account.id { noteCredentialChanged(for: liveOwner) }
             // Leaving a live login the watch confirmed dead: let the server say whether
-            // the account just left is healthy, before anything can pick it as a target.
+            // the account just left is healthy (on its own, see `settleLeftLiveLogin`).
             // Whatever the live login was, it is a different one now.
             let leftDeadLogin = liveLoginWatch.confirmedDeadAccount
-            liveLoginWatch.reset()
-            deadLoginNeedsEvaluation = false
-            if let leftDeadLogin, leftDeadLogin != account.id { await settleLeftLiveLogin(leftDeadLogin) }
+            liveLoginReplaced()
+            if let leftDeadLogin, leftDeadLogin != account.id { Task { await self.settleLeftLiveLogin(leftDeadLogin) } }
 
             await refresh()
             // `refresh()` clears errorMessage, so surface the warning afterwards.
@@ -1434,10 +1474,14 @@ final class AppState: ObservableObject {
                                           toOwnerUuid: identity.uuid, ownerEmail: identity.email)
     }
 
-    /// The target's backup, if its login provably is the target's. An expired
-    /// login is renewed first (with the usage refresh's own guards) so the API
-    /// can be asked; if the API still cannot say, only a login that is also
-    /// saved under another account is refused.
+    /// The target's backup, if its login provably is the target's. EVERY target
+    /// is renewed first (`TargetRenewalPolicy`: with the usage refresh's own
+    /// guards, and not again within minutes of this app renewing it), so the
+    /// server's verdict on its refresh grant arrives before the switch and not
+    /// when Claude Code gets stuck on it: a refusal flags the account and stops
+    /// the switch, no answer lets it go ahead. The renewed login also lets the API
+    /// be asked whose it is; if the API still cannot say, only a login that is
+    /// also saved under another account is refused.
     private func validatedTargetBackup(for account: Account) async -> Result<AccountBackup, SwitchProblem> {
         var backup: AccountBackup
         switch keychain.lookupAccountBackup(forAccountId: account.id.uuidString) {
@@ -1463,18 +1507,26 @@ final class AppState: ObservableObject {
         /// Set when a renewal produced the login (and the API's word on whose it is)
         /// the switch carries on with.
         var renewedNow = false
-        let mustRenewSoon = TargetRenewalPolicy.mustRenewBeforeSwitch(expiresAt: login.expiresAt, now: Date())
+        let mustRenew = TargetRenewalPolicy.mustRenewBeforeSwitch(
+            savedAccessTokenFingerprint: TokenFingerprint.of(login.accessToken), lastRenewal: lastRenewals[account.id], now: Date())
 
         /// Renews the saved login, then asks the API about the renewed one.
         /// Returns the reason to stop, or nil to carry on. `loginIsDead` is the
-        /// expired-or-refused case; false is a login that is only about to expire
-        /// (`TargetRenewalPolicy`), where only the server's own verdict stops the switch.
+        /// expired-or-refused case; false is a login whose access token is still
+        /// good (`TargetRenewalPolicy`), where only the server's own verdict stops the switch.
         func renewAndIdentify(loginIsDead: Bool = true) async -> SwitchProblem? {
             let outcome = await refreshBackupInPlace(for: account)
             switch TargetRenewalPolicy.step(after: outcome, loginIsDead: loginIsDead) {
             case .useRenewedLogin:
                 if case .refreshed(let renewed) = outcome {
-                    if let current = keychain.getAccountBackup(forAccountId: account.id.uuidString) { backup = current }
+                    // The renewal rotated the refresh token and saved the new pair; the pair
+                    // read before it is spent. The switch carries on with the renewed one even
+                    // when the store cannot be read back right now (writing the spent pair live
+                    // would let reconcile overwrite the rotated token with a dead one).
+                    let saved = TargetRenewalPolicy.savedLoginAfterRenewal(
+                        renewed: renewed, detailsBefore: backup.oauthAccount,
+                        reread: keychain.getAccountBackup(forAccountId: account.id.uuidString).map { ($0.token, $0.oauthAccount) })
+                    backup = AccountBackup(token: saved.token, oauthAccount: saved.details)
                     if let renewedLogin = CredentialOwnership.login(fromCredential: renewed) {
                         login = renewedLogin
                         identity = await claudeService.accountIdentity(forAccessToken: renewedLogin.accessToken, expiresAt: renewedLogin.expiresAt, account: account.id)
@@ -1485,7 +1537,7 @@ final class AppState: ObservableObject {
             case .switchWithoutRenewal:
                 // A blip (network, rate limit, locked Keychain): nothing was
                 // spent, so go ahead as before; Claude Code renews it on first use.
-                log.warning("[switchTo] Could not renew \(account.email)'s \(loginIsDead ? "expired" : "soon-to-expire") login right now; switching anyway")
+                log.warning("[switchTo] Could not renew \(account.email)'s \(loginIsDead ? "expired" : "saved") login right now; switching anyway")
                 return nil
             case .refuseBelongsToAnother(let owner):
                 return SwitchProblem(message: String(localized: "The login saved for \(account.email) belongs to \(owner). Re-authenticate \(account.email) to fix it.", bundle: L10n.bundle))
@@ -1504,10 +1556,10 @@ final class AppState: ObservableObject {
         case .refreshFirst:
             if let problem = await renewAndIdentify() { return .failure(problem) }
         case .request:
-            // A login good for under an hour is renewed before the switch, so a revoked
-            // refresh grant is found now and not when Claude Code gets stuck on it.
-            if mustRenewSoon {
-                log.info("[switchTo] \(account.email)'s saved login (token \(TokenFingerprint.forLog(TokenFingerprint.of(login.accessToken)))) expires within an hour; renewing it before switching")
+            // Every target is renewed before the switch, so a revoked or spent refresh
+            // grant is found now and not when Claude Code gets stuck on it.
+            if mustRenew {
+                log.info("[switchTo] Renewing \(account.email)'s saved login (token \(TokenFingerprint.forLog(TokenFingerprint.of(login.accessToken)))) before switching")
                 if let problem = await renewAndIdentify(loginIsDead: false) { return .failure(problem) }
             }
             if !renewedNow {
@@ -1523,11 +1575,11 @@ final class AppState: ObservableObject {
             // Not asking the usage or profile endpoint now. An expired or
             // refused login can still be renewed (a POST to the token endpoint,
             // outside both limits), as it always was for an expired target; so
-            // can one that expires within the hour.
+            // can one that is still good.
             if login.isExpired || requestGuard.wasRejected(account: account.id, accessToken: login.accessToken) {
                 if let problem = await renewAndIdentify() { return .failure(problem) }
-            } else if mustRenewSoon {
-                log.info("[switchTo] \(account.email)'s saved login expires within an hour; renewing it before switching")
+            } else if mustRenew {
+                log.info("[switchTo] Renewing \(account.email)'s saved login before switching")
                 if let problem = await renewAndIdentify(loginIsDead: false) { return .failure(problem) }
             } else {
                 // The lineage check below still refuses a login that is also
@@ -1564,6 +1616,9 @@ final class AppState: ObservableObject {
         // It now reads its live login, which is not the saved one the guard
         // may have flagged; forget whatever was earned on the old token.
         noteCredentialChanged(for: account)
+        // And the live login is a different one now: whatever the watch confirmed
+        // about the old one no longer applies.
+        liveLoginReplaced()
     }
 
     /// Keeps PixelSwitch tied to the live login rather than to ~/.claude.json:
@@ -1696,6 +1751,8 @@ final class AppState: ObservableObject {
         // account with no subscription or a dead login (`isUnusable`), which
         // nothing can move you back to.
         let activeUnusable = isUnusable(active)
+        // The engine calls both "unusable" (rule noSubscription); the log says which it was.
+        let leavingDeadLogin = leavesDeadLogin(active)
         if AutoSwitchEngine.cooldownHolds(lastSwitchAt: lastAutoSwitchAt, cooldown: autoSwitchCooldown, activeUnusable: activeUnusable) {
             return
         }
@@ -1724,7 +1781,7 @@ final class AppState: ObservableObject {
             drainEarly: drainEarly,
             drainWithin: drainWithin
         ) else {
-            if leavesDeadLogin(active) {
+            if leavingDeadLogin {
                 noteDeadLoginStayingPut(active)
             } else if activeUnusable {
                 log.warning("[autoSwitch] Active \(active.id) has no active subscription, and no other account has room; staying put")
@@ -1750,10 +1807,12 @@ final class AppState: ObservableObject {
                                                    defaults: relaxed ? defaults.relaxed : defaults)
         let manualNote = activeRule.manualOnly ? ", manual only: left at the default" : ""
         let relaxedNote = relaxed ? "; no account under its weekly limit can take you, so the session limit decides" : ""
+        // The engine's rule for "leave this account now" is called noSubscription whatever the
+        // cause; the LOG names the real one (the event keeps the engine's trigger, unchanged).
+        let ruleName = (trigger == .noSubscription && leavingDeadLogin) ? "needsSignIn" : trigger.rawValue
         if trigger == .noSubscription {
-            // The engine's rule for "leave this account now"; the cause is what the log says.
-            let why = leavesDeadLogin(active) ? "needs sign-in (cause needsSignIn: Claude Code signed it out)" : "has no active subscription"
-            log.info("[autoSwitch] Rule \(trigger.rawValue), strategy \(strategy.rawValue): active \(active.id) \(why); \(ranked.count) candidate(s)\(relaxedNote)")
+            let why = leavingDeadLogin ? "needs sign-in (Claude Code signed it out)" : "has no active subscription"
+            log.info("[autoSwitch] Rule \(ruleName), strategy \(strategy.rawValue): active \(active.id) \(why); \(ranked.count) candidate(s)\(relaxedNote)")
         } else {
             let activeUtil: Double
             let onWhat: String
@@ -1816,23 +1875,25 @@ final class AppState: ObservableObject {
             }
 
             let verifiedUtil = verified.value(for: limit) ?? -1
-            log.info("[autoSwitch] Switching to \(target.id) by rule \(trigger.rawValue) on \(limit.rawValue), verified at \(String(format: "%.0f", verifiedUtil))%\(relaxedNote)")
+            log.info("[autoSwitch] Switching to \(target.id) by rule \(ruleName) on \(limit.rawValue), verified at \(String(format: "%.0f", verifiedUtil))%\(relaxedNote)")
             lastAutoSwitchAt = Date()
             // switchTo() calls refresh() -> evaluateAutoSwitch() again, but the
             // re-entrancy flag + the freshly-set cooldown make that a no-op.
             // The active account visibly changes in the menu bar as feedback.
             await switchTo(target)
-            if activeAccount?.id == target.id {
+            switch TargetRenewalPolicy.afterSwitchAttempt(
+                activeNow: activeAccount?.id, previousActive: active.id, target: target.id, targetStillSwitchable: isSwitchable(target)) {
+            case .completed:
                 lastAutoSwitch = AutoSwitchRecord(from: active.id, to: target.id, limit: limit, trigger: trigger,
                                                   window: plan.window, relaxed: relaxed, at: Date())
-            } else if activeAccount?.id == active.id, !isSwitchable(target) {
+            case .targetNeedsSignIn:
                 // Renewing the target before the switch learned that the server refused its
                 // login: it is flagged and no longer switchable. Choose another target (one
                 // more fresh reading is allowed; each failure flags an account for good).
                 log.warning("[autoSwitch] Candidate \(target.id) needs sign-in (its saved login was refused); trying next")
                 freshRequestBudget += 1
                 continue
-            } else {
+            case .didNotComplete:
                 log.warning("[autoSwitch] Switch to \(target.id) did not complete")
             }
             return
@@ -1840,7 +1901,10 @@ final class AppState: ObservableObject {
         switch trigger {
         case .threshold: log.info("[autoSwitch] Threshold reached but no candidate verified; staying put")
         case .drainEarly: log.info("[autoSwitch] Early drain found no verified candidate; staying put")
-        case .noSubscription: log.info("[autoSwitch] No subscription on the active account, and no candidate verified; staying put")
+        case .noSubscription:
+            log.info(leavingDeadLogin
+                     ? "[autoSwitch] The active account needs sign-in, and no candidate verified; staying put"
+                     : "[autoSwitch] No subscription on the active account, and no candidate verified; staying put")
         }
     }
 
@@ -2208,8 +2272,12 @@ final class AppState: ObservableObject {
         renewalsInFlight[accountId] = nil
         // Settled once, by the call that started the renewal. What the server
         // said decides what the account is allowed to do next.
-        if case .refreshed = outcome {
+        if case .refreshed(let renewed) = outcome {
             noteCredentialChanged(for: account, readNext: false)
+            // Remembered by the access token it produced, so a switch within minutes does not renew it again.
+            if let login = CredentialOwnership.login(fromCredential: renewed) {
+                lastRenewals[account.id] = TargetRenewalPolicy.Renewal(accessTokenFingerprint: TokenFingerprint.of(login.accessToken), at: Date())
+            }
         } else if outcome.requiresReauth {
             if case .belongsToAnotherAccount = outcome {
                 flagNeedsReauth(account, belongedToAnother: true)

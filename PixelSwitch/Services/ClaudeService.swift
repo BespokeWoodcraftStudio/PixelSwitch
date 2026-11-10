@@ -222,10 +222,28 @@ final class ClaudeService: @unchecked Sendable {
         do {
             let status = try await getAuthStatus()
             return AuthHealth.probe(exitedZeroLoggedIn: status.loggedIn)
-        } catch ClaudeServiceError.cliError {
-            return .failed
         } catch {
-            return .unavailable
+            return AuthHealth.probe(after: Self.authStatusFailure(of: error))
+        }
+    }
+
+    /// Sorts what `getAuthStatus` can throw into the failures `AuthHealth` judges
+    /// (only a CLI that exited non-zero counts as signed out; the unit tests pin
+    /// that half). Exhaustive on purpose: a new `ClaudeServiceError` has to be
+    /// placed here, and cannot silently become "signed out". An error that is not
+    /// a `ClaudeServiceError` is the JSON decoder's, so unreadable output.
+    static func authStatusFailure(of error: Error) -> AuthHealth.StatusFailure {
+        guard let failure = error as? ClaudeServiceError else { return .unreadableOutput }
+        switch failure {
+        case .cliError: return .exitedNonZero
+        case .timedOut: return .timedOut
+        case .processLaunchFailed: return .couldNotStart
+        case .invalidOutput: return .unreadableOutput
+        // Not thrown by `claude auth status`; listed so that a new error must be sorted here.
+        case .noTokenForAccount, .keychainWriteFailed, .oauthAccountWriteFailed, .switchVerificationFailed,
+             .switchWrongAccount, .targetLoginBelongsElsewhere, .liveLoginChanged, .liveLoginUnreadable,
+             .liveLoginNotSaved, .targetLoginUnusable:
+            return .unreadableOutput
         }
     }
 
