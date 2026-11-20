@@ -72,7 +72,13 @@ import Foundation
 private final class ProbeFileManager: FileManager, @unchecked Sendable {
     var onRemove: ((URL) -> Void)?
     var refuse = false
+    /// When set, listing any folder throws this instead.
+    var listError: Error?
     private(set) var attempts = 0
+    override func contentsOfDirectory(atPath path: String) throws -> [String] {
+        if let listError { throw listError }
+        return try super.contentsOfDirectory(atPath: path)
+    }
     override func removeItem(at url: URL) throws {
         attempts += 1
         onRemove?(url)
@@ -157,6 +163,46 @@ private final class ProbeFileManager: FileManager, @unchecked Sendable {
     check(missing == W.Outcome(forgotSavedList: true, foldersRemoved: 0, foldersAbsent: 1, foldersLeft: 0) && !W.hasWork(defaults: defaults),
           "launch safety run: with no stores folder on disk the list is forgotten and nothing fails", "\(missing)")
 
+    // D2. A stores folder that cannot be read for any other reason is not "already gone": it is counted as left.
+    reset()
+    let unreadable = makeStore(a)
+    defaults.set(["acct-a": a.uuidString, "acct-b": b.uuidString], forKey: W.defaultsKey)
+    let denying = ProbeFileManager()
+    denying.listError = CocoaError(.fileReadNoPermission)
+    let denied = W.run(defaults: defaults, storesFolder: stores, fileManager: denying)
+    check(denied == W.Outcome(forgotSavedList: true, foldersRemoved: 0, foldersAbsent: 0, foldersLeft: 2) && denying.attempts == 0 && exists(unreadable) && !W.hasWork(defaults: defaults),
+          "launch safety run: a stores folder macOS will not list is counted as left, not as already gone, and nothing is deleted", "\(denied)")
+    // The same for a file where the stores folder should be (ENOTDIR) and for a plain I/O error.
+    reset()
+    fm.createFile(atPath: stores.deletingLastPathComponent().appendingPathComponent("WebsiteDataFile").path, contents: Data("x".utf8))
+    let notAFolder = stores.deletingLastPathComponent().appendingPathComponent("WebsiteDataFile")
+    defaults.set(["acct-a": a.uuidString], forKey: W.defaultsKey)
+    let fileInPlace = W.run(defaults: defaults, storesFolder: notAFolder)
+    check(fileInPlace == W.Outcome(forgotSavedList: true, foldersRemoved: 0, foldersAbsent: 0, foldersLeft: 1) && exists(notAFolder),
+          "launch safety run: a file where the stores folder should be counts as left, and is not touched", "\(fileInPlace)")
+    reset()
+    defaults.set(["acct-a": a.uuidString], forKey: W.defaultsKey)
+    let ioFailing = ProbeFileManager()
+    ioFailing.listError = NSError(domain: NSPOSIXErrorDomain, code: Int(EIO))
+    check(W.run(defaults: defaults, storesFolder: stores, fileManager: ioFailing) == W.Outcome(forgotSavedList: true, foldersRemoved: 0, foldersAbsent: 0, foldersLeft: 1),
+          "launch safety run: a plain I/O error listing the stores folder counts as left")
+    // And only a folder that is not there is absent: every way of saying so.
+    let missingErrors: [Error] = [CocoaError(.fileReadNoSuchFile), CocoaError(.fileNoSuchFile), NSError(domain: NSPOSIXErrorDomain, code: Int(ENOENT)),
+                                  NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileReadUnknown.rawValue,
+                                          userInfo: [NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: Int(ENOENT))])]
+    let otherErrors: [Error] = [CocoaError(.fileReadNoPermission), CocoaError(.fileReadUnknown), NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES)),
+                                NSError(domain: NSPOSIXErrorDomain, code: Int(ENOTDIR)), NSError(domain: NSURLErrorDomain, code: -1)]
+    check(missingErrors.allSatisfy { W.isMissingFolder($0) } && otherErrors.allSatisfy { !W.isMissingFolder($0) },
+          "launch safety run: only no-such-file errors (Cocoa fileReadNoSuchFile or fileNoSuchFile, POSIX ENOENT, or one underneath) mean the folder is absent")
+    for error in missingErrors {
+        reset()
+        defaults.set(["acct-a": a.uuidString], forKey: W.defaultsKey)
+        let gone = ProbeFileManager()
+        gone.listError = error
+        check(W.run(defaults: defaults, storesFolder: stores, fileManager: gone) == W.Outcome(forgotSavedList: true, foldersRemoved: 0, foldersAbsent: 1, foldersLeft: 0),
+              "launch safety run: a no-such-file error from listing counts as already gone", "\(error)")
+    }
+
     // E. A link or a plain file in a folder's place is left alone, and a link's target is never reached.
     reset()
     let victim = root.appendingPathComponent("victim", isDirectory: true)
@@ -178,14 +224,19 @@ private final class ProbeFileManager: FileManager, @unchecked Sendable {
     let idle = W.run(defaults: defaults, storesFolder: stores)
     check(idle == W.Outcome() && exists(unsaved), "launch safety run: with no saved list no folder is ever removed")
 
-    // G. The launch entry point logs one line when it ran and none when it had nothing to do.
+    // G. The launch entry point logs one line when it ran and none when it had nothing to do. It is always
+    //    given a temporary stores folder here, never the real one, and it deletes only what is in that folder.
+    reset()
+    let launchA = UUID(), launchOther = UUID()
+    let launchStore = makeStore(launchA), launchUnrelated = makeStore(launchOther)
     var lines: [String] = []
-    W.runAtLaunch(defaults: defaults) { lines.append($0) }
-    check(lines.isEmpty, "launch safety run: with nothing saved the launch entry point logs nothing")
-    defaults.set(["acct-a": UUID().uuidString], forKey: W.defaultsKey)
-    W.runAtLaunch(defaults: defaults) { lines.append($0) }
-    check(lines.count == 1 && lines[0].hasPrefix("[webCleanup]") && !W.hasWork(defaults: defaults) && !lines[0].contains("/"),
-          "launch safety run: with a saved list the launch entry point forgets it and logs one line with no path", lines.joined(separator: " | "))
+    W.runAtLaunch(defaults: defaults, storesFolder: stores) { lines.append($0) }
+    check(lines.isEmpty && exists(launchStore) && exists(launchUnrelated), "launch safety run: with nothing saved the launch entry point logs nothing and deletes nothing")
+    defaults.set(["acct-a": launchA.uuidString, "acct-gone": UUID().uuidString], forKey: W.defaultsKey)
+    W.runAtLaunch(defaults: defaults, storesFolder: stores) { lines.append($0) }
+    check(lines.count == 1 && lines[0].hasPrefix("[webCleanup]") && !W.hasWork(defaults: defaults) && !lines[0].contains("/")
+          && lines[0].contains("removed 1 leftover") && lines[0].contains("1 already gone") && !exists(launchStore) && exists(launchUnrelated),
+          "launch safety run: with a saved list the launch entry point forgets it, deletes only the saved store in the folder it was given, and logs one line with no path", lines.joined(separator: " | "))
 }
 
 // MARK: - 4. How the app starts it
@@ -205,6 +256,15 @@ private final class ProbeFileManager: FileManager, @unchecked Sendable {
     check(opener.hasPrefix("Task.detached(priority: .utility)") && !opener.contains("MainActor") && !opener.contains("await"),
           "launch safety wiring: the cleanup runs in a detached, low priority task, off the main thread", opener)
     check(app.components(separatedBy: "LegacyWebDataCleanup.").count == 2, "launch safety wiring: the app's launch makes exactly one call into the cleanup")
+    check(cleanup.contains("static func runAtLaunch(defaults: UserDefaults = .standard, storesFolder: URL? = defaultStoresFolder(), log: (String) -> Void)")
+          && cleanup.contains("let outcome = run(defaults: defaults, storesFolder: storesFolder)") && cleanup.components(separatedBy: "defaultStoresFolder()").count == 2,
+          "launch safety wiring: the stores folder is a parameter of the launch entry point, with the real folder as its only default")
+    let tests = (try? String(contentsOfFile: "Tests/UnitTests/LaunchSafetyTests.swift", encoding: .utf8)) ?? ""
+    // Real calls start a line; the lines of this pin only mention the call inside quotes.
+    let calls = tests.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { $0.hasPrefix("W.runAtLaunch(") }
+    check(calls.count >= 2 && calls.allSatisfy { $0.contains("storesFolder: stores") },
+          "launch safety wiring: every test call of the launch entry point passes a temporary stores folder, never the real one", calls.joined(separator: " | "))
 
     // Inside the run loop the saved list's removal is written before the folder removal.
     let forget = cleanup.range(of: "case .forgetSavedList:\n                defaults.removeObject(forKey: defaultsKey)")

@@ -117,8 +117,27 @@ enum LegacyWebDataCleanup {
 
     private enum FolderResult { case removed, absent, left }
 
+    /// True only for "there is no such folder": Cocoa's `fileReadNoSuchFile` (or `fileNoSuchFile`), or
+    /// POSIX `ENOENT` (named by the error itself or by its underlying error). Any other reason the
+    /// stores folder cannot be listed (no permission, a file where the folder should be, an I/O
+    /// error) is not "already gone".
+    static func isMissingFolder(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == NSCocoaErrorDomain, ns.code == CocoaError.fileReadNoSuchFile.rawValue || ns.code == CocoaError.fileNoSuchFile.rawValue { return true }
+        if ns.domain == NSPOSIXErrorDomain, ns.code == Int(ENOENT) { return true }
+        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError,
+           underlying.domain == NSPOSIXErrorDomain, underlying.code == Int(ENOENT) { return true }
+        return false
+    }
+
     private static func removeFolder(of id: UUID, in storesFolder: URL, fileManager: FileManager) -> FolderResult {
-        guard let names = try? fileManager.contentsOfDirectory(atPath: storesFolder.path) else { return .absent }
+        let names: [String]
+        do {
+            names = try fileManager.contentsOfDirectory(atPath: storesFolder.path)
+        } catch {
+            // Only a folder that is not there is "already gone"; a folder that could not be read is left, and counted.
+            return isMissingFolder(error) ? .absent : .left
+        }
         let wanted = id.uuidString.lowercased()
         guard let name = names.first(where: { $0.lowercased() == wanted }) else { return .absent }
         let folder = storesFolder.appendingPathComponent(name, isDirectory: true)
@@ -135,9 +154,11 @@ enum LegacyWebDataCleanup {
 
     /// The launch entry point. With nothing saved it does nothing and logs nothing; otherwise it
     /// forgets the saved list, deletes the leftover folders and passes one line to `log`.
-    static func runAtLaunch(defaults: UserDefaults = .standard, log: (String) -> Void) {
+    /// `storesFolder` is the real one for this app unless a test passes a folder of its own, so a test
+    /// never reaches the real `~/Library/WebKit`.
+    static func runAtLaunch(defaults: UserDefaults = .standard, storesFolder: URL? = defaultStoresFolder(), log: (String) -> Void) {
         guard hasWork(defaults: defaults) else { return }
-        let outcome = run(defaults: defaults, storesFolder: defaultStoresFolder())
+        let outcome = run(defaults: defaults, storesFolder: storesFolder)
         log("[webCleanup] forgot the saved claude.ai window list left by 2.2; "
             + "removed \(outcome.foldersRemoved) leftover data folder(s), \(outcome.foldersAbsent) already gone, \(outcome.foldersLeft) left in place")
     }
