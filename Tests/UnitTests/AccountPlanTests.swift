@@ -1180,8 +1180,10 @@ private func chipHex(_ text: String?) -> UInt32? {
     check(row.components(separatedBy: "age.fixedSize()").count == 2 && row.components(separatedBy: "line(").count == 4,
           "footer pins: one line builder holds the age, and every variant is built from it")
     let age = planMember(dashboard, startingAt: "private func sampleAgeLabel(")
-    check(age.contains(".lineLimit(1)") && !age.contains("minimumScaleFactor") && !age.contains("truncationMode"),
-          "footer pins: the age text is one line and never scaled")
+    let ageLabel = planSource("PixelSwitch/Views/Components/FooterAgeLabel.swift")
+    check(age.contains("LiveFooterAge(sampledAt: sampledAt)") && !age.contains("minimumScaleFactor") && !age.contains("truncationMode")
+          && ageLabel.contains(".lineLimit(1)") && !ageLabel.contains("minimumScaleFactor") && !ageLabel.contains("truncationMode"),
+          "footer pins: the age text (FooterAgeLabel, drawn by the card through LiveFooterAge) is one line and never scaled")
     let hint = planMember(dashboard, startingAt: "private func footerHint(")
     let hintText = "Text(String(localized: \"Double-click to switch\", bundle: L10n.bundle))"
     check(hint.contains(hintText) && dashboard.components(separatedBy: hintText).count == 2 && !dashboard.contains("Text(\"Double-click to switch\")"),

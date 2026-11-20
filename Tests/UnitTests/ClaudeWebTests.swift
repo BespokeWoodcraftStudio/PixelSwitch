@@ -15,7 +15,10 @@ import Foundation
     claudeWebPastedLinkTests()
     claudeWebPageKindAndLogTests()
     claudeWebAccountCheckTests()
+    claudeWebRemovalTests()
+    claudeWebLoadFailureTests()
     claudeWebSourcePins()
+    claudeWebRepoWidePins()
     claudeWebStringTests()
 }
 
@@ -269,6 +272,235 @@ private func u(_ text: String) -> URL? { URL(string: text) }
           "claudeWeb check: the page script reads visible text and returns it")
 }
 
+// MARK: - Sign-out and account removal never race
+
+/// A stand-in for WebKit's data stores: the identifiers that currently exist.
+@MainActor private final class FakeStores {
+    var existing: Set<UUID> = []
+    var createdByFallback: [UUID] = []
+}
+
+/// The removal as `ClaudeWebSessionStore.performRemoval` does it, against the fake: look up the
+/// account's identifier, try to remove that store twice, and if both fail fall back to reopening it
+/// to wipe it. Reopening an identifier that no longer exists creates it, which is the orphan the
+/// 2.2 review found. `guarded` is the mapping re-check (`ClaudeWebStoreMap.isCurrent`).
+@MainActor private func fakeRemoval(_ accountID: String, defaults: UserDefaults, stores: FakeStores, guarded: Bool) async -> Bool {
+    guard let id = ClaudeWebStoreMap.existingIdentifier(for: accountID, defaults: defaults) else { return true }
+    // Both removals have read the identifier before either one touches the store.
+    try? await Task.sleep(for: .milliseconds(30))
+    for _ in 1...2 {
+        if stores.existing.contains(id) {
+            stores.existing.remove(id)
+            ClaudeWebStoreMap.forget(accountID, defaults: defaults)
+            return true
+        }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    if guarded, !ClaudeWebStoreMap.isCurrent(id, for: accountID, defaults: defaults) { return true }
+    stores.existing.insert(id)
+    stores.createdByFallback.append(id)
+    return false
+}
+
+@MainActor private func claudeWebRemovalTests() {
+    let kit = ControlTestKit.self
+
+    // The gate: one removal per account, the second caller takes the first one's answer.
+    do {
+        let gate = ClaudeWebRemovalGate()
+        let calls = ControlTestKit.Box(0)
+        let answers = kit.wait { () async -> [Bool] in
+            let first = Task { @MainActor in
+                await gate.run(accountID: "AAAAAAAA-1111") { calls.value += 1; try? await Task.sleep(for: .milliseconds(80)); return true }
+            }
+            await Task.yield()
+            let runningWhileFirst = gate.isRunning(accountID: "aaaaaaaa-1111 ")
+            let second = Task { @MainActor in
+                await gate.run(accountID: "aaaaaaaa-1111 ") { calls.value += 1000; return false }
+            }
+            return [runningWhileFirst, await first.value, await second.value]
+        } ?? []
+        check(answers == [true, true, true] && calls.value == 1,
+              "claudeWeb removal gate: a second removal of the same account (another spelling of its id) waits for the first and takes its answer; the work runs once",
+              "\(answers), work ran as \(calls.value)")
+        check(!gate.isRunning(accountID: "AAAAAAAA-1111"), "claudeWeb removal gate: a finished removal is no longer listed as running")
+        let again = kit.wait { await gate.run(accountID: "AAAAAAAA-1111") { calls.value += 10; return false } }
+        check(again == false && calls.value == 11, "claudeWeb removal gate: a later removal of the same account runs its own work", "\(String(describing: again)), \(calls.value)")
+    }
+    do {
+        // A failure is shared too: the one that joined hears "false" and does not retry on its own.
+        let gate = ClaudeWebRemovalGate()
+        let calls = ControlTestKit.Box(0)
+        let answers = kit.wait { () async -> [Bool] in
+            let first = Task { @MainActor in
+                await gate.run(accountID: "f1") { calls.value += 1; try? await Task.sleep(for: .milliseconds(40)); return false }
+            }
+            await Task.yield()
+            let second = Task { @MainActor in await gate.run(accountID: "f1") { calls.value += 1000; return true } }
+            return [await first.value, await second.value]
+        } ?? []
+        check(answers == [false, false] && calls.value == 1, "claudeWeb removal gate: a failed removal is reported to the caller that joined it, not retried", "\(answers) \(calls.value)")
+    }
+    do {
+        // Two different accounts never wait for each other.
+        let gate = ClaudeWebRemovalGate()
+        let calls = ControlTestKit.Box(0)
+        let answers = kit.wait { () async -> [Bool] in
+            let a = Task { @MainActor in await gate.run(accountID: "acct-a") { calls.value += 1; try? await Task.sleep(for: .milliseconds(30)); return true } }
+            let b = Task { @MainActor in await gate.run(accountID: "acct-b") { calls.value += 10; try? await Task.sleep(for: .milliseconds(30)); return false } }
+            return [await a.value, await b.value]
+        } ?? []
+        check(answers == [true, false] && calls.value == 11, "claudeWeb removal gate: removals of two different accounts both run, each with its own answer", "\(answers) \(calls.value)")
+    }
+
+    // The race itself, against a model of the store: both removals read the identifier, one deletes
+    // the store, the other cannot find it.
+    func scenario(gated: Bool, guarded: Bool) -> (answers: [Bool], orphans: Int, mapped: Bool, stores: Int) {
+        let suite = "ai.pixelventures.pixelswitch.tests.claudeweb.race.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else { return ([], -1, true, -1) }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let account = "5E1F-0000-ACC0-0001"
+        let id = ClaudeWebStoreMap.identifier(for: account, defaults: defaults)
+        let stores = FakeStores()
+        stores.existing = [id]
+        let gate = ClaudeWebRemovalGate()
+        let saved = SendableDefaults(defaults)
+        let answers = kit.wait { () async -> [Bool] in
+            func removal() async -> Bool {
+                if gated {
+                    return await gate.run(accountID: account) { await fakeRemoval(account, defaults: saved.value, stores: stores, guarded: guarded) }
+                }
+                return await fakeRemoval(account, defaults: saved.value, stores: stores, guarded: guarded)
+            }
+            let signOut = Task { @MainActor in await removal() }
+            let accountRemoval = Task { @MainActor in await removal() }
+            return [await signOut.value, await accountRemoval.value]
+        } ?? []
+        return (answers, stores.createdByFallback.count, ClaudeWebStoreMap.existingIdentifier(for: account, defaults: defaults) != nil, stores.existing.count)
+    }
+    let raw = scenario(gated: false, guarded: false)
+    check(raw.orphans == 1 && raw.stores == 1,
+          "claudeWeb removal race: with neither fix, the loser's fallback recreates the deleted store (the orphan the review found; this proves the model sees the race)",
+          "\(raw)")
+    let gated = scenario(gated: true, guarded: false)
+    check(gated.answers == [true, true] && gated.orphans == 0 && gated.stores == 0 && !gated.mapped,
+          "claudeWeb removal race: through the gate, sign-out and account removal together leave no store behind and nothing mapped",
+          "\(gated)")
+    let guardedOnly = scenario(gated: false, guarded: true)
+    check(guardedOnly.answers == [true, true] && guardedOnly.orphans == 0 && guardedOnly.stores == 0 && !guardedOnly.mapped,
+          "claudeWeb removal race: even without the gate, the mapping re-check keeps the loser from reopening a deleted store",
+          "\(guardedOnly)")
+
+    // The re-check itself.
+    let suite = "ai.pixelventures.pixelswitch.tests.claudeweb.iscurrent.\(UUID().uuidString)"
+    if let defaults = UserDefaults(suiteName: suite) {
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let id = ClaudeWebStoreMap.identifier(for: "Acct-X", defaults: defaults)
+        check(ClaudeWebStoreMap.isCurrent(id, for: "acct-x ", defaults: defaults), "claudeWeb store: isCurrent is true while the account holds the identifier (any spelling of its id)")
+        check(!ClaudeWebStoreMap.isCurrent(UUID(), for: "Acct-X", defaults: defaults), "claudeWeb store: isCurrent is false for an identifier the account does not hold")
+        ClaudeWebStoreMap.forget("Acct-X", defaults: defaults)
+        check(!ClaudeWebStoreMap.isCurrent(id, for: "Acct-X", defaults: defaults), "claudeWeb store: isCurrent is false once the mapping is forgotten")
+    } else {
+        check(false, "claudeWeb store: a throwaway defaults suite could not be made for isCurrent")
+    }
+
+    // Wiring a view and WebKit cannot compile here: every removal comes through the one entry point,
+    // which goes through the gate, and the fallback asks before it reopens a store.
+    let sources = claudeWebSources()
+    func text(_ name: String) -> String { sources.first { $0.name == name }?.text ?? "" }
+    let store = text("ClaudeWebSessionStore.swift")
+    let all = sources.map(\.text).joined(separator: "\n")
+    check(store.contains("private static let removals = ClaudeWebRemovalGate()")
+          && store.contains("return await removals.run(accountID: accountID) {\n            await performRemoval(for: accountID, defaults: saved.value)")
+          && !store.contains("static func removeSignIn(for accountID: String, defaults: UserDefaults = .standard) async -> Bool {\n        let tag"),
+          "claudeWeb removal pins: removeSignIn hands the work to the per-account gate")
+    if let guardRange = store.range(of: "ClaudeWebStoreMap.isCurrent(id, for: accountID, defaults: defaults)"),
+       let fallback = store.range(of: "let store = WKWebsiteDataStore(forIdentifier: id)"),
+       let removeCall = store.range(of: "try await WKWebsiteDataStore.remove(forIdentifier: id)") {
+        check(removeCall.lowerBound < guardRange.lowerBound && guardRange.lowerBound < fallback.lowerBound
+              && store.components(separatedBy: "WKWebsiteDataStore(forIdentifier: id)").count == 3,
+              "claudeWeb removal pins: the fallback that reopens a store by its identifier comes after the mapping re-check, and is the only reopening besides dataStore(for:)")
+    } else {
+        check(false, "claudeWeb removal pins: the removal, the mapping re-check and the fallback are found in order")
+    }
+    check(all.components(separatedBy: "WKWebsiteDataStore.remove(forIdentifier:").count == 2
+          && all.components(separatedBy: "ClaudeWebSessionStore.removeSignIn(for:").count == 3,
+          "claudeWeb removal pins: a data store is removed in one place, reached by exactly two callers (sign-out and account removal)")
+}
+
+// MARK: - A page that does not load
+
+@MainActor private func claudeWebLoadFailureTests() {
+    let url = NSURLErrorDomain
+    let web = ClaudeWebLoadFailure.webKitDomain
+    // Stopped on purpose: nothing to report.
+    check(!ClaudeWebLoadFailure.shouldShowBanner(domain: url, code: NSURLErrorCancelled),
+          "claudeWeb load failure: a cancelled load (a new load, Stop, a refused address) shows no banner")
+    check(!ClaudeWebLoadFailure.shouldShowBanner(domain: web, code: 102),
+          "claudeWeb load failure: WebKit's 'frame load interrupted' (a policy decision stopped it) shows no banner")
+    // Everything that leaves a page blank or broken does.
+    let real: [(String, Int, String)] = [
+        (url, NSURLErrorNotConnectedToInternet, "offline"), (url, NSURLErrorTimedOut, "timed out"),
+        (url, NSURLErrorCannotFindHost, "cannot find host"), (url, NSURLErrorCannotConnectToHost, "cannot connect"),
+        (url, NSURLErrorNetworkConnectionLost, "connection lost"), (url, NSURLErrorDNSLookupFailed, "DNS"),
+        (url, NSURLErrorSecureConnectionFailed, "TLS failed"), (url, NSURLErrorServerCertificateUntrusted, "bad certificate"),
+        (url, NSURLErrorInternationalRoamingOff, "roaming off"), (web, 100, "cannot show this type"), (web, 101, "cannot show this address"),
+    ]
+    let silent = real.filter { !ClaudeWebLoadFailure.shouldShowBanner(domain: $0.0, code: $0.1) }.map(\.2)
+    check(silent.isEmpty, "claudeWeb load failure: offline, timeout, host, TLS and other real failures all show the banner", silent.joined(separator: ", "))
+    check(ClaudeWebLoadFailure.shouldShowBanner(domain: "SomeOtherDomain", code: NSURLErrorCancelled)
+          && ClaudeWebLoadFailure.shouldShowBanner(domain: url, code: 102),
+          "claudeWeb load failure: only the cancel code of the URL domain and 102 of WebKit's domain are ignored, not the same numbers elsewhere")
+
+    // The page's process ends: reload once, then stop and say so.
+    check(ClaudeWebLoadFailure.reaction(toProcessEnding: false) == .reload && ClaudeWebLoadFailure.reaction(toProcessEnding: true) == .showBanner,
+          "claudeWeb load failure: the first end of the page process reloads, the next one without a page in between shows the banner")
+    var reloaded = false
+    var reactions: [ClaudeWebLoadFailure.ProcessEndedReaction] = []
+    for event in ["ended", "ended", "finished", "ended", "ended"] {
+        if event == "finished" { reloaded = false; continue }
+        let reaction = ClaudeWebLoadFailure.reaction(toProcessEnding: reloaded)
+        if reaction == .reload { reloaded = true }
+        reactions.append(reaction)
+    }
+    check(reactions == [.reload, .showBanner, .reload, .showBanner], "claudeWeb load failure: a page that finishes loading earns the next crash its own reload", "\(reactions)")
+
+    // Wiring a view cannot compile here.
+    let controller = claudeWebSources().first { $0.name == "ClaudeWebWindowController.swift" }?.text ?? ""
+    let all = claudeWebSources().map(\.text).joined(separator: "\n")
+    check(controller.contains("didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error")
+          && controller.contains("didFail navigation: WKNavigation!, withError error: Error")
+          && controller.contains("func webViewWebContentProcessDidTerminate(_ webView: WKWebView)"),
+          "claudeWeb load failure pins: the window answers a load that failed before and after it began, and the page process ending")
+    let failed = String((controller.range(of: "private func loadFailed(_ error: Error) {").map { controller[$0.lowerBound...] } ?? "").prefix(600))
+    let failedBody = failed.components(separatedBy: "\n    }\n").first ?? failed
+    check(failedBody.contains("guard ClaudeWebLoadFailure.shouldShowBanner(domain: failure.domain, code: failure.code) else { return }")
+          && failedBody.contains("loadFailureBanner.isHidden = false"),
+          "claudeWeb load failure pins: the banner shows only for a failure that is not a deliberate stop")
+    check(failedBody.contains("(\\(failure.domain) \\(failure.code))")
+          && !failedBody.contains("userInfo") && !failedBody.contains("localizedDescription") && !failedBody.contains("\\(error)") && !failedBody.contains("absoluteString"),
+          "claudeWeb load failure pins: the log line for a failed load carries the error's domain and code only, never an address or the error's own text")
+    check(!all.contains("NSURLErrorFailingURL") && !all.contains("NSErrorFailingURL"),
+          "claudeWeb load failure pins: nothing reads the failing address out of an error (it can carry a query string)")
+    check(controller.contains("ClaudeWebLoadFailure.reaction(toProcessEnding: reloadedAfterProcessEnded)")
+          && controller.contains("reloadedAfterProcessEnded = true")
+          && controller.contains("didFinish navigation: WKNavigation!) {\n        reloadedAfterProcessEnded = false")
+          && controller.contains("private func installWebView() {\n        hasCommittedPage = false\n        reloadedAfterProcessEnded = false"),
+          "claudeWeb load failure pins: one automatic reload per crash, cleared when a page finishes and when the web view is rebuilt")
+    check(controller.contains("loadFailureBanner.setText(String(localized: \"Couldn't load claude.ai. Check your connection.\", bundle: L10n.bundle))")
+          && controller.contains("loadFailureBanner.setAction(title: String(localized: \"Reload\", bundle: L10n.bundle), target: self, action: #selector(reloadFromBanner))")
+          && controller.contains("topStack.setViews([toolbar, signInBanner, mismatchBanner, loadFailureBanner, pasteBox], in: .top)"),
+          "claudeWeb load failure pins: the bar sits with the other bars, says its line, and carries the existing Reload button")
+    check(controller.contains("if view.url == nil || !hasCommittedPage { loadUsagePage() } else { view.reload() }"),
+          "claudeWeb load failure pins: Reload on a page that never loaded starts the usage page over (WebKit's reload does nothing then)")
+    let languages = ["en", "de", "fr", "ja", "zh-Hans"]
+    let tables = languages.map { NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String] ?? [:] }
+    let line = "Couldn't load claude.ai. Check your connection."
+    check(tables[0][line] == line && tables.dropFirst().allSatisfy { ($0[line] ?? "").isEmpty == false && $0[line] != line && ($0[line] ?? "").contains("claude.ai") },
+          "claudeWeb load failure strings: the bar's line is in all five tables, translated, with claude.ai kept as it is")
+    check(tables.allSatisfy { !($0[line] ?? "").contains("\u{2014}") }, "claudeWeb load failure strings: no em dash in any language")
+}
+
 // MARK: - Source pins
 
 private func claudeWebSources() -> [(name: String, text: String)] {
@@ -330,6 +562,88 @@ private func claudeWebSources() -> [(name: String, text: String)] {
     // Sign-out asks first.
     check(all.contains("beginSheetModal(for: window") && all.contains("Sign out of claude.ai here?") && all.contains("alertFirstButtonReturn"),
           "claudeWeb pins: Sign out of claude.ai here asks to confirm before it removes anything")
+}
+
+// MARK: - Repo-wide: no reset, no user-agent, one script
+
+/// Every source file the shipped product is built from: the app, the command line tool, the shared
+/// and widget code and the Linux port, with test files left out. Run from the repo root.
+private func shippedSources() -> [(path: String, text: String)] {
+    let roots = ["PixelSwitch", "PixelSwitchCLI", "Shared", "PixelSwitchWidget", "linux"]
+    let extensions: Set<String> = ["swift", "py", "sh", "m", "mm", "h", "js", "cjs", "mjs", "ts"]
+    let skippedFolders: Set<String> = ["tests", "Tests", "__pycache__", ".build", "node_modules", ".git"]
+    let fileManager = FileManager.default
+    var found: [(path: String, text: String)] = []
+    for root in roots {
+        guard let walker = fileManager.enumerator(atPath: root) else { continue }
+        for case let relative as String in walker {
+            let parts = relative.split(separator: "/").map(String.init)
+            guard let name = parts.last, !parts.dropLast().contains(where: { skippedFolders.contains($0) }) else { continue }
+            if name.hasSuffix("Tests.swift") || name.hasSuffix("Test.swift") || name.hasPrefix("test_")
+                || name.hasSuffix("_test.py") || name == "conftest.py" { continue }
+            let path = "\(root)/\(relative)"
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue,
+                  let text = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
+            let ext = (name as NSString).pathExtension
+            // A script with no extension (linux/bin/pixelswitch) counts when it starts with a shebang.
+            if ext.isEmpty ? !text.hasPrefix("#!") : !extensions.contains(ext) { continue }
+            found.append((path, text))
+        }
+    }
+    return found.sorted { $0.path < $1.path }
+}
+
+/// The founder, 2026-11-19: "you absolutly do not execute a reset". The ClaudeWeb pins above read only
+/// that folder; this one reads the whole shipped product, so a reset address, a spoofed browser
+/// identity or a second script call cannot arrive from anywhere else (the app, the CLI, the widget,
+/// the Linux port).
+@MainActor private func claudeWebRepoWidePins() {
+    let sources = shippedSources()
+    func count(_ suffix: String) -> Int { sources.filter { $0.path.hasSuffix(suffix) }.count }
+    let swiftApp = sources.filter { $0.path.hasPrefix("PixelSwitch/") && $0.path.hasSuffix(".swift") }.count
+    let swiftCLI = sources.filter { $0.path.hasPrefix("PixelSwitchCLI/") && $0.path.hasSuffix(".swift") }.count
+    let python = sources.filter { $0.path.hasPrefix("linux/") && $0.path.hasSuffix(".py") }.count
+    // A wrong working folder or a renamed root must fail loudly here, never pass over an empty list.
+    check(swiftApp >= 80 && swiftCLI >= 4 && count("Shared/WidgetData.swift") == 1 && count("PixelSwitchWidget/PixelSwitchWidget.swift") == 1
+          && python >= 40 && count("linux/pixelswitch/api.py") == 1 && count("PixelSwitch/ClaudeWeb/ClaudeWebWindowController.swift") == 1,
+          "no-reset pins: the shipped sources of the app, CLI, shared code, widget and Linux port are all found (app \(swiftApp), CLI \(swiftCLI), Shared, widget, Linux \(python))")
+    check(!sources.contains { source in ["/tests/", "/Tests/", "Tests.swift", "/test_"].contains { source.path.contains($0) } },
+          "no-reset pins: test files are left out of the scan")
+
+    // 1. No reset address or reset grant anywhere. These names are what claude.ai's own page uses for its reset.
+    let resetNames = ["reset_rate_limits", "cedar_ember", "juniper_tide", "grant_id", "limit-reset", "limit_reset"]
+    let resetHits = sources.flatMap { source in
+        resetNames.filter { source.text.range(of: $0, options: .caseInsensitive) != nil }.map { "\(source.path): \($0)" }
+    }
+    check(resetHits.isEmpty, "no-reset pins: no reset endpoint or grant name appears in any shipped source", resetHits.joined(separator: " | "))
+
+    // 2. No user agent of our own for a web view, and no header that sets one, except the Linux client's
+    //    honest name for its own HTTP calls (no browser, no web view).
+    let webViewAgent = sources.flatMap { source in
+        ["customUserAgent", "applicationNameForUserAgent"].filter { source.text.contains($0) }.map { "\(source.path): \($0)" }
+    }
+    check(webViewAgent.isEmpty, "no-reset pins: nothing sets a web view's user agent", webViewAgent.joined(separator: " | "))
+    let allowedHeaderFile = "linux/pixelswitch/api.py"
+    let headerHits = sources.filter { $0.path != allowedHeaderFile && $0.text.range(of: "user-agent", options: .caseInsensitive) != nil }.map(\.path)
+    check(headerHits.isEmpty, "no-reset pins: no source writes a User-Agent header, outside the one Linux client file", headerHits.joined(separator: " | "))
+    let linuxClient = sources.first { $0.path == allowedHeaderFile }?.text ?? ""
+    let clientWrites = linuxClient.components(separatedBy: "\n").filter { $0.contains("\"User-Agent\"") }
+    let linuxDaemon = sources.first { $0.path == "linux/pixelswitch/daemon.py" }?.text ?? ""
+    check(clientWrites.count == 2 && clientWrites.allSatisfy { $0.contains("self.user_agent") }
+          && linuxDaemon.contains("USER_AGENT_FORMAT = \"PixelSwitch/{version} (Linux)\""),
+          "no-reset pins: the Linux client's only User-Agent writes send its own name, PixelSwitch/<version> (Linux)", "\(clientWrites.count) write(s)")
+    let browserAgent = sources.filter { $0.text.contains("Mozilla/") }.map(\.path)
+    check(browserAgent.isEmpty, "no-reset pins: no source carries a browser's user-agent text", browserAgent.joined(separator: " | "))
+
+    // 3. Exactly one script call in the whole product: the read-only account check.
+    let scriptCalls = sources.compactMap { source -> (String, Int)? in
+        let n = source.text.components(separatedBy: "evaluateJavaScript(").count - 1
+        return n > 0 ? (source.path, n) : nil
+    }
+    check(scriptCalls.count == 1 && scriptCalls[0].0 == "PixelSwitch/ClaudeWeb/ClaudeWebWindowController.swift" && scriptCalls[0].1 == 1,
+          "no-reset pins: the whole product has exactly one evaluateJavaScript call, the read-only account check",
+          scriptCalls.map { "\($0.0) x\($0.1)" }.joined(separator: " | "))
 }
 
 // MARK: - Strings
