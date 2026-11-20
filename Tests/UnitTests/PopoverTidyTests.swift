@@ -302,11 +302,19 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     let row = tidySource("PixelSwitch/Views/SettingsAccountRow.swift")
     check(!hover.isEmpty && !footer.isEmpty && !button.isEmpty && !row.isEmpty, "hover label pins: the component, the footer and the row are found")
 
-    // Drawn by the app, not the system: it appears after 0.3 s of pointer rest, from continuous hover (which also covers a
-    // pointer that was already over the icon when the popover opened), and never touches layout or clicks.
-    check(hover.contains("static let delay: Duration = .milliseconds(300)") && hover.contains("Task.sleep(for: HoverLabelMetrics.delay)")
-          && hover.contains(".onContinuousHover { phase in"),
-          "hover label pins: the label shows after a 0.3 s pause, driven by continuous hover rather than the system tooltip")
+    // Drawn by the app, not the system: it appears after 0.3 s of pointer rest.
+    check(hover.contains("static let delay: Duration = .milliseconds(300)") && hover.contains("Task.sleep(for: HoverLabelMetrics.delay)"),
+          "hover label pins: the label shows after a 0.3 s pause")
+    // The pointer is found with an always-active AppKit tracking area, not SwiftUI's hover (which only reports in the key window of the
+    // active app: a menu bar popover is often neither, which is how the system tooltip came to work "sometimes").
+    let tracking = tidyBlock(hover, from: "final class HoverTrackingView: NSView {", to: "\n}\n")
+    check(!tracking.isEmpty && tracking.contains("options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect]")
+          && tracking.contains("override func mouseEntered") && tracking.contains("override func mouseMoved") && tracking.contains("override func mouseExited"),
+          "hover label pins: the pointer is tracked by an NSTrackingArea that is .activeAlways, so it reports in a popover that is not key and an app that is not active")
+    check(!hover.contains(".onHover") && !hover.contains(".onContinuousHover") && hover.contains("HoverTracker { over in"),
+          "hover label pins: the label's pointer detection is the tracking area alone, with no SwiftUI hover in it")
+    check(tracking.contains("override func hitTest(_ point: NSPoint) -> NSView? { nil }") && hover.contains(".allowsHitTesting(false)\n            }"),
+          "hover label pins: the tracking view returns nil from hitTest and is not hit-testable in SwiftUI, so a click still reaches the button under it")
     check(hover.contains(".overlay(alignment: .top) {") && hover.contains(".allowsHitTesting(false)") && hover.contains(".frame(height: 0)"),
           "hover label pins: the label is an overlay hung from a zero-height strip, so it takes no room and cannot move the layout, and it ignores clicks")
     check(hover.contains("Color.cardFillStrong") && hover.contains("Color.cardBorder") && hover.contains("Color.textPrimary"),
@@ -389,8 +397,6 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
         "Sign in to this account again before you switch to it.",
         "Wait for the current switch or sign-in to finish.",
         "Save label",
-        "More actions",
-        "More actions for %@",
         "Remove %@?",
         "PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account.",
         "Usage last refreshed at %@. It refreshes on its own.",
@@ -409,6 +415,8 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     }
     check(tables.allSatisfy { $0["Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards."] == nil },
           "tidy strings: the old Usage and Accounts tabs line is gone from all five tables")
+    check(tables.allSatisfy { $0["More actions"] == nil && $0["More actions for %@"] == nil },
+          "tidy strings: the orphaned More actions keys (only the deleted \"...\" menu used them) are gone from all five tables")
     check(tables.allSatisfy { $0["Login New Account"] == nil }, "tidy strings: the orphaned Login New Account key (only the deleted Accounts tab used it) is gone from all five tables")
     check(tables.allSatisfy { Set($0.keys) == Set(tables[0].keys) }, "tidy strings: the five tables still have exactly the same keys")
 

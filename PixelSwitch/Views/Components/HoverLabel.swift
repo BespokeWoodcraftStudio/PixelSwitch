@@ -8,10 +8,15 @@ import AppKit
 // the label that always shows: a small caption that appears above the pointed-at icon after a short
 // pause and goes when the pointer leaves. `.help` stays on the same views, for accessibility tools.
 //
-// It is an overlay, so it takes no room and cannot move anything; it ignores the pointer, so it
-// never blocks a click; and it is drawn in the card colours, so it reads in light and in dark. Plain
-// views only (no `AppState`), so the screenshot harnesses compile this file and draw the very label
-// the app shows (`alwaysShown` holds it open for a still).
+// The pointer is found with an AppKit tracking area that is active always (`HoverTracker`), not with
+// SwiftUI's `onHover`: PixelSwitch is an LSUIElement app, and a menu bar popover is often not the key
+// window and the app often not active, and SwiftUI's hover only reports while they are. A tracking
+// area with `.activeAlways` reports in every state.
+//
+// It is an overlay, so it takes no room and cannot move anything; it ignores the pointer (the tracking
+// view returns nil from `hitTest`), so it never blocks a click; and it is drawn in the card colours,
+// so it reads in light and in dark. Plain views only (no `AppState`), so the screenshot harnesses
+// compile this file and draw the very label the app shows (`alwaysShown` holds it open for a still).
 
 /// Where the label sits against the icon it names. An icon at the edge of its window uses `.trailing`
 /// (or `.leading`), so the label grows inward from that edge and is never cut off by it.
@@ -71,10 +76,61 @@ struct HoverLabelBubble: View {
     }
 }
 
+/// Reports whether the pointer is over the view it is laid over, in any window or app state.
+///
+/// An `NSTrackingArea` with `.activeAlways` (and `.inVisibleRect`, so it follows the view's size),
+/// `.mouseEnteredAndExited` and `.mouseMoved`: it reports in a window that is not key and in an app
+/// that is not active, which SwiftUI's `onHover` and `onContinuousHover` do not. The view returns nil
+/// from `hitTest`, so every click still goes to the button under it. `onChange` is called with true
+/// on every move over the view and with false when the pointer leaves.
+struct HoverTracker: NSViewRepresentable {
+    let onChange: @MainActor (Bool) -> Void
+
+    func makeNSView(context: Context) -> HoverTrackingView {
+        let view = HoverTrackingView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: HoverTrackingView, context: Context) {
+        view.onChange = onChange
+    }
+}
+
+final class HoverTrackingView: NSView {
+    var onChange: (@MainActor (Bool) -> Void)?
+    private var area: NSTrackingArea?
+
+    /// Never the target of a click: the button under this view gets it.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area { removeTrackingArea(area) }
+        let fresh = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil)
+        addTrackingArea(fresh)
+        area = fresh
+        // A pointer already over the view (the popover opened under it) sends no entry; ask where it is.
+        if let window, window.isVisible {
+            let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            if bounds.contains(point) { onChange?(true) }
+        }
+    }
+
+    override func mouseEntered(with event: NSEvent) { onChange?(true) }
+    override func mouseMoved(with event: NSEvent) { onChange?(true) }
+    override func mouseExited(with event: NSEvent) { onChange?(false) }
+}
+
 /// Shows `HoverLabelBubble` above the view once the pointer has rested on it for `HoverLabelMetrics.delay`.
 ///
-/// It listens with `onContinuousHover`, which reports every move and not only the entry, so a pointer
-/// that was already over the icon when the popover opened (no entry event) still gets its label.
+/// It listens with `HoverTracker` (an always-active tracking area), which reports every move and not
+/// only the entry, so a pointer that was already over the icon when the popover opened (no entry
+/// event) still gets its label, and which works while the popover is not the key window.
 /// Pressing the icon hides the label until the pointer has left (`dismissTrigger` changes), so a bar
 /// the press opens is never covered by it.
 ///
@@ -110,14 +166,18 @@ struct HoverLabelModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onContinuousHover { phase in
-                switch phase {
-                case .active:
-                    if !quiet { arm() }
-                case .ended:
-                    quiet = false
-                    disarm()
+            // Over the view, never in front of a click: the tracking view returns nil from hitTest and
+            // SwiftUI is told to skip it too.
+            .overlay {
+                HoverTracker { over in
+                    if over {
+                        if !quiet { arm() }
+                    } else {
+                        quiet = false
+                        disarm()
+                    }
                 }
+                .allowsHitTesting(false)
             }
             .onChange(of: dismissTrigger) { _, _ in
                 quiet = true
@@ -127,7 +187,7 @@ struct HoverLabelModifier: ViewModifier {
                 quiet = false
                 disarm()
             }
-            // Switching to another app with the pointer still on the icon sends no "ended": hide it anyway.
+            // Switching to another app with the pointer still on the icon sends no exit: hide it anyway.
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
                 quiet = false
                 disarm()

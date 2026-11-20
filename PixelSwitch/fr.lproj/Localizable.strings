@@ -359,8 +359,6 @@
 "Sign in to this account again before you switch to it." = "Reconnectez-vous à ce compte avant de basculer vers lui.";
 "Wait for the current switch or sign-in to finish." = "Attendez la fin du changement de compte ou de la connexion en cours.";
 "Save label" = "Enregistrer le libellé";
-"More actions" = "Autres actions";
-"More actions for %@" = "Autres actions pour %@";
 "Remove %@?" = "Supprimer %@ ?";
 "PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account." = "PixelSwitch oublie ce compte et supprime sa connexion enregistrée. Si vous l'utilisez en ce moment, PixelSwitch vous bascule vers un autre compte.";
 "Usage last refreshed at %@. It refreshes on its own." = "Utilisation actualisée pour la dernière fois à %@. Elle s'actualise toute seule.";
