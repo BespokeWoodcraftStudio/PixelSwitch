@@ -30,18 +30,23 @@ enum ChromeUsagePage {
         case .defaultBrowser:
             chromeLog.info("[chromeResets] account \(tag): Chrome is not installed, opening the usage page in the default browser")
             openInDefaultBrowser(tag: tag)
+        case .chromeSignedInAs(let address):
+            chromeLog.info("[chromeResets] account \(tag): opening the usage page in the Chrome profile signed in to this address (the account's saved choice; if Chrome has none, it opens the profile used last)")
+            launchChrome(arguments: ChromeUsageLaunch.arguments(profileEmail: address), tag: tag)
         case .chrome(let directory, let source):
             switch source {
             case .matched:
                 chromeLog.info("[chromeResets] account \(tag): opening the usage page in Chrome profile \"\(directory)\" (signed in to this account's address)")
+            case .chosenDirectory:
+                chromeLog.info("[chromeResets] account \(tag): opening the usage page in Chrome profile \"\(directory)\" (the account's saved choice)")
             case .owned:
                 chromeLog.info("[chromeResets] account \(tag): no Chrome profile is signed in to this address, opening the usage page in this account's own PixelSwitch profile")
             case .ownedProfileListUnreadable(.accessDenied):
-                chromeLog.warning("[chromeResets] account \(tag): macOS did not let PixelSwitch read Chrome's profile list (App Data access is denied), so no Chrome profile could be matched; opening the usage page in this account's own PixelSwitch profile")
+                chromeLog.info("[chromeResets] account \(tag): macOS did not let PixelSwitch read Chrome's profile list (App Data access is denied), so no Chrome profile could be matched; opening the usage page in this account's own PixelSwitch profile")
             case .ownedProfileListUnreadable:
-                chromeLog.warning("[chromeResets] account \(tag): Chrome's profile list could not be read, so no Chrome profile could be matched; opening the usage page in this account's own PixelSwitch profile")
+                chromeLog.info("[chromeResets] account \(tag): Chrome's profile list could not be read, so no Chrome profile could be matched; opening the usage page in this account's own PixelSwitch profile")
             }
-            launchChrome(profileDirectory: directory, tag: tag)
+            launchChrome(arguments: ChromeUsageLaunch.arguments(profileDirectory: directory), tag: tag)
         }
     }
 
@@ -64,13 +69,14 @@ enum ChromeUsagePage {
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: ChromeUsageLaunch.chromeBundleIdentifier) != nil
     }
 
-    /// `/usr/bin/open -na "Google Chrome" --args --profile-directory=<dir> <usage page>`.
+    /// `/usr/bin/open` with the tested argument array (`ChromeUsageLaunch.arguments`), for
+    /// example `-na "Google Chrome" --args --profile-directory=<dir> <usage page>`.
     /// A launcher that cannot start, or that exits with an error, falls back to the
     /// default browser so the button still opens the page.
-    private static func launchChrome(profileDirectory: String, tag: String) {
+    private static func launchChrome(arguments: [String], tag: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: ChromeUsageLaunch.openExecutable)
-        process.arguments = ChromeUsageLaunch.arguments(profileDirectory: profileDirectory)
+        process.arguments = arguments
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice

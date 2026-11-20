@@ -364,3 +364,10 @@
 "Remove %@?" = "%@ entfernen?";
 "PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account." = "PixelSwitch vergisst dieses Konto und löscht die gespeicherte Anmeldung. Wenn du es gerade verwendest, wechselt PixelSwitch zu einem anderen Konto.";
 "Usage last refreshed at %@. It refreshes on its own." = "Nutzung zuletzt um %@ aktualisiert. Sie aktualisiert sich von selbst.";
+
+/* 2.4: the per-account Chrome profile choice for Limit resets (PixelSwitch/Views/Components/ChromeProfileChoice.swift) */
+"Its own PixelSwitch Chrome profile" = "Ein eigenes PixelSwitch-Chrome-Profil";
+"The Chrome profile signed in as %@" = "Das Chrome-Profil, das als %@ angemeldet ist";
+"The Chrome profile folder %@" = "Der Chrome-Profilordner %@";
+"Choose this only if Chrome has a profile signed in with this address. Otherwise Chrome opens whichever profile you used last." = "Wählen Sie dies nur, wenn Chrome ein mit dieser Adresse angemeldetes Profil hat. Sonst öffnet Chrome das Profil, das Sie zuletzt benutzt haben.";
+"Chrome profile for Limit resets" = "Chrome-Profil für Limit-Resets";
