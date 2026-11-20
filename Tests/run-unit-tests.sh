@@ -66,6 +66,7 @@ swiftc -swift-version 6 \
   PixelSwitch/Services/LegacyWebDataCleanup.swift \
   Tests/UnitTests/ChromeProfileTests.swift \
   Tests/UnitTests/NoResetPinTests.swift \
+  Tests/UnitTests/LaunchSafetyTests.swift \
   PixelSwitch/Models/FooterAge.swift \
   Tests/UnitTests/FooterAgeTests.swift \
   Shared/WidgetData.swift \

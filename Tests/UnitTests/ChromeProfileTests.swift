@@ -291,8 +291,7 @@ private let sampleLocalState = """
           "legacy web cleanup: it reads the key 2.2 saved its data store identifiers under")
     check(!W.hasWork(defaults: defaults) && W.pendingIdentifiers(defaults: defaults).isEmpty,
           "legacy web cleanup: with nothing saved there is no work and no identifier")
-    W.settle(failed: [], defaults: defaults)
-    check(defaults.object(forKey: W.defaultsKey) == nil, "legacy web cleanup: settling with nothing saved saves nothing")
+    check(W.plan(defaults: defaults).isEmpty, "legacy web cleanup: with nothing saved the plan is empty")
 
     let a = UUID(), b = UUID(), c = UUID()
     let zero = "00000000-0000-0000-0000-000000000000"
@@ -303,21 +302,8 @@ private let sampleLocalState = """
           "legacy web cleanup: every saved identifier once; a duplicate, a non-UUID and the all-zero UUID are left out", "\(pending)")
     check(pending == W.pendingIdentifiers(defaults: defaults), "legacy web cleanup: the order of the identifiers is fixed")
 
-    W.settle(failed: [b], defaults: defaults)
-    let kept = defaults.dictionary(forKey: W.defaultsKey) as? [String: String] ?? [:]
-    check(kept == ["acct-b": b.uuidString],
-          "legacy web cleanup: a store that could not be removed keeps its entry for the next launch, the others are forgotten", "\(kept)")
-    W.settle(failed: [], defaults: defaults)
-    check(defaults.object(forKey: W.defaultsKey) == nil && !W.hasWork(defaults: defaults),
-          "legacy web cleanup: once every store is removed the key is gone, so later launches do nothing")
-
     defaults.set("not a dictionary", forKey: W.defaultsKey)
     check(W.hasWork(defaults: defaults) && W.pendingIdentifiers(defaults: defaults).isEmpty, "legacy web cleanup: a saved value of the wrong type has no identifiers")
-    W.settle(failed: [], defaults: defaults)
-    check(defaults.object(forKey: W.defaultsKey) == nil, "legacy web cleanup: and it is cleared")
-    defaults.set(["x": a.uuidString], forKey: W.defaultsKey)
-    W.settle(failed: [c], defaults: defaults)
-    check(defaults.object(forKey: W.defaultsKey) == nil, "legacy web cleanup: a failure for an identifier that was never saved keeps nothing")
 }
 
 // MARK: - Source pins
@@ -374,7 +360,7 @@ private func chromeSource(_ name: String) -> String {
     check(logLines.count >= 6 && leaks.isEmpty, "chrome pins: log lines name the account by its short id and never an address (\(logLines.count) lines)",
           leaks.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " | "))
 
-    // The 2.2 window is gone, and the one place WebKit remains is the cleanup that deletes its data.
+    // The 2.2 window is gone, and no web framework remains anywhere (LaunchSafetyTests pins that and the cleanup's order).
     let sources = shippedSources()
     check(!FileManager.default.fileExists(atPath: "PixelSwitch/ClaudeWeb") && !FileManager.default.fileExists(atPath: "Tests/UnitTests/ClaudeWebTests.swift"),
           "chrome pins: the 2.2 in-app claude.ai window's folder and its tests are deleted")
@@ -382,15 +368,8 @@ private func chromeSource(_ name: String) -> String {
                                                                          || $0.text.contains("ClaudeWebSessionStore") || $0.text.contains("ClaudeWebStoreMap")
                                                                          || $0.text.contains("removeWebSignIn")) }.map(\.path)
     check(leftovers.isEmpty, "chrome pins: nothing in the shipped product still names the 2.2 window's types", leftovers.joined(separator: " | "))
-    let webKit = sources.filter { $0.text.contains("import WebKit") }.map(\.path)
-    check(webKit == ["PixelSwitch/Services/LegacyWebDataCleanupRunner.swift"],
-          "chrome pins: WebKit is imported in exactly one file, the cleanup that deletes the old data stores", webKit.joined(separator: " | "))
-    let runner = (try? String(contentsOfFile: "PixelSwitch/Services/LegacyWebDataCleanupRunner.swift", encoding: .utf8)) ?? ""
-    check(runner.contains("WKWebsiteDataStore.remove(forIdentifier: id)") && !runner.contains("WKWebView") && !runner.contains("WKWebsiteDataStore(forIdentifier")
-          && !runner.contains("dataStore(") && !runner.contains("evaluateJavaScript"),
-          "chrome pins: the cleanup only removes data stores by identifier; it never opens one, makes a web view or runs a script")
     let app = (try? String(contentsOfFile: "PixelSwitch/PixelSwitchApp.swift", encoding: .utf8)) ?? ""
-    check(app.components(separatedBy: "LegacyWebDataCleanupRunner.runOnce()").count == 2,
+    check(app.components(separatedBy: "LegacyWebDataCleanup.runAtLaunch").count == 2,
           "chrome pins: the cleanup runs from one place, the app's launch")
     let state = (try? String(contentsOfFile: "PixelSwitch/AppState.swift", encoding: .utf8)) ?? ""
     check(!state.contains("ClaudeWeb") && !state.contains("WebSignIn"), "chrome pins: removing an account no longer touches any claude.ai web sign-in")
