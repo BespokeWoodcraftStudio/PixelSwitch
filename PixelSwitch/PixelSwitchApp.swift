@@ -63,8 +63,14 @@ struct PixelSwitchApp: App {
                     )
                     signInWindowController.install(appState: appState, locale: currentLocale)
                     RemoteControlService.shared.start(appState: appState, updateChecker: updateChecker)
-                    // 2.2's in-app claude.ai window is gone: remove the web data it left, once.
-                    Task { await LegacyWebDataCleanupRunner.runOnce() }
+                    // 2.2's in-app claude.ai window is gone: forget the list it saved and delete the
+                    // data folders it left, once. Plain file work (no web framework), off the main
+                    // thread, after the menu bar item is up; the saved list goes first and every error
+                    // is caught, so it can never block or repeat a failed launch.
+                    Task.detached(priority: .utility) {
+                        let cleanupLog = FileLog("ClaudeWeb")
+                        LegacyWebDataCleanup.runAtLaunch { cleanupLog.info($0) }
+                    }
                     // Kick off background usage tracking immediately upon app start
                     Task {
                         await appState.refresh()

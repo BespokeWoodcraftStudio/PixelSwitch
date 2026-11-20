@@ -606,6 +606,7 @@ runAccountPlanTests()
 runAccountIdentityTests()
 runNoResetPinTests()
 runChromeProfileTests()
+runLaunchSafetyTests()
 runFooterAgeTests()
 
 print("\n\(passed) passed, \(failed) failed")
