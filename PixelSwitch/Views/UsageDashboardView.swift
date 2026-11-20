@@ -292,6 +292,16 @@ struct UsageDashboardView: View {
                 }
                 .padding(.top, 4)
             }
+            // A card with a reading has its Limit resets button in the footer row. One
+            // with no reading (expired, waiting) has no footer, so it gets a row
+            // of its own, under the message and Re-sign, which stay where they are.
+            if usage == nil, resetsVisible(account) {
+                HStack(spacing: 6) {
+                    resetsButton(account)
+                    Spacer(minLength: 4)
+                }
+                .frame(minHeight: 14)
+            }
         }
         }
         // The account you are signed in to right now is ringed in orange, all
@@ -313,6 +323,9 @@ struct UsageDashboardView: View {
         // while someone was only trying to read a number off it.
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { switchByDoubleClick(to: account) }
+        // The footer's hint rarely has room beside the age and the Limit resets button,
+        // so the tooltip says it too, only on a card a double-click would switch to.
+        .help(canSwitch(to: account) ? String(localized: "Double-click to switch", bundle: L10n.bundle) : "")
         .onHover { hovering in
             if hovering {
                 hoveredAccount = account.id
@@ -426,6 +439,48 @@ struct UsageDashboardView: View {
         .help(String(localized: "Re-authenticate (fix stale token)", bundle: L10n.bundle))
         .accessibilityLabel(String(format: String(localized: "Re-authenticate %@", bundle: L10n.bundle),
                                    account.displayEmail(obfuscated: maskEmails)))
+        // Voice Control: "Click Re-sign" still works now that the spoken label names the account.
+        .accessibilityInputLabels([String(localized: "Re-sign", bundle: L10n.bundle)])
+        .fixedSize()
+    }
+
+    /// True when this card offers Limit resets: the account has a plan and is not the
+    /// no-subscription card. The rule itself is `Account.showsResetsButton`
+    /// (pure and tested); this only hands it the card's no-subscription state.
+    private func resetsVisible(_ account: Account) -> Bool {
+        account.showsResetsButton(noSubscription: appState.accountUsageErrors[account.id]?.isNoSubscription == true)
+    }
+
+    /// Limit resets: opens this account's own claude.ai window (`ClaudeWebWindows`), on
+    /// its usage page, so the founder can use claude.ai's own "Reset for free"
+    /// button for the right account. It ONLY opens the window: nothing is clicked,
+    /// submitted or called on claude.ai from here. A real borderless button like
+    /// Retry and Re-sign, in the same `.brandText` label, so a click on it never
+    /// counts toward the card's double-click-to-switch. Not disabled while a
+    /// sign-in or a switch runs: opening a web page touches neither. `account.email`
+    /// is passed whole on purpose (the window checks which address it is signed in
+    /// as); the window masks it itself when masking is on.
+    private func resetsButton(_ account: Account, iconOnly: Bool = false) -> some View {
+        Button {
+            ClaudeWebWindows.shared.open(accountID: account.id.uuidString, email: account.email)
+        } label: {
+            Group {
+                if iconOnly {
+                    Label(String(localized: "Limit resets", bundle: L10n.bundle), systemImage: "arrow.counterclockwise.circle")
+                        .labelStyle(.iconOnly)
+                } else {
+                    Label(String(localized: "Limit resets", bundle: L10n.bundle), systemImage: "arrow.counterclockwise.circle")
+                }
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.brandText)
+        }
+        .buttonStyle(.borderless)
+        .focusable(false)
+        .help(String(localized: "Open this account's claude.ai usage page to use a reset", bundle: L10n.bundle))
+        .accessibilityLabel(String(format: String(localized: "Limit resets for %@", bundle: L10n.bundle),
+                                   account.displayEmail(obfuscated: maskEmails)))
+        .accessibilityInputLabels([String(localized: "Limit resets", bundle: L10n.bundle)])
         .fixedSize()
     }
 
@@ -440,33 +495,64 @@ struct UsageDashboardView: View {
     /// holds an address that truncates on a real account
     /// (`claude@bespokewoodc...`), and squeezing a hint in beside it would eat
     /// the one thing the card exists to identify.
-    @ViewBuilder
     private func cardFooter(_ account: Account) -> some View {
-        HStack(spacing: 6) {
-            sampleAgeLabel(account)
-            Spacer(minLength: 4)
-            if appState.switchingTo == account.id {
-                HStack(spacing: 4) {
-                    ProgressView().controlSize(.small).scaleEffect(0.6)
-                    Text("Switching…")
-                        .font(.caption2.weight(.semibold))
-                }
-                .foregroundStyle(.brandText)
-                .transition(.opacity)
-            } else if hoveredAccount == account.id && canSwitch(to: account) {
-                Text("Double-click to switch")
-                    .font(.caption2)
-                    .foregroundStyle(.textSecondary)
-                    .transition(.opacity)
-            } else if autoSwitchEnabled && AutoSwitchSettings.isManualOnly(own: account.switchThreshold) {
-                Label("Manual only", systemImage: "hand.raised")
-                    .font(.caption2)
-                    .foregroundStyle(.textSecondary)
-                    .lineLimit(1)
-                    .help("Auto-switch never moves you to this account. You can still switch to it here.")
-            }
+        // The layout rule (the age never truncates; the hint is dropped first, then
+        // the button goes icon-only) lives in `CardFooterRow`, shared with the
+        // screenshot harness so what it draws is what this draws.
+        CardFooterRow(
+            age: sampleAgeLabel(account),
+            reset: footerResets(account, iconOnly: false),
+            resetIconOnly: footerResets(account, iconOnly: true),
+            status: footerStatus(account),
+            hint: footerHint(account)
+        )
+    }
+
+    /// Limit resets, beside "Updated … ago", when this card offers it.
+    @ViewBuilder
+    private func footerResets(_ account: Account, iconOnly: Bool) -> some View {
+        if resetsVisible(account) {
+            resetsButton(account, iconOnly: iconOnly)
         }
-        .frame(minHeight: 14)
+    }
+
+    /// True while the pointer is over a card a double-click would switch to.
+    private func showsSwitchHint(_ account: Account) -> Bool {
+        hoveredAccount == account.id && canSwitch(to: account)
+    }
+
+    /// What is going on, never dropped: the switch in progress, or the Manual only
+    /// note. (The hover hint takes the Manual only note's place while hovering.)
+    @ViewBuilder
+    private func footerStatus(_ account: Account) -> some View {
+        if appState.switchingTo == account.id {
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.small).scaleEffect(0.6)
+                Text(String(localized: "Switching…", bundle: L10n.bundle))
+                    .font(.caption2.weight(.semibold))
+            }
+            .foregroundStyle(.brandText)
+            .transition(.opacity)
+        } else if !showsSwitchHint(account) && autoSwitchEnabled && AutoSwitchSettings.isManualOnly(own: account.switchThreshold) {
+            Label("Manual only", systemImage: "hand.raised")
+                .font(.caption2)
+                .foregroundStyle(.textSecondary)
+                .lineLimit(1)
+                .help("Auto-switch never moves you to this account. You can still switch to it here.")
+        }
+    }
+
+    /// What a double-click would do. The first thing to go when the line is short
+    /// of room (`CardFooterRow`), so it never costs the age or the button its words.
+    @ViewBuilder
+    private func footerHint(_ account: Account) -> some View {
+        if appState.switchingTo != account.id && showsSwitchHint(account) {
+            Text(String(localized: "Double-click to switch", bundle: L10n.bundle))
+                .font(.caption2)
+                .foregroundStyle(.textSecondary)
+                .lineLimit(1)
+                .transition(.opacity)
+        }
     }
 
     @ViewBuilder
@@ -478,6 +564,7 @@ struct UsageDashboardView: View {
                     .font(.caption2)
                 Text("Updated \(Text(sampledAt, style: .relative)) ago")
                     .font(.caption2)
+                    .lineLimit(1)
             }
             .foregroundStyle(.textSecondary)
         }

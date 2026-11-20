@@ -59,6 +59,10 @@ swiftc -swift-version 6 \
   Tests/UnitTests/UsageGuardTests.swift \
   PixelSwitch/Services/AuthHealth.swift \
   Tests/UnitTests/AuthHealthTests.swift \
+  PixelSwitch/ClaudeWeb/ClaudeWebStoreMap.swift \
+  PixelSwitch/ClaudeWeb/ClaudeWebPolicy.swift \
+  PixelSwitch/ClaudeWeb/ClaudeWebAccountCheck.swift \
+  Tests/UnitTests/ClaudeWebTests.swift \
   Shared/WidgetData.swift \
   Tests/UnitTests/AccountPlanTests.swift \
   Tests/UnitTests/main.swift \

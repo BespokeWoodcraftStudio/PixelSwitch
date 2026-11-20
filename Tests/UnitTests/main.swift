@@ -603,6 +603,7 @@ runUsageErrorTests()
 runUsageGuardTests()
 runAuthHealthTests()
 runAccountPlanTests()
+runClaudeWebTests()
 
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

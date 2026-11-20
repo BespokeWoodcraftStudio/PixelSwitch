@@ -338,6 +338,32 @@
 /* Ultra (Max 20x) has no 5-hour limit: what the Session column of its Settings row says */
 "No 5-hour limit" = "Aucune limite de 5 heures";
 
+/* Resets button: each account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+"Back" = "Retour";
+"Reload" = "Recharger";
+"Open in browser" = "Ouvrir dans le navigateur";
+"Paste sign-in link" = "Coller le lien de connexion";
+"Sign out of claude.ai here" = "Se déconnecter de claude.ai ici";
+"Sign in as %@" = "Connectez-vous en tant que %@";
+"Paste the sign-in link from your email" = "Collez le lien de connexion reçu par e-mail";
+"Load" = "Charger";
+"That is not one whole link. Paste the full link from your email." = "Ce n’est pas un lien complet. Collez le lien entier reçu par e-mail.";
+"Only a link on claude.ai loads here. Paste the sign-in link from your email." = "Seuls les liens claude.ai se chargent ici. Collez le lien de connexion reçu par e-mail.";
+"Sign out of claude.ai here?" = "Se déconnecter de claude.ai ici ?";
+"This removes the claude.ai sign-in that PixelSwitch keeps for %@. Your browser and your other accounts are not affected." = "Cela supprime la connexion à claude.ai que PixelSwitch conserve pour %@. Votre navigateur et vos autres comptes ne sont pas concernés.";
+"Sign out" = "Se déconnecter";
+"This window is signed in as %1$@, not %2$@. Sign out here and sign in as %2$@." = "Cette fenêtre est connectée en tant que %1$@, et non %2$@. Déconnectez-vous ici, puis connectez-vous en tant que %2$@.";
+"PixelSwitch could not remove this sign-in. Quit and reopen PixelSwitch, then try again." = "PixelSwitch n’a pas pu supprimer cette connexion. Quittez PixelSwitch, rouvrez-le, puis réessayez.";
+
 /* 2.2: Re-sign on a Usage card whose sign-in has ended; the plan chip of an account with no active subscription */
 "Re-sign" = "Se reconnecter";
 "No plan" = "Aucun forfait";
+
+/* 2.2: Limit resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+"Limit resets" = "Réinit. des limites";
+"Limit resets for %@" = "Réinitialisation des limites pour %@";
+"Open this account's claude.ai usage page to use a reset" = "Ouvrir la page d'utilisation claude.ai de ce compte pour utiliser une réinitialisation";
+
+/* 2.2: the Usage card footer's hover hint (also its tooltip) and its switch-in-progress text */
+"Double-click to switch" = "Double-cliquez pour basculer";
+"Switching…" = "Basculement…";

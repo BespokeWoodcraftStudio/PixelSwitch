@@ -250,6 +250,23 @@ extension Account {
         AccountPlan.chip(subscriptionType: subscriptionType, planTier: planTier,
                          sessionObserved: sessionLimitObserved == true, noSubscription: noSubscription)
     }
+
+    /// Whether the Usage card offers its "Resets" button, the one that opens this
+    /// account's own claude.ai window (`ClaudeWebWindows`) so the founder can use
+    /// claude.ai's "Reset for free" himself. Pure, so the rule is tested.
+    ///
+    /// - Shown on every Claude account that has a plan, whatever the state of its
+    ///   Claude Code sign-in: an expired card still shows it, because the claude.ai
+    ///   sign-in the window keeps is separate from the Claude Code one.
+    /// - Hidden while the account has no active subscription (`noSubscription`, the
+    ///   card's 403 state): a lapsed account has nothing to reset.
+    /// - Hidden when no plan is known (the chip would be nil), and for any provider
+    ///   other than Claude Code, which has no claude.ai page.
+    ///
+    /// The button only opens a window; nothing is clicked or sent on the page.
+    func showsResetsButton(noSubscription: Bool = false) -> Bool {
+        provider == .claudeCode && !noSubscription && planChip() != nil
+    }
 }
 
 // MARK: - The one place the session reading is decided
