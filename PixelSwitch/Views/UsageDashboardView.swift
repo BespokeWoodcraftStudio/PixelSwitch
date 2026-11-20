@@ -323,6 +323,9 @@ struct UsageDashboardView: View {
         // while someone was only trying to read a number off it.
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { switchByDoubleClick(to: account) }
+        // The footer's hint rarely has room beside the age and the Limit resets button,
+        // so the tooltip says it too, only on a card a double-click would switch to.
+        .help(canSwitch(to: account) ? String(localized: "Double-click to switch", bundle: L10n.bundle) : "")
         .onHover { hovering in
             if hovering {
                 hoveredAccount = account.id
@@ -525,7 +528,7 @@ struct UsageDashboardView: View {
         if appState.switchingTo == account.id {
             HStack(spacing: 4) {
                 ProgressView().controlSize(.small).scaleEffect(0.6)
-                Text("Switching…")
+                Text(String(localized: "Switching…", bundle: L10n.bundle))
                     .font(.caption2.weight(.semibold))
             }
             .foregroundStyle(.brandText)
@@ -544,7 +547,7 @@ struct UsageDashboardView: View {
     @ViewBuilder
     private func footerHint(_ account: Account) -> some View {
         if appState.switchingTo != account.id && showsSwitchHint(account) {
-            Text("Double-click to switch")
+            Text(String(localized: "Double-click to switch", bundle: L10n.bundle))
                 .font(.caption2)
                 .foregroundStyle(.textSecondary)
                 .lineLimit(1)

@@ -363,3 +363,7 @@
 "Limit resets" = "制限リセット";
 "Limit resets for %@" = "%@ の制限リセット";
 "Open this account's claude.ai usage page to use a reset" = "このアカウントの claude.ai 使用状況ページを開いてリセットを使う";
+
+/* 2.2: the Usage card footer's hover hint (also its tooltip) and its switch-in-progress text */
+"Double-click to switch" = "ダブルクリックで切り替え";
+"Switching…" = "切り替え中…";

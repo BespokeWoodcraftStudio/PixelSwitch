@@ -363,3 +363,7 @@
 "Limit resets" = "Réinit. des limites";
 "Limit resets for %@" = "Réinitialisation des limites pour %@";
 "Open this account's claude.ai usage page to use a reset" = "Ouvrir la page d'utilisation claude.ai de ce compte pour utiliser une réinitialisation";
+
+/* 2.2: the Usage card footer's hover hint (also its tooltip) and its switch-in-progress text */
+"Double-click to switch" = "Double-cliquez pour basculer";
+"Switching…" = "Basculement…";

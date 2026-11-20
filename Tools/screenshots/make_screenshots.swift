@@ -117,8 +117,8 @@ private let lapsedSample = SampleAccount(email: "lapsed@example.com", swatch: 5,
 
 /// The footer's words in one language, read from that language's own Localizable.strings
 /// (run from the repo root), so the German and French pictures use the shipped translations.
-/// "Double-click to switch" and "Switching…" are in no table, so the app shows them in English
-/// in every language, and so does this.
+/// "Double-click to switch" and "Switching…" are in the tables too, so they are translated here
+/// as they are in the app.
 private struct FooterStrings {
     let code: String
     let bundle: Bundle
@@ -141,6 +141,8 @@ private struct FooterStrings {
     func age(_ relative: String) -> String { String(format: t("Updated %@ ago"), relative) }
     var resets: String { t("Limit resets") }
     var manualOnly: String { t("Manual only") }
+    var hint: String { t("Double-click to switch") }
+    var switching: String { t("Switching…") }
 
     static let en = FooterStrings("en", longAge: "12 hr, 59 min", shortAge: "4 min", stressAge: "1 day, 23 hr, 59 min")
     static let de = FooterStrings("de", longAge: "12 Std., 59 Min.", shortAge: "4 Min.", stressAge: "1 Tag, 23 Std., 59 Min.")
@@ -194,7 +196,7 @@ private struct FooterLine: View {
                 if switching {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.triangle.2.circlepath").font(.caption2)
-                        Text("Switching…").font(.caption2.weight(.semibold))
+                        Text(verbatim: strings.switching).font(.caption2.weight(.semibold))
                     }
                     .foregroundStyle(Color.brandText)
                 } else if manualOnly && !hover {
@@ -204,7 +206,7 @@ private struct FooterLine: View {
             },
             hint: Group {
                 if hover && !switching {
-                    Text("Double-click to switch").font(.caption2).foregroundStyle(.textSecondary).lineLimit(1)
+                    Text(verbatim: strings.hint).font(.caption2).foregroundStyle(.textSecondary).lineLimit(1)
                 }
             }
         )
@@ -529,10 +531,11 @@ private struct FooterMatrix: View {
 @MainActor
 private func reportFooterWidths() {
     func width<V: View>(_ view: V) -> CGFloat { NSHostingView(rootView: view.fixedSize()).fittingSize.width }
-    let hint = width(Text("Double-click to switch").font(.caption2))
     let available: CGFloat = 328 - 2 * AppStyle.cardPadding - 14
-    print("footer widths (points); the line gets \(available) pt; spacing 6, spacer 4; hint \(hint)")
+    print("footer widths (points); the line gets \(available) pt; spacing 6, spacer 4")
     for strings in FooterStrings.all {
+        let hint = width(Text(verbatim: strings.hint).font(.caption2))
+        print("  \(strings.code): hint \(hint)")
         for (name, relative) in [("long age", strings.longAge), ("short age", strings.shortAge), ("stress age", strings.stressAge)] {
             let age = width(HStack(spacing: 3) { Image(systemName: "clock").font(.caption2)
                                                   Text(verbatim: strings.age(relative)).font(.caption2) })

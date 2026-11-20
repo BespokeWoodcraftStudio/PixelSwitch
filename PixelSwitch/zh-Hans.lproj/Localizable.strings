@@ -363,3 +363,7 @@
 "Limit resets" = "限额重置";
 "Limit resets for %@" = "%@ 的限额重置";
 "Open this account's claude.ai usage page to use a reset" = "打开此账户的 claude.ai 用量页面以使用重置";
+
+/* 2.2: the Usage card footer's hover hint (also its tooltip) and its switch-in-progress text */
+"Double-click to switch" = "双击切换";
+"Switching…" = "切换中…";

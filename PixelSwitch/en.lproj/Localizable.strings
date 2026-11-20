@@ -365,3 +365,7 @@
 "Limit resets" = "Limit resets";
 "Limit resets for %@" = "Limit resets for %@";
 "Open this account's claude.ai usage page to use a reset" = "Open this account's claude.ai usage page to use a reset";
+
+/* 2.2: the Usage card footer's hover hint (also its tooltip) and its switch-in-progress text */
+"Double-click to switch" = "Double-click to switch";
+"Switching…" = "Switching…";

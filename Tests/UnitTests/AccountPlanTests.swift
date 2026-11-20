@@ -1183,11 +1183,22 @@ private func chipHex(_ text: String?) -> UInt32? {
     check(age.contains(".lineLimit(1)") && !age.contains("minimumScaleFactor") && !age.contains("truncationMode"),
           "footer pins: the age text is one line and never scaled")
     let hint = planMember(dashboard, startingAt: "private func footerHint(")
-    check(hint.contains("Text(\"Double-click to switch\")") && dashboard.components(separatedBy: "Text(\"Double-click to switch\")").count == 2,
-          "footer pins: the hover hint lives in footerHint only, the piece the row drops first")
+    let hintText = "Text(String(localized: \"Double-click to switch\", bundle: L10n.bundle))"
+    check(hint.contains(hintText) && dashboard.components(separatedBy: hintText).count == 2 && !dashboard.contains("Text(\"Double-click to switch\")"),
+          "footer pins: the hover hint lives in footerHint only, the piece the row drops first, and is looked up in the app's language bundle")
     let status = planMember(dashboard, startingAt: "private func footerStatus(")
-    check(status.contains("Text(\"Switching…\")") && status.contains("Label(\"Manual only\"") && !status.contains("Double-click"),
-          "footer pins: Switching and Manual only are the status, kept in every variant")
+    check(status.contains("Text(String(localized: \"Switching…\", bundle: L10n.bundle))") && !dashboard.contains("Text(\"Switching…\")")
+          && status.contains("Label(\"Manual only\"") && !status.contains("Double-click"),
+          "footer pins: Switching and Manual only are the status, kept in every variant, and Switching is looked up in the app's language bundle")
+    // The tooltip on the card: the hint rarely has room in the footer, so the card says it too, only when a double-click would switch.
+    let tip = ".help(canSwitch(to: account) ? String(localized: \"Double-click to switch\", bundle: L10n.bundle) : \"\")"
+    if let tap = dashboard.range(of: ".onTapGesture(count: 2) { switchByDoubleClick(to: account) }"), let help = dashboard.range(of: tip),
+       let hover = dashboard.range(of: ".onHover { hovering in") {
+        check(dashboard.components(separatedBy: tip).count == 2 && tap.upperBound <= help.lowerBound && help.upperBound <= hover.lowerBound,
+              "footer pins: the card carries the Double-click to switch tooltip right beside its double-click gesture, empty when the card cannot be switched to")
+    } else {
+        check(false, "footer pins: the card's gesture and tooltip are found")
+    }
     check(dashboard.contains("hoveredAccount == account.id && canSwitch(to: account)") && status.contains("!showsSwitchHint(account)"),
           "footer pins: the hover hint still takes the place of the Manual only note while the pointer is over a switchable card")
 
@@ -1213,7 +1224,8 @@ private func chipHex(_ text: String?) -> UInt32? {
     // The strings: the three new keys are in all five tables, translated.
     let languages = ["en", "de", "fr", "ja", "zh-Hans"]
     let tables = languages.map { NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String] ?? [:] }
-    let keys = ["Limit resets", "Limit resets for %@", "Open this account's claude.ai usage page to use a reset"]
+    let keys = ["Limit resets", "Limit resets for %@", "Open this account's claude.ai usage page to use a reset",
+                "Double-click to switch", "Switching…"]
     check(tables.allSatisfy { $0["Resets"] == nil && $0["Resets for %@"] == nil },
           "resets strings: the first draft's keys, Resets and Resets for %@, are gone from all five tables (no orphans)")
     for key in keys {
