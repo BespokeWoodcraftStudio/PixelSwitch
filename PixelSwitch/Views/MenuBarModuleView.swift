@@ -112,7 +112,8 @@ struct MenuBarModuleView: View {
 
     private var accountText: String {
         guard let account = appState.activeAccount else { return "—" }
-        let name = account.effectiveDisplayName(obfuscated: maskEmails)
+        // The address alone for a default-named account, never "<address>'s Organization" (see `Account.identityLines`).
+        let name = account.identityLines(obfuscated: maskEmails).primary
         return name.isEmpty ? "—" : name
     }
 

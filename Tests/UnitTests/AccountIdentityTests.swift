@@ -212,4 +212,27 @@ private func identitySource(_ path: String) -> String {
           "identity pins: the screenshot harness draws the app's AccountIdentityHeader from the real rule")
     check(script.contains("Tests/UnitTests/AccountIdentityTests.swift"),
           "identity pins: the unit harness compiles these tests")
+
+    // The menu bar text and the widget payload take the same primary line, so a default-named
+    // account shows its address there, not "<address>'s Organization".
+    let menuBar = identitySource("PixelSwitch/Views/MenuBarModuleView.swift")
+    let app = identitySource("PixelSwitch/AppState.swift")
+    check(!menuBar.isEmpty && !app.isEmpty, "identity pins: the menu bar and app state sources are found from the repo root")
+    if let from = menuBar.range(of: "private var accountText: String {"),
+       let to = menuBar.range(of: "private var sessionUtilization", range: from.upperBound..<menuBar.endIndex) {
+        let member = String(menuBar[from.lowerBound..<to.lowerBound])
+        check(member.contains("account.identityLines(obfuscated: maskEmails).primary") && !member.contains("effectiveDisplayName("),
+              "identity pins: the menu bar's account text is the primary identity line")
+    } else {
+        check(false, "identity pins: accountText is found in MenuBarModuleView")
+    }
+    if let from = app.range(of: "private func updateWidgetData() {"),
+       let to = app.range(of: "let data = WidgetData(", range: from.upperBound..<app.endIndex) {
+        let member = String(app[from.lowerBound..<to.lowerBound])
+        check(member.contains("displayName: account.identityLines(obfuscated: EmailDisplay.isMasked).primary")
+              && member.contains("email: account.displayEmail(obfuscated: EmailDisplay.isMasked)") && !member.contains("effectiveDisplayName("),
+              "identity pins: the widget payload's name is the primary identity line and its email is unchanged")
+    } else {
+        check(false, "identity pins: updateWidgetData is found in AppState")
+    }
 }
