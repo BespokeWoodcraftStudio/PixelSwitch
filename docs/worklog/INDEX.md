@@ -62,3 +62,6 @@ that file for the full entry. Start here to get up to speed on the project.
 
 ## 2026-11-19
 - [WL-2026-11-19-001](./2026-11-19.md) — 2.2: Re-sign button, plan chip colours, Limit resets window per account, steady footer; records and hand-check page for the release — _feature/partial_
+
+## 2026-11-20
+- [WL-2026-11-20-001](./2026-11-20.md) — 2.3: email once, Limit resets in the account's Chrome profile, Accounts tab moved into Settings, bigger footer icons; records and hand-check page for the release — _feature/partial_

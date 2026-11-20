@@ -22,6 +22,10 @@ def pic(name, alt, caption):
 signin_pic = pic("signin-page-in-window", "The Limit resets window on claude.ai's sign-in, with an example account",
                  "What the window should look like when you are signed out (example account, not yours; the whole window is new, so it is outlined in green). Click to see it full size.")
 
+SUP = ('<span style="display:block;padding:8px 12px;margin:0 0 10px;border-left:4px solid #b08900;background:rgba(176,137,0,.12)">'
+       '<b>Superseded by 2.3 (2026-11-20).</b> The in-app claude.ai window this check is about was removed in 2.3; Limit resets now opens Chrome. '
+       'Do not do this check. Use the 2.3 page instead.</span>')
+
 SKIP = {"label": "C. Skipped for now", "note": "Fine. I will ask again later."}
 NOTHING = "Counted as not checked yet. Anything wrong is fixed in the next version, which reaches you by itself."
 NOTHING_S = "Counted as not checked yet; anything wrong is fixed in the next version."
@@ -76,7 +80,7 @@ cards = [
   "id": "limit-resets", "asked": ASKED,
   "title": "Does Limit resets open claude.ai as beeco1@pixelventures.ai, and show its resets?",
   "short": "Limit resets window, beeco1",
-  "what": ("Each card has a <b>Limit resets</b> button. It opens that account's own claude.ai usage page in a PixelSwitch window with its own saved claude.ai sign-in. You sign in once per account. "
+  "what": SUP + ("Each card has a <b>Limit resets</b> button. It opens that account's own claude.ai usage page in a PixelSwitch window with its own saved claude.ai sign-in. You sign in once per account. "
            "You decide yourself whether to click claude.ai's own reset button; PixelSwitch never uses a reset, and neither do I."
            + signin_pic +
            "The window has <b>Reload</b>, <b>Open in browser</b>, <b>Paste sign-in link</b> and <b>Sign out of claude.ai here</b>. While you are signed out, a bar says <b>Sign in as &lt;the account's email&gt;</b>. If the page fails to load, a banner offers Reload."),
@@ -99,7 +103,7 @@ cards = [
   "id": "stays-signed-in", "asked": ASKED,
   "title": "After closing and reopening the window, are you still signed in?",
   "short": "Still signed in after reopening",
-  "what": "The claude.ai sign-in is saved per account, so closing the window and clicking Limit resets again should not ask you to sign in again.",
+  "what": SUP + "The claude.ai sign-in is saved per account, so closing the window and clicking Limit resets again should not ask you to sign in again.",
   "why": "If it asked every time, the button would be too annoying to use.",
   "steps": ["After check 4, close the Limit resets window.", "Click <b>Limit resets</b> on the beeco1@pixelventures.ai card again.",
             "It should open straight on the usage page, with no sign-in bar.",
@@ -113,7 +117,7 @@ cards = [
   "id": "other-accounts", "asked": ASKED,
   "title": "Sign in the remaining accounts once each",
   "short": "Sign in the other accounts",
-  "what": "Each account has its own claude.ai sign-in. Doing it once for each means Limit resets works from any card afterwards.",
+  "what": SUP + "Each account has its own claude.ai sign-in. Doing it once for each means Limit resets works from any card afterwards.",
   "why": "This also tells us whether the window behaves the same for every account, including personal Gmail ones.",
   "steps": ["For each of your other accounts, click <b>Limit resets</b> on its card and sign in as in check 4.",
             "The title and the <b>Sign in as</b> bar must name the account whose card you clicked. If a window ever shows a different account, say so.",
@@ -128,7 +132,7 @@ cards = [
   "id": "google", "asked": ASKED,
   "title": "Did Continue with Google work inside the window?",
   "short": "Google sign-in in the window",
-  "what": "This is the one fact I cannot learn without you. If Google refuses to sign in inside PixelSwitch's window, the emailed-link route is the way, and I will say so on the button's help text in the next version.",
+  "what": SUP + "This is the one fact I cannot learn without you. If Google refuses to sign in inside PixelSwitch's window, the emailed-link route is the way, and I will say so on the button's help text in the next version.",
   "why": "We do not disguise the window to get past Google. The honest outcome is either that it works or that the emailed link is the route.",
   "steps": ["Think back to check 4: what happened when you clicked <b>Continue with Google</b> in the window?"],
   "nothing": "Counted as not answered. The next version keeps both routes.",
@@ -148,6 +152,7 @@ page = {
  "lede": [
   "<strong>Nothing on this page blocks the work.</strong> 2.2 is built, reviewed and released first and checked by you afterwards, as with every release since 1.2. "
   "Seven short checks: the version, the Re-sign button, the plan chips, and the new <b>Limit resets</b> window (sign in once per account).",
+  "<b>Checks 4, 5, 6 and 7 are superseded by 2.3 (2026-11-20):</b> the in-app Limit resets window was removed; see the 2.3 hand-check page.",
   "<b>PixelSwitch never uses a reset.</b> The Limit resets window is claude.ai's own page; clicking a reset there is only ever your decision.",
   "<b>About the pictures:</b> the one picture shows the window signed out with an example account, not yours."
  ],

@@ -1,24 +1,22 @@
-## PixelSwitch 2.2
+## PixelSwitch 2.3
 
 ### New
 
-- **A Re-sign button on an account card whose sign-in has expired.** When a card in the main window says the account's sign-in expired, a **Re-sign** button now sits on it. It does the same thing as the refresh button (↻) in the Accounts tab: it opens the sign-in panel for that account. An account with no subscription gets no Re-sign button, because signing in again would not help.
-- **Each plan has its own chip color.** Ultra is orange, Max blue, Pro gold, Team green, Enterprise violet and an unknown plan grey. An account with no subscription shows a grey **No plan** chip. If all your accounts are Ultra, they all stay orange.
-- **A Limit resets button on every account card.** It opens that account's own claude.ai usage page in a PixelSwitch window, so you can see the account's limit resets and use one yourself on claude.ai's own button. PixelSwitch never uses a reset for you.
-  - Each account has its own saved claude.ai sign-in, set up once. The window shows **Sign in as** the account's email while you are signed out, and you can sign out of claude.ai from the window.
-  - If claude.ai emails you a sign-in link instead of signing you in, paste it into the **Paste sign-in link** field. **Open in browser** opens the same page in your browser.
-  - If the page does not load, a banner offers **Reload**.
-  - Removing an account also deletes its saved claude.ai sign-in.
-  - Why a window and not a button that resets directly: Anthropic's server offers resets only to claude.ai and to Claude Code, and answered "not eligible" to PixelSwitch for every saved account. PixelSwitch does not pretend to be either of them.
-  - Not yet proven: whether "Continue with Google" works inside this window. If Google refuses it, use claude.ai's email option and paste the emailed link into **Paste sign-in link**.
+- **Limit resets now opens claude.ai in your own Chrome.** The button on each account card opens that account's claude.ai usage page in the Chrome profile that belongs to the account. PixelSwitch finds the profile by the Google account Chrome shows for it. If no profile matches, PixelSwitch creates one named "PixelSwitch <email>" the first time, and you sign in to claude.ai there once. If Chrome is not installed, it opens your default browser. PixelSwitch only opens the page: you click claude.ai's own **Reset** button yourself, and PixelSwitch never uses a reset for you.
+  - The claude.ai window built into PixelSwitch 2.2 is gone, and the data it left behind is removed the first time 2.3 starts. That window could not remember your sign-in, and Google does not allow signing in inside an app's own window.
+  - Why not a one-click reset: Anthropic offers resets only to claude.ai and to Claude Code. PixelSwitch does not pretend to be either of them.
+- **The Accounts tab is gone from the popover.** The popover now has Usage and Costs. Switch, Re-sign, Edit label and Remove are in **Settings → Accounts**, which opens on the tab you used last and is wider so long email addresses fit.
+- **Bigger icons at the bottom of the popover, each with a label when you hover.** They are Add current account, Sign in a new account, Refresh, Settings and Quit. While a sign-in runs, the popover shows "Signing in…" with a **Show sign-in window** button. Add and Remove are off while a switch or a sign-in is running.
 
 ### Fixed
 
-- **The "Updated N min ago" line at the bottom of a card shows whole minutes and is never cut off.** It no longer shows seconds, so it no longer flickers, and when space is short the **Double-click to switch** hint moves into a tooltip. "Double-click to switch" and "Switching…" are now translated into German, French, Japanese and Simplified Chinese.
+- **Your email shows once.** When your organization name is Anthropic's default ("<email>'s Organization") or missing, the popover header, the menu bar text and the widget show the email once instead of twice. A real organization name (a Team, for example) still shows above the email, and a label you chose still shows above the email. The name in the header stays on one line.
+- **The expired message points at the right button.** It now says "Click Re-sign to fix." The old "(↻)" pointed at the Refresh icon.
+- **An expired account can no longer be switched to by double-clicking it.** This is the same rule Settings already used for its Switch button.
 
 ### Linux
 
-The Linux version is unchanged in 2.2. It does not have the Ultra change, the sign-in check or the new main-window buttons yet. It updates itself from these releases (each update is checked against PixelSwitch's signing key before it is installed).
+The Linux version gets the new "Click Re-sign to fix." wording. Nothing else changed there. It updates itself from these releases (each update is checked against PixelSwitch's signing key before it is installed).
 
 For Ubuntu 24.04 or 26.04 with GNOME (Python 3.12 or later), install in one line:
 
@@ -29,7 +27,7 @@ curl -fsSL https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/latest
 Or check the installer first:
 
 ```
-curl -fsSLO https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/download/v2.2/install-linux.sh
+curl -fsSLO https://github.com/BespokeWoodcraftStudio/PixelSwitch/releases/download/v2.3/install-linux.sh
 sha256sum install-linux.sh   # must print 31bdbeeb70388cf40da5797b881455ef0f7c1489e66ebbb4e07c5b9de03247a0
 bash install-linux.sh
 ```
@@ -38,4 +36,4 @@ The new texts are in English, German, French, Japanese and Simplified Chinese on
 
 Your accounts, settings and saved logins carry over as they are.
 
-**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v2.1...v2.2
+**Full Changelog**: https://github.com/BespokeWoodcraftStudio/PixelSwitch/compare/v2.2...v2.3
