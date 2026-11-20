@@ -1,11 +1,13 @@
 // Renders PixelSwitch's Settings pieces offscreen, with invented sample data:
 // the Accounts row (SettingsAccountRow: Priority, account, Session and Weekly
-// menus, and Switch, Re-sign, Edit label and Remove account as four icon buttons) for equal windows,
+// menus, and Switch, Re-sign, Edit label, Chrome profile and Remove account as five icons) for equal windows,
 // the 90/50 split, a Manual only account, priorities P1, P3 and none, the account in
 // use (Switch off), an account whose sign-in ended (Re-sign in the warning colour,
 // Switch off) and a busy app; the same icons with a hover label held open on each (the
-// label the app draws, HoverLabel.swift: a still has no pointer); and the General defaults
-// (SettingsThresholdDefaults).
+// label the app draws, HoverLabel.swift: a still has no pointer); the Chrome profile icon with each
+// of its choices (the warning line shows while "signed in as" is chosen); a real scrolling List,
+// where the first row's label hangs below its icon because there is no room above; and the General
+// defaults (SettingsThresholdDefaults).
 //
 // These are the app's own views, drawn through an AppKit hosting view so the
 // menus and sliders are real controls, light and dark, at 2x. Nothing here
@@ -29,7 +31,8 @@ private let defaultsSplit = AutoSwitchEngine.WindowPair(session: 90, weekly: 50)
 @MainActor
 private func row(_ account: Account, defaults: AutoSwitchEngine.WindowPair, reset: Text = Text(verbatim: "Weekly resets Mon 11:00 AM"),
                  active: Bool = false, label: String? = nil, help: String = "",
-                 signInEnded: Bool = false, busy: Bool = false, previewLabel: SettingsRowIcon? = nil) -> some View {
+                 signInEnded: Bool = false, busy: Bool = false, previewLabel: SettingsRowIcon? = nil,
+                 chrome: ChromeProfileChoice? = nil) -> some View {
     let manual = AutoSwitchSettings.isManualOnly(own: account.switchThreshold)
     // Switch is off for the account in use, for one whose sign-in ended, and while the app is busy:
     // the reasons are the app's own sentences (SettingsAccountsTab.switchOffReason), in the language drawn.
@@ -56,8 +59,10 @@ private func row(_ account: Account, defaults: AutoSwitchEngine.WindowPair, rese
         switchOffReason: off,
         actionsBusy: busy,
         previewLabel: previewLabel,
+        chromeChoice: chrome,
+        chromeAddress: account.email,
         onPriority: { _ in }, onSession: { _ in }, onWeekly: { _ in },
-        onSwitch: {}, onResign: {}, onLabel: { _ in }, onRemove: {})
+        onSwitch: {}, onResign: {}, onLabel: { _ in }, onRemove: {}, onChromeChoice: { _ in })
 }
 
 /// The inset list Settings puts the rows in, drawn plainly: alternating rows.
@@ -119,6 +124,8 @@ private func iconLabelsSample() -> some View {
             row(studio, defaults: defaultsEqual, previewLabel: .switchTo),
             row(studio, defaults: defaultsEqual, previewLabel: .resign),
             row(studio, defaults: defaultsEqual, previewLabel: .editLabel),
+            // The Chrome profile icon: its label names the current choice, here Automatic (nothing kept).
+            row(studio, defaults: defaultsEqual, previewLabel: .chromeProfile),
             row(studio, defaults: defaultsEqual, previewLabel: .remove),
             // The account in use: Switch is off and says why.
             row(work, defaults: defaultsEqual, active: true, label: "Work", previewLabel: .switchTo),
@@ -129,6 +136,74 @@ private func iconLabelsSample() -> some View {
         ])
     }
     .padding(20)
+}
+
+/// The Chrome profile choices, one row each, with the hover label held open on the icon: Automatic (nothing kept),
+/// its own PixelSwitch profile, the profile signed in as the address (the warning line shows in the row, with the
+/// longest address the app is meant to show whole) and a named folder.
+@MainActor
+private func chromeChoicesSample() -> some View {
+    let a = Account(email: "studio@example.com", displayName: "Studio", priority: 1)
+    let b = Account(email: "work@example.com", displayName: "Work", customLabel: "Work", priority: 2)
+    // 33 characters, the longest address the founder has (claude@bespokewoodcraftstudio.com); .test is reserved (RFC 2606).
+    let c = Account(email: "claude@bespokewoodcraftstudio.test", displayName: "Team", isActive: true, priority: 3)
+    let d = Account(email: "archive@example.com", displayName: "Archive", priority: 4)
+    return VStack(alignment: .leading, spacing: 10) {
+        SampleList(rows: [
+            row(a, defaults: defaultsEqual, previewLabel: .chromeProfile, chrome: nil),
+            row(b, defaults: defaultsEqual, label: "Work", previewLabel: .chromeProfile, chrome: .ownProfile),
+            row(c, defaults: defaultsEqual, active: true, previewLabel: .chromeProfile, chrome: .chromeProfileSignedInAs),
+            row(d, defaults: defaultsEqual, previewLabel: .chromeProfile, chrome: .directory("Profile 1")),
+        ])
+    }
+    .padding(20)
+}
+
+/// A real scrolling List like Settings' (an inset list with alternating rows), so the label's room above is measured
+/// against the list's own clip view. A short first row has no room above its icon, so its label hangs below the icon; a
+/// row further down has room, so its label rises above. `which` holds the label open on that row only. `short` makes the
+/// first row a plain two-line row (no label under the address) as most rows are.
+@MainActor
+private func listSample(which: Int, chrome: ChromeProfileChoice?, short: Bool) -> some View {
+    let accounts = [
+        short ? Account(email: "claude@bespokewoodcraftstudio.test", displayName: "Team", priority: 1)
+              : Account(email: "work@example.com", displayName: "Work", isActive: true, customLabel: "Work", priority: 1),
+        Account(email: "studio@example.com", displayName: "Studio", priority: 2),
+        Account(email: "archive@example.com", displayName: "Archive", priority: 3),
+    ]
+    return List {
+        ForEach(0..<accounts.count, id: \.self) { index in
+            row(accounts[index], defaults: defaultsEqual, active: !short && index == 0, label: !short && index == 0 ? "Work" : nil,
+                previewLabel: index == which ? .chromeProfile : nil, chrome: index == which ? chrome : nil)
+        }
+    }
+    .listStyle(.inset(alternatesRowBackgrounds: true))
+    .frame(height: 230)
+    .padding(8)
+}
+
+/// Rows in a scroll view with no inset at all, the tightest a first row can sit: its top edge is the scroll view's
+/// top edge, so there is no room above its icon and its label hangs below it (the 33-character address makes the
+/// label wrap to two lines when "signed in as" is chosen, the tallest label there is). The rows below are drawn
+/// after it, so the label has to stay in front of them.
+@MainActor
+private func scrollSample(chrome: ChromeProfileChoice?) -> some View {
+    let first = Account(email: "claude@bespokewoodcraftstudio.test", displayName: "Team", priority: 1)
+    let second = Account(email: "studio@example.com", displayName: "Studio", priority: 2)
+    return ScrollView {
+        VStack(spacing: 0) {
+            row(first, defaults: defaultsEqual, previewLabel: .chromeProfile, chrome: chrome)
+                .padding(.horizontal, 10).padding(.vertical, 3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(nsColor: .alternatingContentBackgroundColors[0]))
+            row(second, defaults: defaultsEqual)
+                .padding(.horizontal, 10).padding(.vertical, 3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(nsColor: .alternatingContentBackgroundColors[1]))
+        }
+    }
+    .frame(height: 170)
+    .padding(8)
 }
 
 @MainActor
@@ -210,10 +285,16 @@ enum SettingsRenders {
             NSApp.setActivationPolicy(.prohibited)
             for dark in [false, true] {
                 let name = dark ? "dark" : "light"
-                // 932 wide: the Settings window (940) less its padding and the list's insets.
-                writePNG(accountsSample(), width: 932, dark: dark, language: language, to: "\(out)/settings-accounts-rows\(suffix)-\(name).png")
-                writePNG(splitDefaultsSample(), width: 932, dark: dark, language: language, to: "\(out)/settings-accounts-split-defaults\(suffix)-\(name).png")
-                writePNG(iconLabelsSample(), width: 932, dark: dark, language: language, to: "\(out)/settings-accounts-icon-labels\(suffix)-\(name).png")
+                // 972 wide: the Settings window (980) less its padding and the list's insets.
+                writePNG(accountsSample(), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-rows\(suffix)-\(name).png")
+                writePNG(splitDefaultsSample(), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-split-defaults\(suffix)-\(name).png")
+                writePNG(iconLabelsSample(), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-icon-labels\(suffix)-\(name).png")
+                writePNG(chromeChoicesSample(), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-chrome-profile\(suffix)-\(name).png")
+                writePNG(listSample(which: 0, chrome: nil, short: true), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-list-first-row-label\(suffix)-\(name).png")
+                writePNG(listSample(which: 0, chrome: .chromeProfileSignedInAs, short: true), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-list-first-row-label-long\(suffix)-\(name).png")
+                writePNG(scrollSample(chrome: nil), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-scroll-first-row-label\(suffix)-\(name).png")
+                writePNG(scrollSample(chrome: .chromeProfileSignedInAs), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-scroll-first-row-label-long\(suffix)-\(name).png")
+                writePNG(listSample(which: 1, chrome: nil, short: true), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-list-second-row-label\(suffix)-\(name).png")
                 if language == "en" {
                     writePNG(generalSample(session: 90, weekly: 50), width: 560, dark: dark, language: language, to: "\(out)/settings-general-defaults-split-\(name).png")
                     writePNG(generalSample(session: 98, weekly: 98), width: 560, dark: dark, language: language, to: "\(out)/settings-general-defaults-equal-\(name).png")

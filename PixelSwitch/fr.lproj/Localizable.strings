@@ -371,3 +371,6 @@
 "The Chrome profile folder %@" = "Le dossier de profil Chrome %@";
 "Choose this only if Chrome has a profile signed in with this address. Otherwise Chrome opens whichever profile you used last." = "Choisissez cette option seulement si Chrome a un profil connecté avec cette adresse. Sinon, Chrome ouvre le profil que vous avez utilisé en dernier.";
 "Chrome profile for Limit resets" = "Profil Chrome pour la réinitialisation des limites";
+"Automatic (its own PixelSwitch profile)" = "Automatique (son propre profil PixelSwitch)";
+"Chrome profile for Limit resets: %@" = "Profil Chrome pour la réinitialisation des limites : %@";
+"Chrome profile for Limit resets of %@" = "Profil Chrome pour la réinitialisation des limites de %@";

@@ -46,6 +46,8 @@ enum ChromeUsagePage {
                 chromeLog.info("[chromeResets] account \(tag): opening the usage page in this account's own PixelSwitch profile (the account's saved choice)")
             case .owned:
                 chromeLog.info("[chromeResets] account \(tag): no Chrome profile is signed in to this address, opening the usage page in this account's own PixelSwitch profile")
+            case .ownedSignedInAddressUnusable:
+                chromeLog.info("[chromeResets] account \(tag): the account's saved choice is the Chrome profile signed in as its address, but the address is blank or not usable, so Chrome could not be asked for it; opening the usage page in this account's own PixelSwitch profile")
             case .ownedProfileListUnreadable(.accessDenied):
                 chromeLog.info("[chromeResets] account \(tag): macOS did not let PixelSwitch read Chrome's profile list (App Data access is denied), so no Chrome profile could be matched; opening the usage page in this account's own PixelSwitch profile")
             case .ownedProfileListUnreadable:

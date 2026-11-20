@@ -591,6 +591,54 @@ private extension Data {
     check(S.set(.directory("Default"), forAccountID: a, defaults: defaults) && S.choice(forAccountID: a, defaults: defaults) == .directory("Default"),
           "chrome choice: a wrong-typed value is replaced by the next kept choice")
 
+    // One bad entry never hides or overwrites the other accounts' choices (the dictionary is read as [String: Any], String values kept).
+    let c = "CCCCCCCC-3333-4333-8333-CCCCCCCCCCCC", d = "DDDDDDDD-4444-4444-8444-DDDDDDDDDDDD"
+    defaults.set([a.lowercased(): "signedInAs", b.lowercased(): 7, c.lowercased(): "directory:Profile 1", d.lowercased(): ["nested": "x"]] as [String: Any], forKey: S.defaultsKey)
+    check(S.saved(forAccountID: a, defaults: defaults) == .chromeProfileSignedInAs && S.saved(forAccountID: c, defaults: defaults) == .directory("Profile 1")
+          && S.saved(forAccountID: b, defaults: defaults) == nil && S.saved(forAccountID: d, defaults: defaults) == nil,
+          "chrome choice: with a number and a dictionary among the entries, the String entries are still read and the bad ones count as no choice")
+    check(S.storedTexts(defaults: defaults) == [a.lowercased(): "signedInAs", c.lowercased(): "directory:Profile 1"],
+          "chrome choice: the texts read are exactly the String entries")
+    let other = "EEEEEEEE-5555-4555-8555-EEEEEEEEEEEE"
+    check(S.set(.ownProfile, forAccountID: other, defaults: defaults)
+          && S.saved(forAccountID: a, defaults: defaults) == .chromeProfileSignedInAs && S.saved(forAccountID: c, defaults: defaults) == .directory("Profile 1")
+          && S.saved(forAccountID: other, defaults: defaults) == .ownProfile,
+          "chrome choice: keeping one account's choice next to a bad entry leaves the other accounts' choices as they were")
+    check((defaults.dictionary(forKey: S.defaultsKey) as? [String: String]) == [a.lowercased(): "signedInAs", c.lowercased(): "directory:Profile 1", other.lowercased(): "own"],
+          "chrome choice: and the bad entries are dropped by that write, not kept or turned into anything")
+    defaults.set([a.lowercased(): "signedInAs", b.lowercased(): 7, c.lowercased(): "own"] as [String: Any], forKey: S.defaultsKey)
+    S.clear(forAccountID: c, defaults: defaults)
+    check(S.saved(forAccountID: a, defaults: defaults) == .chromeProfileSignedInAs && S.saved(forAccountID: c, defaults: defaults) == nil
+          && (defaults.dictionary(forKey: S.defaultsKey) as? [String: String]) == [a.lowercased(): "signedInAs"],
+          "chrome choice: clearing one account next to a bad entry keeps the others, and the bad entry goes")
+    defaults.set([b.lowercased(): 7] as [String: Any], forKey: S.defaultsKey)
+    S.clear(forAccountID: a, defaults: defaults)
+    check(defaults.object(forKey: S.defaultsKey) == nil, "chrome choice: when only bad entries are left, clearing leaves no key at all")
+    // What the Settings menu does with a pick: Automatic (nil) forgets, anything else is kept, and the own profile is a kept choice.
+    defaults.removeObject(forKey: S.defaultsKey)
+    let pickAccount = "FFFFFFFF-6666-4666-8666-FFFFFFFFFFFF"
+    check(S.saved(forAccountID: pickAccount, defaults: defaults) == nil, "chrome pick: an account with nothing kept starts as Automatic (no saved choice)")
+    check(S.apply(.ownProfile, forAccountID: pickAccount, defaults: defaults) && S.saved(forAccountID: pickAccount, defaults: defaults) == .ownProfile
+          && (defaults.dictionary(forKey: S.defaultsKey) as? [String: String]) == [pickAccount.lowercased(): "own"],
+          "chrome pick: picking the own profile from Automatic keeps it (as own), so the account is no longer Automatic")
+    check(S.apply(.chromeProfileSignedInAs, forAccountID: pickAccount, defaults: defaults) && S.saved(forAccountID: pickAccount, defaults: defaults) == .chromeProfileSignedInAs,
+          "chrome pick: picking signed in as keeps it")
+    check(S.apply(.directory("Profile 1"), forAccountID: pickAccount, defaults: defaults) && S.saved(forAccountID: pickAccount, defaults: defaults) == .directory("Profile 1"),
+          "chrome pick: picking a named folder keeps it")
+    check(!S.apply(.directory("../x"), forAccountID: pickAccount, defaults: defaults) && S.saved(forAccountID: pickAccount, defaults: defaults) == .directory("Profile 1"),
+          "chrome pick: an invalid folder name changes nothing")
+    check(S.apply(nil, forAccountID: pickAccount, defaults: defaults) && S.saved(forAccountID: pickAccount, defaults: defaults) == nil
+          && defaults.object(forKey: S.defaultsKey) == nil,
+          "chrome pick: picking Automatic forgets the kept choice, and with nothing left the key is gone")
+    check(S.apply(nil, forAccountID: pickAccount, defaults: defaults) && S.apply(.ownProfile, forAccountID: pickAccount, defaults: defaults)
+          && S.saved(forAccountID: pickAccount, defaults: defaults) == .ownProfile,
+          "chrome pick: Automatic, then the own profile again, keeps own: the explicit own profile is a different state from none")
+    defaults.removeObject(forKey: S.defaultsKey)
+    // The documented form uses lower case keys; an upper case key written from a shell is never found.
+    defaults.set([a: "signedInAs"], forKey: S.defaultsKey)
+    check(S.saved(forAccountID: a, defaults: defaults) == nil, "chrome choice: an upper case account-id key is not found (the documented keys are lower case)")
+    defaults.removeObject(forKey: S.defaultsKey)
+
     // The three launches, as exact argument arrays.
     check(C.arguments(profileDirectory: "PixelSwitch me@example.com") == ["-na", "Google Chrome", "--args", "--profile-directory=PixelSwitch me@example.com", url],
           "chrome args: the own profile is --profile-directory with the PixelSwitch folder")
@@ -651,9 +699,20 @@ private extension Data {
     for (index, unusable) in ["", "   ", "no-at-sign", "a b@x.com"].enumerated() {
         let other = "unusable-\(index)"   // its own account each time: the first own folder an account gets is saved for good
         S.set(.chromeProfileSignedInAs, forAccountID: other, defaults: defaults)
-        check(route(other, unusable, nil, .accessDenied) == .chrome(profileDirectory: PixelSwitchChromeProfile.directoryName(forEmail: unusable, accountID: other), source: .ownedProfileListUnreadable(.accessDenied)),
-              "chrome order: the signed-in-as choice with the unusable address \(unusable.debugDescription) counts as no choice and falls back to the own profile, never a blank flag")
+        let ownFolder = PixelSwitchChromeProfile.directoryName(forEmail: unusable, accountID: other)
+        check(route(other, unusable, nil, .accessDenied) == .chrome(profileDirectory: ownFolder, source: .ownedSignedInAddressUnusable),
+              "chrome order: the signed-in-as choice with the unusable address \(unusable.debugDescription) falls back to the own profile, never a blank flag, and says why (not \"nothing is signed in\", and not \"the list was unreadable\")")
+        check(route(other, unusable, state, nil) == .chrome(profileDirectory: ownFolder, source: .ownedSignedInAddressUnusable)
+              && route(other, unusable, nil, nil) == .chrome(profileDirectory: ownFolder, source: .ownedSignedInAddressUnusable),
+              "chrome order: the same reason whether the list was read with no match or not read at all, for \(unusable.debugDescription)")
     }
+    // The fallback is the same folder as before; only the reason differs from a plain "nothing signed in".
+    S.set(.chromeProfileSignedInAs, forAccountID: "unusable-folder", defaults: defaults)
+    S.clear(forAccountID: "plain-none", defaults: defaults)
+    check(route("unusable-folder", "no-at-sign", nil, nil) == .chrome(profileDirectory: "PixelSwitch no-at-sign", source: .ownedSignedInAddressUnusable)
+          && route("plain-none", "no-at-sign", nil, nil) == .chrome(profileDirectory: "PixelSwitch no-at-sign", source: .owned)
+          && ChromeUsageLaunch.Source.ownedSignedInAddressUnusable != .owned,
+          "chrome order: with the same address and folder, a signed-in-as choice reports the unusable address and an account with no choice reports owned")
     // 3. With no stored choice and no match, its own profile.
     S.clear(forAccountID: id, defaults: defaults)
     defaults.removeObject(forKey: PixelSwitchChromeProfile.defaultsKey)
@@ -794,6 +853,8 @@ private func chromeSource(_ name: String) -> String {
     check(page.contains("ChromeLocalState.readFailure(from: error)") && page.contains("localStateFailure: read.failure")
           && page.contains("case .ownedProfileListUnreadable(.accessDenied):") && page.contains("macOS did not let PixelSwitch read Chrome's profile list"),
           "chrome pins: a read macOS refused is logged as that, not as no profile being signed in")
+    check(page.contains("case .ownedSignedInAddressUnusable:") && page.contains("the address is blank or not usable"),
+          "chrome pins: a signed-in-as choice with an unusable address is logged as that, not as no profile being signed in")
     check(page.contains("ChromeProfileChoiceStore.saved(forAccountID: accountID) == nil ? readLocalState() : (data: nil, failure: nil)"),
           "chrome pins: an account with a stored choice never has Chrome's profile list read at all")
     check(page.components(separatedBy: "try? Data(contentsOf").count == 1,
@@ -805,13 +866,29 @@ private func chromeSource(_ name: String) -> String {
     check(logLines.count >= 6 && leaks.isEmpty, "chrome pins: log lines name the account by its short id and never an address (\(logLines.count) lines)",
           leaks.map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " | "))
 
-    // The profile choice control: stores through the tested store, opens nothing.
+    // The profile choice control: plain inputs, reports what was picked, opens nothing. The tab keeps it through the tested store.
     let control = (try? String(contentsOfFile: "PixelSwitch/Views/Components/ChromeProfileChoice.swift", encoding: .utf8)) ?? ""
-    check(control.contains("struct ChromeProfileChoiceControl: View")
-          && control.contains("ChromeProfileChoiceStore.choice(forAccountID: account.id.uuidString)")
-          && control.contains("ChromeProfileChoiceStore.set(newValue, forAccountID: account.id.uuidString)")
-          && control.contains("account.displayEmail(obfuscated: maskEmails)"),
-          "chrome pins: the profile choice control reads and writes the stored choice by account id and shows the address through the masking rule")
+    let tab = (try? String(contentsOfFile: "PixelSwitch/Views/SettingsAccountsTab.swift", encoding: .utf8)) ?? ""
+    check(control.contains("struct ChromeProfileChoiceControl: View") && control.contains("let choice: ChromeProfileChoice?")
+          && control.contains("let address: String") && control.contains("let onChoose: @MainActor (ChromeProfileChoice?) -> Void")
+          && !control.contains("@AppStorage") && !control.contains("@State") && !control.contains("let account: Account") && !control.contains("EmailDisplay"),
+          "chrome pins: the profile choice control takes the kept choice, the address and one closure, and holds no state of its own")
+    check(tab.contains("ChromeProfileChoiceStore.saved(forAccountID: account.id.uuidString)")
+          && tab.contains("ChromeProfileChoiceStore.apply(choice, forAccountID: account.id.uuidString)")
+          && tab.contains("chromeAddress: account.displayEmail(obfuscated: maskEmails)"),
+          "chrome pins: Settings reads the kept choice by account id, keeps what is picked (or forgets it for Automatic) and shows the address through the masking rule")
+    check(!control.contains("ChromeProfileChoiceStore.choice("), "chrome pins: the control never shows the stored own choice for an account that has none: nothing kept is Automatic")
+    // Nothing kept is its own state, labelled Automatic, and picking the own profile is a different, kept choice.
+    check(control.contains("case nil: return automaticTitle()") && control.contains(".tag(ChromeProfileChoice?.none)")
+          && control.contains(".tag(Optional(ChromeProfileChoice.ownProfile))") && control.contains(".tag(Optional(ChromeProfileChoice.chromeProfileSignedInAs))")
+          && control.contains("String(localized: \"Automatic (its own PixelSwitch profile)\", bundle: L10n.bundle)"),
+          "chrome pins: the menu has Automatic (nothing kept), its own profile (kept as own) and signed in as, each its own item")
+    check(tab.contains("chromeChoicesRevision += 1") && !tab.contains("ChromeProfileChoiceStore.set(") && !tab.contains("ChromeProfileChoiceStore.clear("),
+          "chrome pins: every pick goes through the store's apply, and any pick redraws the rows")
+    // The rows read the kept choices again when the tab appears (and when the app comes forward), so a defaults write from outside shows.
+    check(tab.contains(".onAppear { chromeChoicesRevision += 1 }") && tab.contains("NSApplication.didBecomeActiveNotification")
+          && tab.contains("_ = chromeChoicesRevision"),
+          "chrome pins: the Accounts tab reloads the kept choices when it appears and when the app comes forward")
     let controlActs = ["Process()", "NSWorkspace", "ChromeUsagePage.", "FileManager", "Local State", "UserDefaults.standard"].filter { control.contains($0) }
     check(controlActs.isEmpty, "chrome pins: the profile choice control opens nothing and reads no file; the store is the only thing it touches", controlActs.joined(separator: ", "))
     check(!control.contains("\u{2014}"), "chrome pins: no em dash in the control")
@@ -819,6 +896,8 @@ private func chromeSource(_ name: String) -> String {
     check(doc.contains("defaults write ai.pixelventures.pixelswitch ai.pixelventures.pixelswitch.chromeProfiles.choices")
           && doc.contains("-dict-add <account-id-lower-case> 'directory:Profile 1'"),
           "chrome pins: the store documents the exact defaults write form")
+    check(doc.contains("The account-id keys must be lower case") && doc.contains("an upper case key is never found"),
+          "chrome pins: the documented defaults form says the account-id keys are lower case")
 
     // The 2.2 window is gone, and no web framework remains anywhere (LaunchSafetyTests pins that and the cleanup's order).
     let sources = shippedSources()
@@ -849,17 +928,38 @@ private func chromeSource(_ name: String) -> String {
     check(tables.allSatisfy { !($0[help] ?? "").contains("\u{2014}") }, "chrome strings: no em dash in any language")
     let choiceKeys = ["Its own PixelSwitch Chrome profile", "The Chrome profile signed in as %@", "The Chrome profile folder %@",
                       "Choose this only if Chrome has a profile signed in with this address. Otherwise Chrome opens whichever profile you used last.",
-                      "Chrome profile for Limit resets"]
+                      "Chrome profile for Limit resets", "Automatic (its own PixelSwitch profile)",
+                      "Chrome profile for Limit resets: %@", "Chrome profile for Limit resets of %@"]
     check(choiceKeys.allSatisfy { key in tables.allSatisfy { ($0[key] ?? "").isEmpty == false } },
-          "chrome strings: the five profile choice strings are in all five tables")
+          "chrome strings: the eight profile choice strings are in all five tables")
     check(choiceKeys.allSatisfy { tables[0][$0] == $0 } && choiceKeys.allSatisfy { key in tables.dropFirst().allSatisfy { $0[key] != key } },
           "chrome strings: their English line is the key, and de, fr, ja and zh-Hans are translated, not copied")
     check(choiceKeys.allSatisfy { key in tables.allSatisfy { !($0[key] ?? "").contains("\u{2014}") } },
           "chrome strings: no em dash in any profile choice string")
-    check(["The Chrome profile signed in as %@", "The Chrome profile folder %@"].allSatisfy { key in tables.allSatisfy { ($0[key] ?? "").components(separatedBy: "%@").count == 2 } },
-          "chrome strings: the two strings that take a name or address keep exactly one %@ in every language")
+    check(["The Chrome profile signed in as %@", "The Chrome profile folder %@", "Chrome profile for Limit resets: %@", "Chrome profile for Limit resets of %@"]
+            .allSatisfy { key in tables.allSatisfy { ($0[key] ?? "").components(separatedBy: "%@").count == 2 } },
+          "chrome strings: the four strings that take a name, an address or a choice keep exactly one %@ in every language")
+    check(tables.allSatisfy { !($0["Automatic (its own PixelSwitch profile)"] ?? "").contains("%") }
+          && tables.allSatisfy { ($0["Chrome profile for Limit resets: %@"] ?? "").contains("Chrome") && ($0["Chrome profile for Limit resets of %@"] ?? "").contains("Chrome") },
+          "chrome strings: Automatic has no placeholder, and both hover and spoken lines keep the name Chrome in every language")
     check(tables.allSatisfy { $0["Open this account's claude.ai usage page to use a reset"] == nil },
           "chrome strings: the old help text (the window's) is gone from all five tables")
+
+    // The five tables carry the same keys, and no key is written twice in any of them (a merge of several lanes can do both).
+    let keyPattern = try? NSRegularExpression(pattern: "^\"((?:[^\"\\\\]|\\\\.)*)\"\\s*=", options: [.anchorsMatchLines])
+    var rawKeys: [[String]] = []
+    for language in languages {
+        let text = (try? String(contentsOfFile: "PixelSwitch/\(language).lproj/Localizable.strings", encoding: .utf8)) ?? ""
+        let range = NSRange(text.startIndex..., in: text)
+        rawKeys.append((keyPattern?.matches(in: text, range: range) ?? []).compactMap { Range($0.range(at: 1), in: text).map { String(text[$0]) } })
+    }
+    let duplicated = zip(languages, rawKeys).flatMap { language, keys in
+        Dictionary(grouping: keys, by: { $0 }).filter { $0.value.count > 1 }.keys.map { "\(language): \($0)" }
+    }
+    check(rawKeys.allSatisfy { $0.count > 300 } && duplicated.isEmpty, "chrome strings: no key is written twice in any of the five tables (\(rawKeys.map(\.count)))", duplicated.joined(separator: " | "))
+    let keySets = rawKeys.map { Set($0) }
+    check(keySets.dropFirst().allSatisfy { $0 == keySets[0] } && keySets.allSatisfy { $0.count == tables[0].count },
+          "chrome strings: the five tables have identical key sets", zip(languages, keySets).map { "\($0.0): \($0.1.symmetricDifference(keySets[0]).sorted().joined(separator: ", "))" }.joined(separator: " | "))
 
     // Every string only the 2.2 window used is gone from every table.
     let windowKeys = ["Back", "Reload", "Open in browser", "Paste sign-in link", "Sign out of claude.ai here", "Sign in as %@",

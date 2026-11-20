@@ -193,19 +193,19 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     check(!row.isEmpty && !tab.isEmpty && !buttons.isEmpty, "row pins: the Settings sources are found from the repo root")
 
     // The four things only the popover tab had: Switch, Re-sign, Edit label and Remove, as four plain icon
-    // buttons (a hand check asked why two of them were behind a "..." menu).
+    // buttons (a hand check asked why two of them were behind a "..." menu), and a fifth icon, the Chrome profile menu.
     let actions = tidyBlock(row, from: "    private var actions: some View {", to: "    // MARK: - Label editor")
     let iconButton = tidyBlock(row, from: "private struct RowIconButton: View {", to: "\n}\n")
     check(!actions.isEmpty && !iconButton.isEmpty, "row pins: the row's actions and its icon button are found")
-    check(tidyCount(actions, "RowIconButton(") == 4 && !actions.contains("Menu") && !actions.contains("ellipsis"),
-          "row pins: the row's actions are four icon buttons, with no menu in them")
+    check(tidyCount(actions, "RowIconButton(") == 4 && tidyCount(actions, "RowIconMenu(") == 1 && !actions.contains("ellipsis") && !actions.contains("Menu {"),
+          "row pins: the row's actions are four icon buttons and one Chrome profile menu icon, and no \"...\" menu holds an action")
     check(!row.contains("ellipsis") && !row.contains("More actions"), "row pins: the row has no \"...\" menu and no More actions text any more")
     var order = actions.startIndex
     var inOrder = true
-    for symbol in ["arrow.left.arrow.right", "arrow.triangle.2.circlepath", "square.and.pencil", "trash"] {
+    for symbol in ["arrow.left.arrow.right", "arrow.triangle.2.circlepath", "square.and.pencil", "globe", "trash"] {
         if let found = actions.range(of: "symbol: \"\(symbol)\"", range: order..<actions.endIndex) { order = found.upperBound } else { inOrder = false }
     }
-    check(inOrder, "row pins: left to right the icons are Switch, Re-sign, Edit label and Remove")
+    check(inOrder, "row pins: left to right the icons are Switch, Re-sign, Edit label, Chrome profile and Remove (Remove stays last, at the edge)")
 
     // Each is a Button with a spoken label, a hover label and a tooltip; the label and tooltip sit on a wrapper around the
     // button, so they show while it is off (a disabled control gets no pointer events, and its reason is the label).
@@ -213,9 +213,11 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     check(!buttonOnly.isEmpty && buttonOnly.contains(".accessibilityLabel(spoken)") && buttonOnly.contains(".disabled(isDisabled)")
           && !buttonOnly.contains(".help(") && !buttonOnly.contains(".hoverLabel("),
           "row pins: each icon is a Button with a spoken label and an off state, and carries no tooltip of its own")
-    check(iconButton.contains("        }\n        .contentShape(Rectangle())\n        .onHover { hovering = $0 }\n        .help(Text(verbatim: hint))")
-          && iconButton.contains(".hoverLabel(hint, anchor: .trailing,"),
+    check(iconButton.contains("        }\n        .contentShape(Rectangle())\n        .help(Text(verbatim: hint))")
+          && iconButton.contains(".hoverLabel(hint, anchor: .trailing,") && iconButton.contains("onHover: { hovering = $0 }"),
           "row pins: the hint is the tooltip and the hover label, both on a wrapper around the button")
+    check(!iconButton.contains(".onHover") && !iconButton.contains(".onContinuousHover") && iconButton.contains("lit: (hovering || labelShown) && !isDisabled"),
+          "row pins: an icon's highlight follows the hover label's tracking area (the pointer in any window state), not SwiftUI's onHover")
     check(actions.contains("spoken: Text(\"Switch to \\(title)\")") && actions.contains("spoken: Text(\"Re-authenticate \\(title)\")")
           && actions.contains("spoken: Text(\"Edit label for \\(title)\")") && actions.contains("spoken: Text(\"Remove account \\(title)\")"),
           "row pins: every icon is spoken with the account's name")
@@ -240,8 +242,42 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     check(actions.contains("destructive: true") && actions.contains("hoverTint: Color.limitCrit") && iconButton.contains("Button(role: destructive ? .destructive : nil)"),
           "row pins: Remove is marked destructive, quiet until the pointer is over it, then red")
     // Icons are small enough that the address keeps its room at the 940 pt window in English, German and French.
-    check(iconButton.contains(".frame(width: 22, height: 22)") && actions.contains("HStack(spacing: 0) {"),
-          "row pins: the four icons are 22 pt wide with no gap, so a 33-character address stays whole beside them in English, German and French")
+    let glyph = tidyBlock(row, from: "private struct RowIconGlyph: View {", to: "\n}\n")
+    check(glyph.contains(".frame(width: 22, height: 22)") && iconButton.contains("RowIconGlyph(symbol: symbol") && actions.contains("HStack(spacing: 0) {"),
+          "row pins: the five icons are 22 pt wide with no gap, so a 33-character address stays whole beside them in English, German and French")
+    let settings = tidySource("PixelSwitch/Views/SettingsView.swift")
+    check(settings.contains(".frame(width: 980, height: 520)"),
+          "row pins: the Settings window is 980 pt wide, 40 pt more than with four icons, for the fifth icon (the renders at 972 pt content width show the 34-character address whole in en, de and fr)")
+
+    // The Chrome profile icon: a menu with the same look, a hover label that names the current choice, a spoken label and value.
+    let menuIcon = tidyBlock(row, from: "private struct RowIconMenu: View {", to: "\n}\n")
+    let chromeAction = tidyBlock(actions, from: "RowIconMenu(", to: "onChoose: onChromeChoice)")
+    check(!menuIcon.isEmpty && !chromeAction.isEmpty && chromeAction.contains("symbol: \"globe\"")
+          && chromeAction.contains("hint: ChromeProfileChoiceControl.hoverText(for: chromeChoice, address: chromeAddress)")
+          && chromeAction.contains("spoken: Text(verbatim: ChromeProfileChoiceControl.spokenLabel(accountName: title))")
+          && chromeAction.contains("value: Text(verbatim: ChromeProfileChoiceControl.title(for: chromeChoice, address: chromeAddress))")
+          && actions.contains("onChoose: onChromeChoice)"),
+          "row pins: the Chrome profile icon says \"Chrome profile for Limit resets: <current choice>\" on hover and speaks its account and its choice")
+    check(menuIcon.contains("Menu {") && menuIcon.contains("ChromeProfileChoiceControl(choice: choice, address: address, onChoose: onChoose)")
+          && menuIcon.contains(".menuIndicator(.hidden)") && menuIcon.contains("RowIconGlyph(symbol: symbol, lit: hovering || labelShown)")
+          && menuIcon.contains(".accessibilityLabel(spoken)") && menuIcon.contains(".accessibilityValue(value)")
+          && menuIcon.contains(".help(Text(verbatim: hint))") && menuIcon.contains(".hoverLabel(hint, anchor: .trailing, maxWidth: 480, gap: -3")
+          && menuIcon.contains("onHover: { hovering = $0 }") && !menuIcon.contains(".onHover"),
+          "row pins: the Chrome profile icon is a menu of the control's items with the row's icon look, a tooltip, a hover label, an accessibility label and value, and the tracker's highlight")
+    check(row.contains("var chromeChoice: ChromeProfileChoice?") && row.contains("var chromeAddress = \"\"")
+          && row.contains("let onChromeChoice: @MainActor (ChromeProfileChoice?) -> Void") && row.contains("case switchTo, resign, editLabel, chromeProfile, remove"),
+          "row pins: the row takes the kept choice, the address and one closure for the Chrome profile menu, and plain inputs only")
+    // The warning for the signed-in option is a line in the row while it is chosen, not only a tooltip.
+    let warning = tidyBlock(row, from: "if chromeChoice == .chromeProfileSignedInAs {", to: ".font(.caption)\n                }")
+    check(!warning.isEmpty && warning.contains("Text(verbatim: ChromeProfileChoiceControl.signedInHelp())") && warning.contains("exclamationmark.triangle.fill"),
+          "row pins: while the signed-in-as choice is kept, the row shows the warning as a line of text with a warning mark")
+    check(tab.contains("chromeChoice: chromeChoice(for: account)") && tab.contains("onChromeChoice: { chooseChromeProfile($0, for: account) }")
+          && tab.contains("chromeAddress: account.displayEmail(obfuscated: maskEmails)"),
+          "row pins: the tab hands each row its kept choice and what to do with a pick")
+    let chooser = tidyBlock(tab, from: "private func chooseChromeProfile(", to: "\n    }\n")
+    check(chooser.contains("ChromeProfileChoiceStore.apply(choice, forAccountID: account.id.uuidString)")
+          && !chooser.contains("ChromeUsagePage") && !chooser.contains("Process") && !chooser.contains("NSWorkspace"),
+          "row pins: a pick only writes the kept choice (or forgets it for Automatic); nothing is opened")
 
     // The row stays plain inputs and closures (the offscreen renders compile it without the app).
     check(!row.contains("appState.") && !row.contains("@AppStorage(") && !row.contains("@EnvironmentObject private"),
@@ -311,8 +347,30 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     check(!tracking.isEmpty && tracking.contains("options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect]")
           && tracking.contains("override func mouseEntered") && tracking.contains("override func mouseMoved") && tracking.contains("override func mouseExited"),
           "hover label pins: the pointer is tracked by an NSTrackingArea that is .activeAlways, so it reports in a popover that is not key and an app that is not active")
-    check(!hover.contains(".onHover") && !hover.contains(".onContinuousHover") && hover.contains("HoverTracker { over in"),
-          "hover label pins: the label's pointer detection is the tracking area alone, with no SwiftUI hover in it")
+    check(!hover.contains(".onHover") && !hover.contains(".onContinuousHover") && hover.contains("HoverTracker(onChange: { over in")
+          && hover.contains("onHover?(over)"),
+          "hover label pins: the label's pointer detection is the tracking area alone, with no SwiftUI hover in it, and it hands the same reports to the icon's highlight")
+    // The label goes when nobody can see its icon: the window closes or stops being key or main, the view leaves its window, a menu opens.
+    check(tracking.contains("NSWindow.willCloseNotification") && tracking.contains("NSWindow.didResignKeyNotification") && tracking.contains("NSWindow.didResignMainNotification")
+          && tracking.contains("object: window)") && tracking.contains("@objc private func windowStoppedShowing(_ notification: Notification) { onChange?(false) }"),
+          "hover label pins: the tracker reports \"outside\" when its window closes or resigns key or main")
+    let leaving = tidyBlock(tracking, from: "override func viewWillMove(toWindow newWindow: NSWindow?) {", to: "super.viewWillMove(toWindow: newWindow)")
+    check(!leaving.isEmpty && leaving.contains("if window != nil, let report = onChange { Task { @MainActor in report(false) } }")
+          && leaving.contains("NotificationCenter.default.removeObserver(self)"),
+          "hover label pins: the tracker reports \"outside\" when its view leaves its window, and stops listening to the old window")
+    check(hover.contains(".onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in\n                quiet = true\n                disarm()\n            }"),
+          "hover label pins: a menu opening hides the label until the pointer leaves")
+    // Where there is no room above the icon (the first row, right under the scroll view's top edge) the label hangs below it.
+    check(tracking.contains("var roomAbove: CGFloat {") && tracking.contains("!(view is NSClipView)") && tracking.contains("clip.convert(clip.bounds, to: nil).maxY")
+          && tracking.contains("return top - convert(bounds, to: nil).maxY"),
+          "hover label pins: the tracker measures the room above its view inside the nearest scroll view's visible area, else the window")
+    check(hover.contains("static func showsBelow(roomAbove: CGFloat, text: String, maxWidth: CGFloat, gap: CGFloat) -> Bool {\n        roomAbove < roomNeeded(for: text, maxWidth: maxWidth, gap: gap)")
+          && hover.contains("static func roomNeeded(for text: String, maxWidth: CGFloat, gap: CGFloat) -> CGFloat {\n        height(for: text, maxWidth: maxWidth) + gap + shadowMargin")
+          && hover.contains("onRoomAbove: { room in roomAbove = room })"),
+          "hover label pins: the label needs its own height (less what it tucks into the icon) plus a shadow margin above the icon, else it shows below")
+    check(hover.contains("if (shown || alwaysShown) && !text.isEmpty && !below {") && hover.contains("if (shown || alwaysShown) && !text.isEmpty && below {")
+          && hover.contains(".overlay(alignment: .bottom) {") && hover.contains(".offset(y: gap)") && hover.contains(".offset(y: -gap)"),
+          "hover label pins: there is one label, hung above the icon or below it, never both")
     check(tracking.contains("override func hitTest(_ point: NSPoint) -> NSView? { nil }") && hover.contains(".allowsHitTesting(false)\n            }"),
           "hover label pins: the tracking view returns nil from hitTest and is not hit-testable in SwiftUI, so a click still reaches the button under it")
     check(hover.contains(".overlay(alignment: .top) {") && hover.contains(".allowsHitTesting(false)") && hover.contains(".frame(height: 0)"),
@@ -321,8 +379,9 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
           "hover label pins: it is drawn in the card fill, border and text tokens, which have a light and a dark value")
     // Not clipped by the popover edge: the anchor lets an edge icon's label grow inward, and a long reason wraps at a maximum width.
     check(hover.contains("case center") && hover.contains("case leading") && hover.contains("case trailing")
-          && hover.contains("min(maxWidth, ceil(line) + 2 * horizontalPadding + 2)"),
-          "hover label pins: a label can grow inward from either edge and wraps at a maximum width")
+          && hover.contains("guard ceil(line) + chrome > maxWidth else { return ceil(line) + chrome }")
+          && hover.contains("return min(maxWidth, ceil(wrapped.width) + chrome)"),
+          "hover label pins: a label can grow inward from either edge, fits its text on one line and wraps at a maximum width as wide as its longest line")
     check(tidyBlock(file, from: "symbol: \"gear\"", to: "action: onSettings").contains("anchor: .trailing")
           && tidyBlock(file, from: "symbol: \"power\"", to: "action: onQuit").contains("anchor: .trailing"),
           "hover label pins: Settings and Quit, at the popover's right edge, grow their labels inward")
@@ -336,8 +395,8 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
           && button.contains(".help(disabledHelp ?? help)") && tidyCount(button, ".hoverLabel(") == 1,
           "hover label pins: all five footer icons go through the one component that draws the label (the reason when off) and keeps .help")
     // The Settings row's four icons use it too.
-    check(tidyCount(row, ".hoverLabel(") == 1 && row.contains(".help(Text(verbatim: hint))") && tidyCount(row, "RowIconButton(") == 4,
-          "hover label pins: the Settings row's four icons go through one component that draws the label and keeps .help")
+    check(tidyCount(row, ".hoverLabel(") == 2 && tidyCount(row, ".help(Text(verbatim: hint))") == 2 && tidyCount(row, "RowIconButton(") == 4 && tidyCount(row, "RowIconMenu(") == 1,
+          "hover label pins: the Settings row's four click icons and its Chrome profile menu icon all draw the label through the one modifier and keep .help")
 
     // The harnesses draw the label held open: on the footer's first and last icons, and on each of the row's icons.
     let shots = tidySource("Tools/screenshots/make_screenshots.swift")
@@ -346,9 +405,12 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     check(shots.contains("labelled(.addCurrent)") && shots.contains("labelled(.quit)") && shots.contains("labelled(.signInNew, loggingIn: true)")
           && shots.contains("HoverLabel.swift"),
           "hover label pins: the footer fixture shows the label on the first icon, the last icon and an icon that is off")
-    check(["switchTo", "resign", "editLabel", "remove"].allSatisfy { renders.contains("previewLabel: .\($0)") }
+    check(["switchTo", "resign", "editLabel", "chromeProfile", "remove"].allSatisfy { renders.contains("previewLabel: .\($0)") }
           && renders.contains("settings-accounts-icon-labels") && runner.contains("HoverLabel.swift"),
-          "hover label pins: the Settings fixture shows the label on each of the row's four icons")
+          "hover label pins: the Settings fixture shows the label on each of the row's five icons")
+    check(renders.contains("settings-accounts-chrome-profile") && renders.contains("settings-accounts-scroll-first-row-label") && renders.contains("settings-accounts-list-first-row-label")
+          && runner.contains("ChromeProfileChoice.swift") && runner.contains("ChromeProfileMatcher.swift") && runner.contains("ChromeLocalState.swift"),
+          "hover label pins: the fixtures draw each Chrome profile choice, a real List and a tight scroll view whose first row's label hangs below its icon")
 }
 
 // MARK: - The expired message

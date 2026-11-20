@@ -65,10 +65,10 @@ struct SettingsView: View {
                 .tag(SettingsTab.about)
         }
         // Wide enough that the Accounts tab's rows (drag handle, Priority, the account,
-        // Session, Weekly and the four action icons: Switch, Re-sign, Edit label, Remove) leave an
-        // address of 33 characters (claude@bespokewoodcraftstudio.com) whole in English
-        // and nearly whole in German and French. Was 820 before the actions column.
-        .frame(width: 940, height: 520)
+        // Session, Weekly and the five action icons: Switch, Re-sign, Edit label, Chrome profile,
+        // Remove) leave an address of 33 characters (claude@bespokewoodcraftstudio.com) whole in
+        // English, German and French. Was 820 before the actions column, 940 with four icons.
+        .frame(width: 980, height: 520)
         .onAppear {
             launchAtLogin = SettingsStore.shared.launchAtLogin
         }

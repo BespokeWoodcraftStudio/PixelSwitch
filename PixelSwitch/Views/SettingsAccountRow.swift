@@ -61,14 +61,15 @@ enum WindowColumnMetrics {
     }
 }
 
-/// The row's four action icons, left to right.
+/// The row's five action icons, left to right.
 enum SettingsRowIcon {
-    case switchTo, resign, editLabel, remove
+    case switchTo, resign, editLabel, chromeProfile, remove
 }
 
 /// One account's row in Settings → Accounts: drag handle, Priority control,
-/// the account, the Session and Weekly menus, and four icon buttons (Switch, Re-sign,
-/// Edit label, Remove account), each one click with a hover label the app draws.
+/// the account, the Session and Weekly menus, and five icons (Switch, Re-sign, Edit label,
+/// Chrome profile, Remove account), each with a hover label the app draws. Four are one click;
+/// the Chrome profile icon opens a menu.
 ///
 /// Plain inputs and closures only (no `AppState`, no `@AppStorage`), so the
 /// same view that Settings shows is rendered offscreen with sample data
@@ -116,6 +117,11 @@ struct SettingsAccountRow: View {
     var actionsBusy = false
     /// Holds one icon's hover label open, for the offscreen renders: a still has no pointer.
     var previewLabel: SettingsRowIcon?
+    /// What is kept for the Chrome profile Limit resets opens (`ChromeProfileChoiceStore.saved`);
+    /// nil while nothing is kept, which the menu calls Automatic.
+    var chromeChoice: ChromeProfileChoice?
+    /// The account's address as shown (masked when masking is on): it names the signed-in-as item.
+    var chromeAddress = ""
 
     let onPriority: @MainActor (Int?) -> Void
     let onSession: @MainActor (ThresholdMenuChoice) -> Void
@@ -129,6 +135,9 @@ struct SettingsAccountRow: View {
     let onLabel: @MainActor (String) -> Void
     /// Ask to remove the account. The row only asks; the tab confirms and removes.
     let onRemove: @MainActor () -> Void
+    /// The Chrome profile menu picked something: a choice to keep, or nil for Automatic (forget it).
+    /// The row only reports it; the tab keeps it through `ChromeProfileChoiceStore`.
+    let onChromeChoice: @MainActor (ChromeProfileChoice?) -> Void
 
     /// The priority a person is stepping to with the arrows, not yet saved. The
     /// list sorts by priority, so saving every click would move the row out
@@ -216,6 +225,19 @@ struct SettingsAccountRow: View {
                         .foregroundStyle(.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                // Chrome opens the profile used last when none is signed in with this address, so while this
+                // is chosen the warning is a line in the row, not only a tooltip (a menu bar tooltip may not show).
+                if chromeChoice == .chromeProfileSignedInAs {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Color.limitWarn)
+                            .accessibilityHidden(true)
+                        Text(verbatim: ChromeProfileChoiceControl.signedInHelp())
+                            .foregroundStyle(.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .font(.caption)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -252,10 +274,11 @@ struct SettingsAccountRow: View {
 
     // MARK: - Actions
 
-    /// Four plain icon buttons at the row's end, one click each: Switch, Re-sign, Edit label and
-    /// Remove account. (A "..." menu held the last two in 2.3; a hand check asked why they were
-    /// behind three dots.) Each says what it does in a hover label the app draws (`HoverLabel.swift`),
-    /// with the same words on `.help` for accessibility tools.
+    /// Five plain icons at the row's end: Switch, Re-sign, Edit label, Chrome profile and Remove account.
+    /// (A "..." menu held Edit label and Remove in 2.3; a hand check asked why they were behind three
+    /// dots.) All but Chrome profile are one click; Chrome profile opens a menu of the choices for the
+    /// Chrome profile Limit resets opens. Each says what it does in a hover label the app draws
+    /// (`HoverLabel.swift`), with the same words on `.help` for accessibility tools.
     ///
     /// Switch is off for the account in use, for one whose sign-in ended, and while a switch or a
     /// sign-in runs (`switchOffReason`, from `SwitchAvailability`); Re-sign and Remove wait while a
@@ -293,6 +316,19 @@ struct SettingsAccountRow: View {
                 inputLabel: Text("Edit label"),
                 labelShown: previewLabel == .editLabel,
                 action: { beginEditing() })
+
+            // Which Chrome profile Limit resets opens for this account: a menu, not a click. The hover label
+            // names the current choice, so the row says what it is set to without opening the menu.
+            RowIconMenu(
+                symbol: "globe",
+                hint: ChromeProfileChoiceControl.hoverText(for: chromeChoice, address: chromeAddress),
+                spoken: Text(verbatim: ChromeProfileChoiceControl.spokenLabel(accountName: title)),
+                value: Text(verbatim: ChromeProfileChoiceControl.title(for: chromeChoice, address: chromeAddress)),
+                inputLabel: Text("Chrome profile for Limit resets"),
+                choice: chromeChoice,
+                address: chromeAddress,
+                labelShown: previewLabel == .chromeProfile,
+                onChoose: onChromeChoice)
 
             // Quiet until the pointer is over it, then red: it deletes the saved login.
             RowIconButton(
@@ -502,12 +538,36 @@ struct SettingsAccountRow: View {
     }
 }
 
-/// One of the row's four action icons: a 22 pt plain button in the quiet tone that takes the full
-/// text colour (or `hoverTint`) and a soft highlight under the pointer, dims when it is off, and
-/// says what it does, or why it is off, in a hover label the app draws.
+/// What an icon in the row looks like: a 22 pt glyph in the quiet tone that takes the full text colour
+/// (or `hoverTint`) and a soft highlight while it is lit, and dims when it is off.
+private struct RowIconGlyph: View {
+    let symbol: String
+    var tint: Color = Color.textSecondary
+    var hoverTint: Color = Color.textPrimary
+    let lit: Bool
+    var isDisabled = false
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 13))
+            .frame(width: 22, height: 22)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(lit ? Color.primary.opacity(0.10) : Color.clear)
+            )
+            .foregroundStyle(lit ? hoverTint : tint)
+            .opacity(isDisabled ? 0.4 : 1)
+            .contentShape(Rectangle())
+    }
+}
+
+/// One of the row's icons that is a plain click: a 22 pt button (`RowIconGlyph`) that says what it does,
+/// or why it is off, in a hover label the app draws.
 ///
 /// The hover label and the tooltip sit on a wrapper around the button, not on the button: macOS may
-/// not show a tooltip on a disabled control, and an icon that is off has to say why.
+/// not show a tooltip on a disabled control, and an icon that is off has to say why. The highlight under
+/// the pointer follows the same always-active tracking area as the label (`HoverLabel.swift`), not
+/// SwiftUI's `onHover`, which reports only in the key window of the active app.
 ///
 /// `State` is written out instead of with `@State`, like the row itself (see its note).
 private struct RowIconButton: View {
@@ -532,26 +592,17 @@ private struct RowIconButton: View {
     private let pressStorage = State<Int>(initialValue: 0)
     private var hovering: Bool {
         get { hoverStorage.wrappedValue }
-        nonmutating set { hoverStorage.wrappedValue = newValue }
+        nonmutating set { if hoverStorage.wrappedValue != newValue { hoverStorage.wrappedValue = newValue } }
     }
 
     var body: some View {
-        let lit = (hovering || labelShown) && !isDisabled
         HStack(spacing: 0) {
             Button(role: destructive ? .destructive : nil) {
                 pressStorage.wrappedValue += 1
                 action()
             } label: {
-                Image(systemName: symbol)
-                    .font(.system(size: 13))
-                    .frame(width: 22, height: 22)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(lit ? Color.primary.opacity(0.10) : Color.clear)
-                    )
-                    .foregroundStyle(lit ? hoverTint : tint)
-                    .opacity(isDisabled ? 0.4 : 1)
-                    .contentShape(Rectangle())
+                RowIconGlyph(symbol: symbol, tint: tint, hoverTint: hoverTint,
+                             lit: (hovering || labelShown) && !isDisabled, isDisabled: isDisabled)
             }
             .buttonStyle(.plain)
             .focusable(false)
@@ -560,11 +611,55 @@ private struct RowIconButton: View {
             .accessibilityInputLabels([inputLabel])
         }
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
         .help(Text(verbatim: hint))
         // Right-aligned to the icon: the row's last icons sit at the window's edge, and the label
-        // grows toward the middle. It rises into the icon's own padding and the row's spare height.
+        // grows toward the middle. It rises into the icon's own padding and the row's spare height, or
+        // hangs below the icon when there is no room above (the first row of the list).
         .hoverLabel(hint, anchor: .trailing, maxWidth: 480, gap: -3, dismissTrigger: pressStorage.wrappedValue,
-                    alwaysShown: labelShown)
+                    alwaysShown: labelShown, onHover: { hovering = $0 })
+    }
+}
+
+/// The row's Chrome profile icon: the same look as the other four, but a menu (`ChromeProfileChoiceControl`)
+/// instead of a click. Its hover label names the current choice, and so does its spoken value.
+private struct RowIconMenu: View {
+    let symbol: String
+    /// The hover label and the tooltip: "Chrome profile for Limit resets: <the current choice>".
+    let hint: String
+    /// What VoiceOver reads, naming the account, and the choice it reads as the value.
+    let spoken: Text
+    let value: Text
+    let inputLabel: Text
+    let choice: ChromeProfileChoice?
+    let address: String
+    /// Holds the hover label open, for the offscreen renders.
+    var labelShown = false
+    let onChoose: @MainActor (ChromeProfileChoice?) -> Void
+
+    private let hoverStorage = State<Bool>(initialValue: false)
+    private var hovering: Bool {
+        get { hoverStorage.wrappedValue }
+        nonmutating set { if hoverStorage.wrappedValue != newValue { hoverStorage.wrappedValue = newValue } }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Menu {
+                ChromeProfileChoiceControl(choice: choice, address: address, onChoose: onChoose)
+            } label: {
+                RowIconGlyph(symbol: symbol, lit: hovering || labelShown)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .focusable(false)
+            .accessibilityLabel(spoken)
+            .accessibilityValue(value)
+            .accessibilityInputLabels([inputLabel])
+        }
+        .contentShape(Rectangle())
+        .help(Text(verbatim: hint))
+        // Opening the menu hides the label (any menu opening does, see `HoverLabelModifier`).
+        .hoverLabel(hint, anchor: .trailing, maxWidth: 480, gap: -3, alwaysShown: labelShown, onHover: { hovering = $0 })
     }
 }

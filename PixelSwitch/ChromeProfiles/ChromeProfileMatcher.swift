@@ -159,14 +159,18 @@ enum ChromeProfileChoice: Equatable, Hashable, Sendable {
 /// to one of
 ///   `own`                   the account's own PixelSwitch profile, even if Chrome's list shows a
 ///                           profile signed in to the address
-/// No entry at all means no choice: a profile Chrome's list shows for the address if the list can
-/// be read, else the account's own PixelSwitch profile.
 ///   `signedInAs`            the Chrome profile signed in with the account's address
 ///   `directory:<name>`      the Chrome profile folder `<name>`, for example `directory:Profile 1`
+/// No entry at all means no choice ("Automatic" in Settings): a profile Chrome's list shows for
+/// the address if the list can be read, else the account's own PixelSwitch profile.
 /// The keywords ignore case. A value that is none of these, or a `directory:` name that
 /// is not a valid folder name, counts as no entry. From a shell, for one account:
 ///   defaults write ai.pixelventures.pixelswitch ai.pixelventures.pixelswitch.chromeProfiles.choices \
 ///       -dict-add <account-id-lower-case> 'directory:Profile 1'
+/// The account-id keys must be lower case (an account's id is shown upper case in most tools):
+/// an upper case key is never found.
+/// Only String values are read. An entry of any other type is ignored (and dropped the next time a
+/// choice is kept), and never hides or overwrites the other accounts' choices.
 enum ChromeProfileChoiceStore {
     /// Account id to choice text, in UserDefaults. Namespaced like the app's other keys.
     static let defaultsKey = "ai.pixelventures.pixelswitch.chromeProfiles.choices"
@@ -199,9 +203,20 @@ enum ChromeProfileChoiceStore {
 
     /// The choice kept for the account, or nil when it has none (or a damaged one).
     static func saved(forAccountID accountID: String, defaults: UserDefaults = .standard) -> ChromeProfileChoice? {
-        let all = defaults.dictionary(forKey: defaultsKey) as? [String: String]
-        guard let text = all?[PixelSwitchChromeProfile.normalizedAccountID(accountID)] else { return nil }
+        guard let text = storedTexts(defaults: defaults)[PixelSwitchChromeProfile.normalizedAccountID(accountID)] else { return nil }
         return choice(fromText: text)
+    }
+
+    /// Every kept text by account id, from the dictionary read as `[String: Any]` with only its String
+    /// values kept. A single entry of another type (a hand-made `defaults write` with a number, say)
+    /// is skipped by itself, so it can never make every account look as if it had no choice, and it
+    /// is never the reason the other accounts' entries are lost on the next write.
+    static func storedTexts(defaults: UserDefaults = .standard) -> [String: String] {
+        var texts: [String: String] = [:]
+        for (key, value) in defaults.dictionary(forKey: defaultsKey) ?? [:] {
+            if let text = value as? String { texts[key] = text }
+        }
+        return texts
     }
 
     /// The account's choice as a menu shows it: the kept one, else its own PixelSwitch profile.
@@ -216,15 +231,28 @@ enum ChromeProfileChoiceStore {
     @discardableResult
     static func set(_ choice: ChromeProfileChoice, forAccountID accountID: String, defaults: UserDefaults = .standard) -> Bool {
         guard let text = text(for: choice) else { return false }
-        var all = defaults.dictionary(forKey: defaultsKey) as? [String: String] ?? [:]
+        var all = storedTexts(defaults: defaults)
         all[PixelSwitchChromeProfile.normalizedAccountID(accountID)] = text
         defaults.set(all, forKey: defaultsKey)
         return true
     }
 
+    /// What the Settings menu does with a pick: keeps the choice, or forgets the kept one when it is nil
+    /// ("Automatic"). Picking the account's own PixelSwitch profile is a choice, so it is kept (as `own`);
+    /// only Automatic leaves the account with none. Returns false, and changes nothing, for a `.directory`
+    /// with an invalid name.
+    @discardableResult
+    static func apply(_ choice: ChromeProfileChoice?, forAccountID accountID: String, defaults: UserDefaults = .standard) -> Bool {
+        guard let choice else {
+            clear(forAccountID: accountID, defaults: defaults)
+            return true
+        }
+        return set(choice, forAccountID: accountID, defaults: defaults)
+    }
+
     /// Forgets the account's kept choice, so it has none again.
     static func clear(forAccountID accountID: String, defaults: UserDefaults = .standard) {
-        var all = defaults.dictionary(forKey: defaultsKey) as? [String: String] ?? [:]
+        var all = storedTexts(defaults: defaults)
         all.removeValue(forKey: PixelSwitchChromeProfile.normalizedAccountID(accountID))
         if all.isEmpty { defaults.removeObject(forKey: defaultsKey) } else { defaults.set(all, forKey: defaultsKey) }
     }

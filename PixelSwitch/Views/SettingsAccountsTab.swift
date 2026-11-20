@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Settings → Accounts: every account in priority order.
 ///
@@ -15,7 +16,8 @@ import SwiftUI
 ///
 /// This tab is where accounts are managed. The popover has no Accounts tab (2.3): its
 /// footer adds an account, and everything else about one account is a row here:
-/// Switch, Re-sign, Edit label and Remove account, beside the priority and limits.
+/// Switch, Re-sign, Edit label, the Chrome profile Limit resets opens and Remove account,
+/// beside the priority and limits.
 struct SettingsAccountsTab: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage(EmailDisplay.key) private var maskEmails = false
@@ -28,6 +30,10 @@ struct SettingsAccountsTab: View {
     @AppStorage(AutoSwitchSettings.strategyKey) private var strategyName = AutoSwitchStrategy.mostRoom.rawValue
     /// The account the person asked to remove and has not yet confirmed.
     @State private var pendingRemoval: Account?
+    /// The kept Chrome profile choices live in UserDefaults as one dictionary, which SwiftUI cannot watch. Each
+    /// row reads them while it is drawn, and this number changes (after a pick here, when the tab appears and
+    /// when the app comes forward) so the rows are drawn again and a `defaults write` from outside shows too.
+    @State private var chromeChoicesRevision = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -78,6 +84,11 @@ struct SettingsAccountsTab: View {
             SettingsSignInButtons()
         }
         .padding()
+        // The rows show what is kept now, including a choice written from a shell while the window was open.
+        .onAppear { chromeChoicesRevision += 1 }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            chromeChoicesRevision += 1
+        }
         // Removing deletes the saved login, so it is asked first (the popover removed at once).
         .confirmationDialog(
             removalTitle,
@@ -127,14 +138,32 @@ struct SettingsAccountsTab: View {
             needsResign: signInEnded(account),
             switchOffReason: switchOffReason(for: account),
             actionsBusy: !SwitchAvailability.canAddOrRemove(isSwitching: appState.switchingTo != nil, isLoggingIn: appState.isLoggingIn),
+            chromeChoice: chromeChoice(for: account),
+            chromeAddress: account.displayEmail(obfuscated: maskEmails),
             onPriority: { appState.setPriority($0, for: account) },
             onSession: { choose($0, window: .session, for: account) },
             onWeekly: { choose($0, window: .weekly, for: account) },
             onSwitch: { Task { await appState.switchTo(account) } },
             onResign: { appState.reauthenticateAccount(account) },
             onLabel: { appState.updateAccountLabel(account, label: $0) },
-            onRemove: { pendingRemoval = account }
+            onRemove: { pendingRemoval = account },
+            onChromeChoice: { chooseChromeProfile($0, for: account) }
         )
+    }
+
+    // MARK: - Chrome profile for Limit resets
+
+    /// What is kept for the account, or nil while nothing is (the menu calls that Automatic).
+    private func chromeChoice(for account: Account) -> ChromeProfileChoice? {
+        _ = chromeChoicesRevision   // read, so a new number draws the rows again
+        return ChromeProfileChoiceStore.saved(forAccountID: account.id.uuidString)
+    }
+
+    /// Keeps what the menu picked for the account: a choice, or nothing for Automatic. Limit resets reads it
+    /// at the click (`ChromeUsagePage`); nothing is opened here.
+    private func chooseChromeProfile(_ choice: ChromeProfileChoice?, for account: Account) {
+        ChromeProfileChoiceStore.apply(choice, forAccountID: account.id.uuidString)
+        chromeChoicesRevision += 1
     }
 
     // MARK: - Switch and Re-sign
