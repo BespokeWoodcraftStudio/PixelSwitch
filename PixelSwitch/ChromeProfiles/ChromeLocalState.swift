@@ -22,6 +22,50 @@ enum ChromeLocalState {
     /// Where `Local State` sits, under the user's Application Support folder.
     static let relativePath = "Google/Chrome/Local State"
 
+    /// Why the file's bytes could not be had. Told apart because they mean different
+    /// things: a missing file is a Chrome that has never run, while a refusal is macOS
+    /// keeping PixelSwitch out of Chrome's data folder (its App Data protection answers
+    /// the read with "not permitted" and no prompt, which on the founder's Mac on
+    /// 2026-11-20 looked exactly like "no profile matched").
+    enum ReadFailure: Equatable, Sendable {
+        /// There is no `Local State` (Chrome was never run for this user).
+        case notFound
+        /// The system refused the read (not permitted, no permission).
+        case accessDenied
+        /// Any other reason (an I/O error, a bad path).
+        case other
+    }
+
+    /// Sorts the error a failed read threw into a `ReadFailure`. Looks at the error
+    /// itself and at the error underneath it (a Cocoa "no permission" error carries the
+    /// POSIX "not permitted" one). A refusal outranks a missing file when both show.
+    static func readFailure(from error: Error) -> ReadFailure {
+        var seen: [ReadFailure] = []
+        var current: NSError? = error as NSError
+        var depth = 0
+        while let ns = current, depth < 4 {
+            seen.append(readFailure(domain: ns.domain, code: ns.code))
+            current = ns.userInfo[NSUnderlyingErrorKey] as? NSError
+            depth += 1
+        }
+        if seen.contains(.accessDenied) { return .accessDenied }
+        if seen.contains(.notFound) { return .notFound }
+        return .other
+    }
+
+    /// The domain and code half of `readFailure(from:)`, so a test can feed it every
+    /// pair without having to make the error.
+    static func readFailure(domain: String, code: Int) -> ReadFailure {
+        switch (domain, code) {
+        case (NSCocoaErrorDomain, 257), (NSCocoaErrorDomain, 513), (NSPOSIXErrorDomain, 1), (NSPOSIXErrorDomain, 13):
+            return .accessDenied   // NSFileReadNoPermissionError, NSFileWriteNoPermissionError, EPERM, EACCES
+        case (NSCocoaErrorDomain, 260), (NSCocoaErrorDomain, 4), (NSPOSIXErrorDomain, 2), (NSPOSIXErrorDomain, 20):
+            return .notFound       // NSFileReadNoSuchFileError, NSFileNoSuchFileError, ENOENT, ENOTDIR
+        default:
+            return .other
+        }
+    }
+
     /// The profiles in `Local State`'s `profile.info_cache`, in a fixed order
     /// (`order`). Tolerant on purpose: nil or empty data, malformed JSON, a missing
     /// or oddly shaped `profile` or `info_cache`, an entry that is not an object, a

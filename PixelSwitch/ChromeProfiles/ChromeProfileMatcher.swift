@@ -2,10 +2,13 @@ import Foundation
 
 /// Which Chrome profile belongs to which PixelSwitch account.
 ///
-/// Pure and Foundation only, so the unit harness compiles it. Two steps:
-/// 1. `directory(forEmail:in:)` looks for a profile Chrome already has that is signed
-///    in to the account's Google address.
-/// 2. When there is none, `PixelSwitchChromeProfile` gives the account a profile
+/// Pure and Foundation only, so the unit harness compiles it. Three steps, in this order:
+/// 1. The account's stored choice (`ChromeProfileChoice`, set in Settings or from a shell)
+///    when it has one: an explicit choice, even "its own profile", is always honoured.
+/// 2. `directory(forEmail:in:)` looks for a profile Chrome already has that is signed
+///    in to the account's Google address (only possible while Chrome's `Local State`
+///    can be read, which macOS can refuse).
+/// 3. When there is none, `PixelSwitchChromeProfile` gives the account a profile
 ///    folder of PixelSwitch's own, named from its address and saved so it never changes.
 ///    Chrome creates that profile the first time it is launched with the name.
 enum ChromeProfileMatcher {
@@ -112,5 +115,117 @@ enum PixelSwitchChromeProfile {
         all[normalizedAccountID(accountID)] = made
         defaults.set(all, forKey: defaultsKey)
         return made
+    }
+}
+
+/// Which Chrome profile one account's Limit resets button opens when PixelSwitch cannot
+/// find the profile for itself (it cannot read Chrome's profile list while macOS refuses
+/// that read), chosen per account in Settings or set from a shell.
+///
+/// Tested live on 2026-11-20 (`docs/investigations/2026-11-20-chrome-profile-email-test.md`):
+/// `--profile-directory` always wins and Chrome makes the folder when it is missing;
+/// `--profile-email` opens the profile signed in with that address (any case), but an
+/// address no profile has silently opens the profile used last, which can be a
+/// different account. So the address flag is only ever sent when the choice says so.
+enum ChromeProfileChoice: Equatable, Hashable, Sendable {
+    /// PixelSwitch's own folder for the account (`PixelSwitchChromeProfile`), opened with
+    /// `--profile-directory`. Chrome makes it on first use; it is signed out until the
+    /// person signs in to claude.ai there once. Kept as a choice, it is honoured even when
+    /// Chrome's profile list shows a profile signed in to the address. What an account with
+    /// no kept choice gets is the same folder unless that list does show such a profile.
+    case ownProfile
+    /// Chrome's profile that is signed in with the account's address, found by Chrome
+    /// itself (`--profile-email=<address>` and nothing else). Only right when such a
+    /// profile exists; otherwise Chrome opens whichever profile was used last.
+    case chromeProfileSignedInAs
+    /// One existing Chrome profile folder by name ("Default", "Profile 1"), opened with
+    /// `--profile-directory`. The name passes `isValidDirectory`.
+    case directory(String)
+
+    /// True for a folder name that may be put after `--profile-directory=`: one folder
+    /// name (`ChromeLocalState.isUsableDirectory`: not empty, not "." or "..", no slash,
+    /// backslash or control character, 255 bytes at most) that also has no ".." in it,
+    /// does not start with a dash and has no space at either end.
+    static func isValidDirectory(_ name: String) -> Bool {
+        guard ChromeLocalState.isUsableDirectory(name), !name.hasPrefix("-"), !name.contains("..") else { return false }
+        return name == name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Where each account's `ChromeProfileChoice` is kept, and the one text format it is
+/// kept in, which is also what a shell can write.
+///
+/// A dictionary in UserDefaults under `defaultsKey`: the account id (lower case UUID text)
+/// to one of
+///   `own`                   the account's own PixelSwitch profile, even if Chrome's list shows a
+///                           profile signed in to the address
+/// No entry at all means no choice: a profile Chrome's list shows for the address if the list can
+/// be read, else the account's own PixelSwitch profile.
+///   `signedInAs`            the Chrome profile signed in with the account's address
+///   `directory:<name>`      the Chrome profile folder `<name>`, for example `directory:Profile 1`
+/// The keywords ignore case. A value that is none of these, or a `directory:` name that
+/// is not a valid folder name, counts as no entry. From a shell, for one account:
+///   defaults write ai.pixelventures.pixelswitch ai.pixelventures.pixelswitch.chromeProfiles.choices \
+///       -dict-add <account-id-lower-case> 'directory:Profile 1'
+enum ChromeProfileChoiceStore {
+    /// Account id to choice text, in UserDefaults. Namespaced like the app's other keys.
+    static let defaultsKey = "ai.pixelventures.pixelswitch.chromeProfiles.choices"
+
+    static let ownValue = "own"
+    static let signedInAsValue = "signedInAs"
+    static let directoryPrefix = "directory:"
+
+    /// The text kept for a choice, or nil for a `.directory` whose name is not valid.
+    static func text(for choice: ChromeProfileChoice) -> String? {
+        switch choice {
+        case .ownProfile: return ownValue
+        case .chromeProfileSignedInAs: return signedInAsValue
+        case .directory(let name): return ChromeProfileChoice.isValidDirectory(name) ? directoryPrefix + name : nil
+        }
+    }
+
+    /// The choice a kept text stands for, or nil when it is none of the three forms.
+    static func choice(fromText text: String) -> ChromeProfileChoice? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch trimmed.lowercased() {
+        case ownValue: return .ownProfile
+        case signedInAsValue.lowercased(): return .chromeProfileSignedInAs
+        default: break
+        }
+        guard trimmed.lowercased().hasPrefix(directoryPrefix) else { return nil }
+        let name = String(trimmed.dropFirst(directoryPrefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        return ChromeProfileChoice.isValidDirectory(name) ? .directory(name) : nil
+    }
+
+    /// The choice kept for the account, or nil when it has none (or a damaged one).
+    static func saved(forAccountID accountID: String, defaults: UserDefaults = .standard) -> ChromeProfileChoice? {
+        let all = defaults.dictionary(forKey: defaultsKey) as? [String: String]
+        guard let text = all?[PixelSwitchChromeProfile.normalizedAccountID(accountID)] else { return nil }
+        return choice(fromText: text)
+    }
+
+    /// The account's choice as a menu shows it: the kept one, else its own PixelSwitch profile.
+    /// (Whether a choice was kept is `saved(forAccountID:)`, which the click uses.)
+    static func choice(forAccountID accountID: String, defaults: UserDefaults = .standard) -> ChromeProfileChoice {
+        saved(forAccountID: accountID, defaults: defaults) ?? .ownProfile
+    }
+
+    /// Keeps a choice for the account, `.ownProfile` included (an explicit own profile is a
+    /// choice, kept as `own`). Returns false, and changes nothing, for a `.directory` with an
+    /// invalid name. Call it from the main thread: a read then a write is not atomic.
+    @discardableResult
+    static func set(_ choice: ChromeProfileChoice, forAccountID accountID: String, defaults: UserDefaults = .standard) -> Bool {
+        guard let text = text(for: choice) else { return false }
+        var all = defaults.dictionary(forKey: defaultsKey) as? [String: String] ?? [:]
+        all[PixelSwitchChromeProfile.normalizedAccountID(accountID)] = text
+        defaults.set(all, forKey: defaultsKey)
+        return true
+    }
+
+    /// Forgets the account's kept choice, so it has none again.
+    static func clear(forAccountID accountID: String, defaults: UserDefaults = .standard) {
+        var all = defaults.dictionary(forKey: defaultsKey) as? [String: String] ?? [:]
+        all.removeValue(forKey: PixelSwitchChromeProfile.normalizedAccountID(accountID))
+        if all.isEmpty { defaults.removeObject(forKey: defaultsKey) } else { defaults.set(all, forKey: defaultsKey) }
     }
 }

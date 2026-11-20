@@ -364,3 +364,10 @@
 "Usage last refreshed at %@. It refreshes on its own." = "用量最近一次刷新于 %@。它会自动刷新。";
 "Edit label for %@" = "编辑 %@ 的标签";
 "Remove account %@" = "移除账户 %@";
+
+/* 2.4: the per-account Chrome profile choice for Limit resets (PixelSwitch/Views/Components/ChromeProfileChoice.swift) */
+"Its own PixelSwitch Chrome profile" = "专属的 PixelSwitch Chrome 配置文件";
+"The Chrome profile signed in as %@" = "已登录为 %@ 的 Chrome 配置文件";
+"The Chrome profile folder %@" = "Chrome 配置文件文件夹 %@";
+"Choose this only if Chrome has a profile signed in with this address. Otherwise Chrome opens whichever profile you used last." = "只有在 Chrome 里有用此地址登录的配置文件时才选择它。否则 Chrome 会打开你上次使用的配置文件。";
+"Chrome profile for Limit resets" = "用于限额重置的 Chrome 配置文件";

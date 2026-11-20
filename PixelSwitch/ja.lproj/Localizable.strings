@@ -364,3 +364,10 @@
 "Usage last refreshed at %@. It refreshes on its own." = "使用状況は %@ に更新されました。自動的に更新されます。";
 "Edit label for %@" = "%@のラベルを編集";
 "Remove account %@" = "アカウント %@ を削除";
+
+/* 2.4: the per-account Chrome profile choice for Limit resets (PixelSwitch/Views/Components/ChromeProfileChoice.swift) */
+"Its own PixelSwitch Chrome profile" = "このアカウント専用の PixelSwitch Chrome プロファイル";
+"The Chrome profile signed in as %@" = "%@ でログインしている Chrome プロファイル";
+"The Chrome profile folder %@" = "Chrome プロファイルフォルダ %@";
+"Choose this only if Chrome has a profile signed in with this address. Otherwise Chrome opens whichever profile you used last." = "Chrome にこのアドレスでログインしているプロファイルがある場合にだけ選んでください。ない場合、Chrome は最後に使ったプロファイルを開きます。";
+"Chrome profile for Limit resets" = "制限リセット用の Chrome プロファイル";

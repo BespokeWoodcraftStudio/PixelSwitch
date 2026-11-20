@@ -366,3 +366,10 @@
 "Usage last refreshed at %@. It refreshes on its own." = "Usage last refreshed at %@. It refreshes on its own.";
 "Edit label for %@" = "Edit label for %@";
 "Remove account %@" = "Remove account %@";
+
+/* 2.4: the per-account Chrome profile choice for Limit resets (PixelSwitch/Views/Components/ChromeProfileChoice.swift) */
+"Its own PixelSwitch Chrome profile" = "Its own PixelSwitch Chrome profile";
+"The Chrome profile signed in as %@" = "The Chrome profile signed in as %@";
+"The Chrome profile folder %@" = "The Chrome profile folder %@";
+"Choose this only if Chrome has a profile signed in with this address. Otherwise Chrome opens whichever profile you used last." = "Choose this only if Chrome has a profile signed in with this address. Otherwise Chrome opens whichever profile you used last.";
+"Chrome profile for Limit resets" = "Chrome profile for Limit resets";
