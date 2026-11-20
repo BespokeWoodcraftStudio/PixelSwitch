@@ -456,18 +456,18 @@ struct UsageDashboardView: View {
         account.showsResetsButton(noSubscription: appState.accountUsageErrors[account.id]?.isNoSubscription == true)
     }
 
-    /// Limit resets: opens this account's own claude.ai window (`ClaudeWebWindows`), on
-    /// its usage page, so the founder can use claude.ai's own "Reset for free"
-    /// button for the right account. It ONLY opens the window: nothing is clicked,
-    /// submitted or called on claude.ai from here. A real borderless button like
-    /// Retry and Re-sign, in the same `.brandText` label, so a click on it never
-    /// counts toward the card's double-click-to-switch. Not disabled while a
-    /// sign-in or a switch runs: opening a web page touches neither. `account.email`
-    /// is passed whole on purpose (the window checks which address it is signed in
-    /// as); the window masks it itself when masking is on.
+    /// Limit resets: opens claude.ai's usage page in the Chrome profile that belongs to
+    /// this account (`ChromeUsagePage`), where the founder is already signed in to
+    /// claude.ai, so he can use claude.ai's own "Reset for free" button for the right
+    /// account. It ONLY opens the page: nothing is clicked, submitted or called on
+    /// claude.ai from here. A real borderless button like Retry and Re-sign, in the
+    /// same `.brandText` label, so a click on it never counts toward the card's
+    /// double-click-to-switch. Not disabled while a sign-in or a switch runs: opening
+    /// a web page touches neither. `account.email` is passed whole on purpose (it picks
+    /// the Chrome profile signed in to that address); it is never shown or logged.
     private func resetsButton(_ account: Account, iconOnly: Bool = false) -> some View {
         Button {
-            ClaudeWebWindows.shared.open(accountID: account.id.uuidString, email: account.email)
+            ChromeUsagePage.open(accountID: account.id.uuidString, email: account.email)
         } label: {
             Group {
                 if iconOnly {
@@ -482,7 +482,7 @@ struct UsageDashboardView: View {
         }
         .buttonStyle(.borderless)
         .focusable(false)
-        .help(String(localized: "Open this account's claude.ai usage page to use a reset", bundle: L10n.bundle))
+        .help(String(localized: "Open this account's claude.ai usage page in Chrome to use a reset", bundle: L10n.bundle))
         .accessibilityLabel(String(format: String(localized: "Limit resets for %@", bundle: L10n.bundle),
                                    account.displayEmail(obfuscated: maskEmails)))
         .accessibilityInputLabels([String(localized: "Limit resets", bundle: L10n.bundle)])

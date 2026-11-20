@@ -63,6 +63,8 @@ struct PixelSwitchApp: App {
                     )
                     signInWindowController.install(appState: appState, locale: currentLocale)
                     RemoteControlService.shared.start(appState: appState, updateChecker: updateChecker)
+                    // 2.2's in-app claude.ai window is gone: remove the web data it left, once.
+                    Task { await LegacyWebDataCleanupRunner.runOnce() }
                     // Kick off background usage tracking immediately upon app start
                     Task {
                         await appState.refresh()

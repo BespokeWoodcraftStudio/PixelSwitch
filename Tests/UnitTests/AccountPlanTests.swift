@@ -1115,12 +1115,12 @@ private func chipHex(_ text: String?) -> UInt32? {
     let shots = planSource("Tools/screenshots/make_screenshots.swift")
     check(!dashboard.isEmpty && !app.isEmpty && !shots.isEmpty, "resets pins: the sources are found from the repo root")
 
-    // The button: opens the window, nothing else.
+    // The button: opens the page in the account's Chrome profile, nothing else.
     let button = planMember(dashboard, startingAt: "private func resetsButton(")
-    check(!button.isEmpty && button.contains("ClaudeWebWindows.shared.open(accountID: account.id.uuidString, email: account.email)"),
-          "resets pins: the button calls ClaudeWebWindows.shared.open with the account's own id and address")
-    check(dashboard.components(separatedBy: "ClaudeWebWindows.shared").count == 2,
-          "resets pins: the Usage card makes exactly one call on ClaudeWebWindows, the open")
+    check(!button.isEmpty && button.contains("ChromeUsagePage.open(accountID: account.id.uuidString, email: account.email)"),
+          "resets pins: the button calls ChromeUsagePage.open with the account's own id and address")
+    check(dashboard.components(separatedBy: "ChromeUsagePage.").count == 2 && !dashboard.contains("ClaudeWeb"),
+          "resets pins: the Usage card makes exactly one call on ChromeUsagePage, the open, and knows nothing of the 2.2 window")
     let forbidden = ["evaluateJavaScript", "WKWebView", "WKWebsiteDataStore", "URLSession", "URLRequest", "import WebKit", "callAsyncJavaScript", ".click("]
     check(forbidden.allSatisfy { !dashboard.contains($0) },
           "resets pins: the Usage card never scripts, clicks, submits or sends anything on claude.ai (no web view, request or script call in it)")
@@ -1132,8 +1132,8 @@ private func chipHex(_ text: String?) -> UInt32? {
     check(button.contains("iconOnly: Bool") && button.contains(".labelStyle(.iconOnly)") && button.contains(".help(String(localized: \"Open this account's")
           && button.contains(".accessibilityLabel("),
           "resets pins: the icon-only form keeps the tooltip and the spoken label, so the button is still named when it has no words")
-    check(button.contains(".help(String(localized: \"Open this account's claude.ai usage page to use a reset\", bundle: L10n.bundle))"),
-          "resets pins: its help text says it opens the account's claude.ai usage page")
+    check(button.contains(".help(String(localized: \"Open this account's claude.ai usage page in Chrome to use a reset\", bundle: L10n.bundle))"),
+          "resets pins: its help text says it opens the account's claude.ai usage page in Chrome")
     check(button.contains(".accessibilityLabel(String(format: String(localized: \"Limit resets for %@\", bundle: L10n.bundle),")
           && button.contains("account.displayEmail(obfuscated: maskEmails)"),
           "resets pins: its spoken label names the account (masked when masking is on)")
@@ -1213,19 +1213,18 @@ private func chipHex(_ text: String?) -> UInt32? {
     check(dashboard.contains("hoveredAccount == account.id && canSwitch(to: account)") && status.contains("!showsSwitchHint(account)"),
           "footer pins: the hover hint still takes the place of the Manual only note while the pointer is over a switchable card")
 
-    // Removing an account takes its claude.ai sign-in with it, once, on the one removal path.
+    // Removing an account no longer has a claude.ai sign-in of PixelSwitch's to remove (2.3 has no in-app claude.ai window).
     let remove = planMember(app, startingAt: "func removeAccount(_ account: Account) {")
-    let call = "Task { await ClaudeWebWindows.shared.removeWebSignIn(accountID: account.id.uuidString) }"
-    check(remove.contains(call) && app.components(separatedBy: "ClaudeWebWindows.shared").count == 2,
-          "resets pins: removeAccount removes the account's claude.ai sign-in, and it is the only place AppState touches ClaudeWebWindows")
-    if let backup = remove.range(of: "keychain.removeAccountBackup("), let web = remove.range(of: call), let drop = remove.range(of: "accounts.removeAll {") {
-        check(backup.lowerBound < web.lowerBound && web.lowerBound < drop.lowerBound,
-              "resets pins: the web sign-in goes right after the saved login, before the account leaves the list")
+    check(!remove.isEmpty && !remove.contains("ClaudeWeb") && !remove.contains("WebSignIn") && !app.contains("ClaudeWebWindows"),
+          "resets pins: removeAccount no longer touches any claude.ai web sign-in, and AppState never names the 2.2 window")
+    if let backup = remove.range(of: "keychain.removeAccountBackup("), let drop = remove.range(of: "accounts.removeAll {") {
+        check(backup.lowerBound < drop.lowerBound,
+              "resets pins: the saved login goes before the account leaves the list")
     } else {
         check(false, "resets pins: removeAccount's steps are found")
     }
     check(app.components(separatedBy: "accounts.removeAll { $0.id == account.id }").count == 2,
-          "resets pins: there is one place an account is deleted from the list, so no removal skips the sign-in")
+          "resets pins: there is one place an account is deleted from the list, so no removal skips the saved-login cleanup")
 
     // The screenshot harness asks the real rule for the lapsed card.
     check(shots.contains(".showsResetsButton(noSubscription: true)") && shots.contains("arrow.counterclockwise.circle")
@@ -1235,7 +1234,7 @@ private func chipHex(_ text: String?) -> UInt32? {
     // The strings: the three new keys are in all five tables, translated.
     let languages = ["en", "de", "fr", "ja", "zh-Hans"]
     let tables = languages.map { NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String] ?? [:] }
-    let keys = ["Limit resets", "Limit resets for %@", "Open this account's claude.ai usage page to use a reset",
+    let keys = ["Limit resets", "Limit resets for %@", "Open this account's claude.ai usage page in Chrome to use a reset",
                 "Double-click to switch", "Switching…"]
     check(tables.allSatisfy { $0["Resets"] == nil && $0["Resets for %@"] == nil },
           "resets strings: the first draft's keys, Resets and Resets for %@, are gone from all five tables (no orphans)")

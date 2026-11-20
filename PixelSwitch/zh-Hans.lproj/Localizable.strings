@@ -338,38 +338,18 @@
 /* Ultra (Max 20x) has no 5-hour limit: what the Session column of its Settings row says */
 "No 5-hour limit" = "无 5 小时上限";
 
-/* Resets button: each account's own claude.ai window (PixelSwitch/ClaudeWeb) */
-"Back" = "返回";
-"Reload" = "重新加载";
-"Open in browser" = "在浏览器中打开";
-"Paste sign-in link" = "粘贴登录链接";
-"Sign out of claude.ai here" = "在此退出 claude.ai";
-"Sign in as %@" = "请以 %@ 登录";
-"Paste the sign-in link from your email" = "粘贴邮件中的登录链接";
-"Load" = "加载";
-"That is not one whole link. Paste the full link from your email." = "这不是完整的链接。请粘贴邮件中的完整链接。";
-"Only a link on claude.ai loads here. Paste the sign-in link from your email." = "这里只会加载 claude.ai 上的链接。请粘贴邮件中的登录链接。";
-"Sign out of claude.ai here?" = "在此退出 claude.ai？";
-"This removes the claude.ai sign-in that PixelSwitch keeps for %@. Your browser and your other accounts are not affected." = "这会移除 PixelSwitch 为 %@ 保存的 claude.ai 登录。你的浏览器和其他账户不受影响。";
-"Sign out" = "退出登录";
-"This window is signed in as %1$@, not %2$@. Sign out here and sign in as %2$@." = "此窗口登录的是 %1$@，而不是 %2$@。请在此退出，再以 %2$@ 登录。";
-"PixelSwitch could not remove this sign-in. Quit and reopen PixelSwitch, then try again." = "PixelSwitch 无法移除此登录。请退出并重新打开 PixelSwitch，然后重试。";
-
 /* 2.2: Re-sign on a Usage card whose sign-in has ended; the plan chip of an account with no active subscription */
 "Re-sign" = "重新登录";
 "No plan" = "无套餐";
 
-/* 2.2: Limit resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+/* 2.3: Limit resets button on each Usage card: opens claude.ai's usage page in the account's own Chrome profile (PixelSwitch/ChromeProfiles) */
 "Limit resets" = "限额重置";
 "Limit resets for %@" = "%@ 的限额重置";
-"Open this account's claude.ai usage page to use a reset" = "打开此账户的 claude.ai 用量页面以使用重置";
+"Open this account's claude.ai usage page in Chrome to use a reset" = "在 Chrome 中打开此账户的 claude.ai 用量页面以使用重置";
 
 /* 2.2: the Usage card footer's hover hint (also its tooltip) and its switch-in-progress text */
 "Double-click to switch" = "双击切换";
 "Switching…" = "切换中…";
-
-/* 2.2: the claude.ai window's bar when a page does not load (its button is the existing Reload) */
-"Couldn't load claude.ai. Check your connection." = "无法加载 claude.ai。请检查网络连接。";
 
 /* 2.3: popover footer tooltips, Settings account row actions and their Remove confirmation, the last-updated tooltip */
 "Add current account: save the one Claude Code is signed in to now" = "添加当前账户：保存 Claude Code 当前登录的账户";
