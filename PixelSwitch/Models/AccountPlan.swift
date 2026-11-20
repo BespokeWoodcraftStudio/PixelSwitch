@@ -165,6 +165,93 @@ extension Account {
     }
 }
 
+// MARK: - The plan chip
+
+/// The colour family a plan's chip is drawn in. A name and not a colour: this file
+/// is pure Foundation, and `BrandColor.swift` turns each tone into its fill
+/// (`PlanChipTone.fill`), with the contrast against the chip's text pinned.
+enum PlanChipTone: CaseIterable, Hashable, Sendable {
+    /// Max 20x, called Ultra: the brand orange.
+    case ultra
+    /// Max 5x, and Max whose tier is not known (the chip says Max either way).
+    case max
+    case pro
+    case team
+    case enterprise
+    /// Any other subscription type the app has no name for.
+    case other
+    /// The account has no active subscription: neutral, whatever it was once.
+    case noPlan
+}
+
+/// What a plan chip says and which colour family it is drawn in.
+struct PlanChip: Equatable, Sendable {
+    let label: String
+    let tone: PlanChipTone
+}
+
+extension AccountPlan {
+    /// The plan chip for an account: the label and the colour family, one per plan.
+    /// Pure, so the popover header and the Usage card cannot disagree.
+    ///
+    /// - `noSubscription` (the usage request was refused with 403: no active
+    ///   subscription) wins over everything, because the stored tier is the last
+    ///   plan the account had and a lapsed account must not keep wearing it. The
+    ///   chip says "No plan", neutral.
+    /// - Ultra, Max (5x, or Max whose tier is not known) and Pro are the plans the
+    ///   resolver names. Their labels match `Account.displaySubscriptionType`.
+    /// - Team and Enterprise are `.other("team")` and `.other("enterprise")` to the
+    ///   resolver. They are recognised by the words team and enterprise in the
+    ///   subscription type or, failing that, in the stored tier (the tier text of
+    ///   a Team or Enterprise login). Enterprise is looked for first. A Max or Pro
+    ///   subscription is never relabelled by its tier.
+    /// - Any other subscription type keeps its own words, in the neutral colour.
+    /// - Nothing known at all is no chip (nil), exactly as before.
+    ///
+    /// Reads the same two stored fields as `resolve`; how the plan is fetched is
+    /// not touched.
+    static func chip(subscriptionType: String?, planTier: String?, sessionObserved: Bool = false,
+                     noSubscription: Bool = false) -> PlanChip? {
+        if noSubscription {
+            return PlanChip(label: String(localized: "No plan", bundle: L10n.bundle), tone: .noPlan)
+        }
+        let plan = resolve(subscriptionType: subscriptionType, planTier: planTier, sessionObserved: sessionObserved)
+        switch plan {
+        case .ultra:
+            return PlanChip(label: "Ultra", tone: .ultra)
+        case .max5x:
+            return PlanChip(label: "Max", tone: .max)
+        case .pro:
+            return PlanChip(label: "Pro", tone: .pro)
+        case .other(let type):
+            if type == "max" { return PlanChip(label: "Max", tone: .max) }
+            if let named = organisationChip(in: type) ?? organisationChip(in: normalized(planTier)) { return named }
+            return PlanChip(label: plan.badgeText(subscriptionType: subscriptionType) ?? "", tone: .other)
+        case .unknown:
+            return organisationChip(in: normalized(planTier))
+        }
+    }
+
+    /// Enterprise or Team when `text` (lower-cased) says so, else nil.
+    private static func organisationChip(in text: String?) -> PlanChip? {
+        guard let text else { return nil }
+        if text.contains("enterprise") { return PlanChip(label: "Enterprise", tone: .enterprise) }
+        if text.contains("team") { return PlanChip(label: "Team", tone: .team) }
+        return nil
+    }
+}
+
+extension Account {
+    /// The chip the popover header and the Usage card draw for this account, or
+    /// nil when no plan is known. Pass `noSubscription` true while the account's
+    /// usage request is answered "no active subscription" (the card's
+    /// `isNoSubscription` state): the chip then says "No plan".
+    func planChip(noSubscription: Bool = false) -> PlanChip? {
+        AccountPlan.chip(subscriptionType: subscriptionType, planTier: planTier,
+                         sessionObserved: sessionLimitObserved == true, noSubscription: noSubscription)
+    }
+}
+
 // MARK: - The one place the session reading is decided
 
 extension UsageAPIResponse {

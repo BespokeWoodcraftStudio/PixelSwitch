@@ -128,12 +128,77 @@ extension Color {
     static let limitWarn = adaptive(light: rgb(0xA9480A), dark: rgb(0xFF9F0A))
     static let limitCrit = adaptive(light: rgb(0xC62828), dark: rgb(0xFF8A84))
 
+    // MARK: - Plan chips
+
+    /// The plan chip fills, one per plan, drawn under `textOnFill` (#111111). Each
+    /// fill holds at least 4.5:1 with that text in light AND dark appearance (the
+    /// numbers are pinned in AccountPlanTests, from `PlanChipPalette`, the one table
+    /// these tokens are built from). Ultra keeps the brand coral; the rest are a
+    /// blue, a green, a violet, a gold and a neutral grey. The green is deeper than
+    /// the system green of the "Active" badge so the two never read as one.
+    static let planUltra = planChipFill(PlanChipPalette.ultra)
+    static let planMax = planChipFill(PlanChipPalette.max)
+    static let planPro = planChipFill(PlanChipPalette.pro)
+    static let planTeam = planChipFill(PlanChipPalette.team)
+    static let planEnterprise = planChipFill(PlanChipPalette.enterprise)
+    /// An unrecognised plan, and "No plan" for an account with no subscription.
+    static let planNeutral = planChipFill(PlanChipPalette.neutral)
+
+    private static func planChipFill(_ fill: PlanChipFill) -> Color {
+        adaptive(light: rgb(fill.light), dark: rgb(fill.dark))
+    }
+
     // MARK: - Subtle Backgrounds
 
     /// Subtle brand tint for banners and badges. A solid tint, not a see-through one.
     static let subtleBrand = adaptive(light: rgb(0xFDE8DF), dark: rgb(0x3D2A22))
     /// Progress bar track.
     static let progressTrack = adaptive(light: rgb(0xD4D4DA), dark: rgb(0x1C1C1E))
+}
+
+// MARK: - Plan chip palette
+
+/// One plan chip fill as 0xRRGGBB for each appearance.
+struct PlanChipFill: Equatable, Sendable {
+    let light: UInt32
+    let dark: UInt32
+}
+
+/// The plan chip fills as numbers. `Color.planUltra` and its siblings are built
+/// from this table, and the unit tests measure the contrast of THESE numbers
+/// against `textOnFill`, so the tokens and the pinned ratios cannot drift apart.
+enum PlanChipPalette {
+    static let ultra = PlanChipFill(light: 0xE86D45, dark: 0xE86D45)       // the brand coral
+    static let max = PlanChipFill(light: 0x4A86E8, dark: 0x5E9BFF)         // blue
+    static let pro = PlanChipFill(light: 0xC4920A, dark: 0xE3B341)         // gold
+    static let team = PlanChipFill(light: 0x2E9E5B, dark: 0x36B56F)        // green
+    static let enterprise = PlanChipFill(light: 0x9573E6, dark: 0xA688F5)  // violet
+    static let neutral = PlanChipFill(light: 0x8E8E93, dark: 0x9A9AA0)     // grey
+
+    static func fill(for tone: PlanChipTone) -> PlanChipFill {
+        switch tone {
+        case .ultra: return ultra
+        case .max: return max
+        case .pro: return pro
+        case .team: return team
+        case .enterprise: return enterprise
+        case .other, .noPlan: return neutral
+        }
+    }
+}
+
+extension PlanChipTone {
+    /// The chip's fill, an adaptive token (light and dark).
+    var fill: Color {
+        switch self {
+        case .ultra: return .planUltra
+        case .max: return .planMax
+        case .pro: return .planPro
+        case .team: return .planTeam
+        case .enterprise: return .planEnterprise
+        case .other, .noPlan: return .planNeutral
+        }
+    }
 }
 
 extension ShapeStyle where Self == Color {

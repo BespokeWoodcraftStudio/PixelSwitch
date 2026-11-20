@@ -337,3 +337,7 @@
 
 /* Ultra (Max 20x) has no 5-hour limit: what the Session column of its Settings row says */
 "No 5-hour limit" = "5時間の上限なし";
+
+/* 2.2: Re-sign on a Usage card whose sign-in has ended; the plan chip of an account with no active subscription */
+"Re-sign" = "再サインイン";
+"No plan" = "プランなし";
