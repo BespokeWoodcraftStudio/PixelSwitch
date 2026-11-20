@@ -16,6 +16,11 @@ import SwiftUI
 ///
 /// `ViewThatFits` picks the first variant whose natural width fits the card, so
 /// the choice follows the real text widths of the language in use.
+///
+/// The choice is only as steady as the age text it measures. An age that counts
+/// up by the second changes width at any moment and the row would flip variants at
+/// a fit boundary, so the age handed in here is the whole-minute `FooterAge`
+/// (`LiveFooterAge`): its text, and so the chosen variant, holds for a full minute.
 struct CardFooterRow<Age: View, Reset: View, ResetIcon: View, Status: View, Hint: View>: View {
     /// "Updated ... ago", or nothing while the reading is fresh.
     let age: Age

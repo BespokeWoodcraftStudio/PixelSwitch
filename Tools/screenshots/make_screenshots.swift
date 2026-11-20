@@ -19,6 +19,7 @@
 //     PixelSwitch/Views/Components/AccountGlyph.swift \
 //     PixelSwitch/Views/Components/Badge.swift \
 //     PixelSwitch/Views/Components/CardFooterRow.swift \
+//     PixelSwitch/Views/Components/FooterAgeLabel.swift PixelSwitch/Models/FooterAge.swift \
 //     PixelSwitch/Models/Account.swift PixelSwitch/Models/AccountPlan.swift PixelSwitch/Models/UsageData.swift \
 //     PixelSwitch/Models/String+Obfuscation.swift \
 //     PixelSwitch/Models/MenuBarConfig.swift PixelSwitch/Models/MenuBarModule.swift \
@@ -122,18 +123,19 @@ private let lapsedSample = SampleAccount(email: "lapsed@example.com", swatch: 5,
 private struct FooterStrings {
     let code: String
     let bundle: Bundle
-    /// What `Text(date, style: .relative)` prints for a long and for a short age. The system
-    /// formats these, so they are written out here as that language prints them.
+    /// What the app's `FooterAge` prints for a long and for a short age, in this language
+    /// (the harness asks the same formatter the card does, so the words are the app's own).
     let longAge: String
     let shortAge: String
-    /// An invented age longer than the app is likely to show, only to prove the last fallback.
+    /// The longest the app can print (days and hours), to prove the last fallback.
     let stressAge: String
 
-    init(_ code: String, longAge: String, shortAge: String, stressAge: String) {
+    init(_ code: String) {
         self.code = code
-        self.longAge = longAge
-        self.shortAge = shortAge
-        self.stressAge = stressAge
+        let locale = Locale(identifier: code)
+        self.longAge = FooterAge.text(minutes: 12 * 60 + 59, locale: locale)
+        self.shortAge = FooterAge.text(minutes: 4, locale: locale)
+        self.stressAge = FooterAge.text(minutes: 6 * 1440 + 23 * 60 + 59, locale: locale)
         self.bundle = Bundle(path: "PixelSwitch/\(code).lproj") ?? .main
     }
 
@@ -144,11 +146,11 @@ private struct FooterStrings {
     var hint: String { t("Double-click to switch") }
     var switching: String { t("Switching…") }
 
-    static let en = FooterStrings("en", longAge: "12 hr, 59 min", shortAge: "4 min", stressAge: "1 day, 23 hr, 59 min")
-    static let de = FooterStrings("de", longAge: "12 Std., 59 Min.", shortAge: "4 Min.", stressAge: "1 Tag, 23 Std., 59 Min.")
-    static let fr = FooterStrings("fr", longAge: "12 h, 59 min", shortAge: "4 min", stressAge: "1 j, 23 h, 59 min")
-    static let ja = FooterStrings("ja", longAge: "12時間59分", shortAge: "4分", stressAge: "1日23時間59分")
-    static let zh = FooterStrings("zh-Hans", longAge: "12小时59分钟", shortAge: "4分钟", stressAge: "1天23小时59分钟")
+    static let en = FooterStrings("en")
+    static let de = FooterStrings("de")
+    static let fr = FooterStrings("fr")
+    static let ja = FooterStrings("ja")
+    static let zh = FooterStrings("zh-Hans")
     static let all = [en, de, fr, ja, zh]
 }
 
@@ -183,11 +185,7 @@ private struct FooterLine: View {
         CardFooterRow(
             age: Group {
                 if let relative {
-                    HStack(spacing: 3) {
-                        Image(systemName: "clock").font(.caption2)
-                        Text(verbatim: strings.age(relative)).font(.caption2).lineLimit(1)
-                    }
-                    .foregroundStyle(.textSecondary)
+                    FooterAgeLabel(text: strings.age(relative))
                 }
             },
             reset: resets(iconOnly: false),
@@ -537,8 +535,7 @@ private func reportFooterWidths() {
         let hint = width(Text(verbatim: strings.hint).font(.caption2))
         print("  \(strings.code): hint \(hint)")
         for (name, relative) in [("long age", strings.longAge), ("short age", strings.shortAge), ("stress age", strings.stressAge)] {
-            let age = width(HStack(spacing: 3) { Image(systemName: "clock").font(.caption2)
-                                                  Text(verbatim: strings.age(relative)).font(.caption2) })
+            let age = width(FooterAgeLabel(text: strings.age(relative)))
             let full = width(Label(strings.resets, systemImage: "arrow.counterclockwise.circle").font(.caption2.weight(.semibold)))
             let icon = width(Label(strings.resets, systemImage: "arrow.counterclockwise.circle").labelStyle(.iconOnly).font(.caption2.weight(.semibold)))
             let withHint = age + 6 + full + 6 + 4 + 6 + hint
