@@ -253,3 +253,21 @@ CTO decisions, with their reasons (his 2026-10-15 order: engineering calls are t
 - **Claude Code blanks a login only when the server refused its refresh token** (read from Claude Code 2.1.321's own bundle). So the blank is strong evidence of a dead grant, and a dead login's saved copy likely carries the same refused refresh token (inferred, not proven). That is why the account left is renewed after the switch, and a switch back to it is refused once the server has refused it, until it is re-signed.
 
 Not done, on purpose or for lack of means (details in the handover): no before and after render of the popover (no "before" exists), the real popover frame cannot be rendered offscreen, the live watch was never run against a real dead login (it cannot be caused without signing his Claude Code out), and the Linux port was not touched.
+
+## Limit resets: the Reset button is a claude.ai window per account, and no agent ever executes a reset, 2026-11-19
+
+Card "How should the Reset button work?" [reset-button] on `docs/decisions/pixelswitch-limit-resets-2026-11-19.html`. Answered in chat on November 19, 2026 at 8:46 PM PST. His words, verbatim:
+
+> "go with option A"
+
+Option A is "A claude.ai window per account inside PixelSwitch": each account card gets a Resets button that opens that account's own claude.ai usage page in a PixelSwitch window with its own saved claude.ai sign-in; he clicks claude.ai's own "Reset for free" button. PixelSwitch never uses a reset itself. The same evening, a standing order, verbatim:
+
+> "you absolutly do not execute a reset"
+
+That means no agent and no PixelSwitch code ever uses a reset. Reading what is offered is fine.
+
+Reasons, with the evidence (`docs/investigations/2026-11-19-limit-reset-endpoint-research.md`, `2026-11-19-limit-reset-grants-per-account.md`, `2026-11-19-limit-reset-legitimate-routes.md`; page screenshots in `docs/decisions/evidence-limit-resets-2026-11-19/`):
+- Anthropic's server shows reset offers only to claude.ai and to Claude Code. Every saved account answered "ineligible" to PixelSwitch, including beeco1@pixelventures.ai, which he says has a reset right now.
+- So a button that resets straight from PixelSwitch exists only if PixelSwitch pretends to be claude.ai or Claude Code. We will not do that. Option A uses claude.ai itself, signed in as the right account, so it is honest and cannot hit the wrong account.
+
+**Decision NOT to build a direct reset call (a later session must not "fix" this).** Do not add any PixelSwitch code (app, CLI, MCP, Linux port) that calls Anthropic's reset or grant endpoints to use a reset, or that presents itself as claude.ai or Claude Code to see or take one. A reset is only ever clicked by him, on claude.ai's own page. Read-only checks of what is offered are allowed. If option A's window cannot hold a claude.ai sign-in (Google sign-in unproven in the app window; the emailed code is the backup), the fallback is option B (open claude.ai/settings/usage in his browser), never a direct call.
