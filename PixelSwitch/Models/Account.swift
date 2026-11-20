@@ -26,6 +26,16 @@ enum AIProviderType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Identity lines
+
+/// The name lines for one account, already masked when masking is on
+/// (`Account.identityLines(obfuscated:)`). `secondary` is nil when a second line
+/// would only repeat the first.
+struct AccountIdentityLines: Equatable, Sendable {
+    let primary: String
+    let secondary: String?
+}
+
 // MARK: - Account Model
 
 struct Account: Identifiable, Codable, Hashable {
@@ -110,6 +120,75 @@ struct Account: Identifiable, Codable, Hashable {
             return label
         }
         return obfuscated ? obfuscatedDisplayName : displayName
+    }
+
+    // MARK: Identity lines
+
+    /// The text that names this account where a name line and an address line
+    /// sit together (the popover header): a primary line and, only when it adds
+    /// something, a secondary one. The address is never on both.
+    ///
+    /// - A custom label leads, with the address under it.
+    /// - With no label, a real organisation name (a Team account's) leads, with
+    ///   the address under it.
+    /// - With no label and no real organisation name, the address alone leads and
+    ///   there is no second line. That covers a missing or empty name, a name that
+    ///   is the address, and Anthropic's default for a personal account,
+    ///   "<address>'s Organization", which says nothing the address does not.
+    ///
+    /// Which lines show is decided on the real values; masking is applied to what
+    /// is returned, exactly as `effectiveDisplayName(obfuscated:)` and
+    /// `displayEmail(obfuscated:)` do. Nothing stored changes.
+    func identityLines(obfuscated: Bool) -> AccountIdentityLines {
+        let shownEmail = displayEmail(obfuscated: obfuscated)
+
+        if let label = customLabel, !label.isEmpty {
+            // A label that is only the address would print it twice.
+            if Account.normalizedForNameComparison(label) == Account.normalizedForNameComparison(email) {
+                return AccountIdentityLines(primary: shownEmail, secondary: nil)
+            }
+            return AccountIdentityLines(primary: label, secondary: shownEmail)
+        }
+
+        guard let organization = realOrganizationName else {
+            return AccountIdentityLines(primary: shownEmail, secondary: nil)
+        }
+        return AccountIdentityLines(primary: obfuscated ? organization.obfuscatedEmail() : organization,
+                                    secondary: shownEmail)
+    }
+
+    /// The organisation name worth showing, or nil when there is none. The live
+    /// `orgName` is read first and `displayName` (what the account was saved with,
+    /// `orgName ?? email`) only when it is empty, so an account saved before
+    /// `orgName` existed keeps the name it always showed.
+    private var realOrganizationName: String? {
+        for candidate in [orgName, displayName] {
+            let name = (candidate ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if name.isEmpty { continue }
+            return Account.isPlaceholderOrganizationName(name, forEmail: email) ? nil : name
+        }
+        return nil
+    }
+
+    /// True when `name` says nothing the address does not: empty, the address
+    /// itself, or Anthropic's default name for a personal account, "<address>'s
+    /// Organization". The comparison ignores case and surrounding or repeated
+    /// spaces, and treats a straight and a curly apostrophe alike. Another
+    /// person's default ("someone-else@x.com's Organization") is a real name here.
+    static func isPlaceholderOrganizationName(_ name: String, forEmail email: String) -> Bool {
+        let wanted = normalizedForNameComparison(name)
+        let address = normalizedForNameComparison(email)
+        return wanted.isEmpty || wanted == address || wanted == address + "'s organization"
+    }
+
+    /// Lower case, one space between words, none at the ends, and every apostrophe
+    /// look-alike as a straight one.
+    private static func normalizedForNameComparison(_ text: String) -> String {
+        var folded = text.lowercased()
+        for lookAlike in ["\u{2019}", "\u{2018}", "\u{02BC}", "\u{FF07}", "\u{2032}", "\u{00B4}", "`"] {
+            folded = folded.replacingOccurrences(of: lookAlike, with: "'")
+        }
+        return folded.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
     init(

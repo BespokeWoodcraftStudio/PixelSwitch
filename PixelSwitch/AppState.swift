@@ -2584,7 +2584,8 @@ final class AppState: ObservableObject {
             let error = accountUsageErrors[account.id]
             return WidgetAccountData(
                 email: account.displayEmail(obfuscated: EmailDisplay.isMasked),
-                displayName: account.effectiveDisplayName(obfuscated: EmailDisplay.isMasked),
+                // The name line the widget draws: the address alone for a default-named account (see `Account.identityLines`).
+                displayName: account.identityLines(obfuscated: EmailDisplay.isMasked).primary,
                 subscriptionType: account.displaySubscriptionType,
                 isActive: account.isActive,
                 sessionUtilization: usage?.fiveHour?.utilization,
