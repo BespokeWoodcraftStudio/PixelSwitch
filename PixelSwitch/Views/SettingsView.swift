@@ -64,9 +64,11 @@ struct SettingsView: View {
                 }
                 .tag(SettingsTab.about)
         }
-        // Wide enough that the Accounts tab's rows (Priority, the account, Session
-        // and Weekly) leave an address at least 28 characters.
-        .frame(width: 820, height: 520)
+        // Wide enough that the Accounts tab's rows (drag handle, Priority, the account,
+        // Session, Weekly and the Switch / Re-sign / More actions column) leave an
+        // address of 33 characters (claude@bespokewoodcraftstudio.com) whole in English
+        // and nearly whole in German and French. Was 820 before the actions column.
+        .frame(width: 940, height: 520)
         .onAppear {
             launchAtLogin = SettingsStore.shared.launchAtLogin
         }

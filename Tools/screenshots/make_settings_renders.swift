@@ -79,7 +79,8 @@ private func accountsSample() -> some View {
     let split = Account(email: "studio@example.com", displayName: "Studio", sessionThreshold: 90, weeklyThreshold: 50, priority: 2)
     let both70 = Account(email: "side-project@example.com", displayName: "Side", switchThreshold: 70, priority: 3)
     let manual = Account(email: "archive@example.com", displayName: "Archive", switchThreshold: 0, priority: 4)
-    let none = Account(email: "studio-team-accounts@example.com", displayName: "Team", priority: nil)
+    // 34 characters, one more than the founder's longest (claude@bespokewoodcraftstudio.com, 33); .test is reserved (RFC 2606).
+    let none = Account(email: "claude@bespokewoodcraftstudio.test", displayName: "Team", priority: nil)
     let widest = Account(email: "overnight-batch@example.com", displayName: "Batch", sessionThreshold: 100, weeklyThreshold: 100, priority: 99)
     return VStack(alignment: .leading, spacing: 10) {
         SampleList(rows: [
@@ -179,9 +180,9 @@ enum SettingsRenders {
             NSApp.setActivationPolicy(.prohibited)
             for dark in [false, true] {
                 let name = dark ? "dark" : "light"
-                // 812 wide: the Settings window (820) less its padding and the list's insets.
-                writePNG(accountsSample(), width: 812, dark: dark, language: language, to: "\(out)/settings-accounts-rows\(suffix)-\(name).png")
-                writePNG(splitDefaultsSample(), width: 812, dark: dark, language: language, to: "\(out)/settings-accounts-split-defaults\(suffix)-\(name).png")
+                // 932 wide: the Settings window (940) less its padding and the list's insets.
+                writePNG(accountsSample(), width: 932, dark: dark, language: language, to: "\(out)/settings-accounts-rows\(suffix)-\(name).png")
+                writePNG(splitDefaultsSample(), width: 932, dark: dark, language: language, to: "\(out)/settings-accounts-split-defaults\(suffix)-\(name).png")
                 if language == "en" {
                     writePNG(generalSample(session: 90, weekly: 50), width: 560, dark: dark, language: language, to: "\(out)/settings-general-defaults-split-\(name).png")
                     writePNG(generalSample(session: 98, weekly: 98), width: 560, dark: dark, language: language, to: "\(out)/settings-general-defaults-equal-\(name).png")

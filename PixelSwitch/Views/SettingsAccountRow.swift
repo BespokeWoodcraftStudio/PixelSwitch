@@ -245,7 +245,7 @@ struct SettingsAccountRow: View {
 
     /// Switch over two small icons, Re-sign and a "..." menu (Edit label, Remove account), in one
     /// narrow column at the row's end. Stacked rather than side by side because the row has no
-    /// width to spare: Settings is 820 pt wide and the address must keep as much of it as it can.
+    /// width to spare: Settings is 940 pt wide and the address must keep as much of it as it can.
     /// Switch and Re-sign are one click; the two that change the account itself are one menu away.
     private var actions: some View {
         VStack(alignment: .trailing, spacing: 4) {
