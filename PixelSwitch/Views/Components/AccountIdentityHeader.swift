@@ -21,6 +21,13 @@ struct AccountIdentityHeader: View {
                 }
                 Text(identity.primary)
                     .font(.headline)
+                    // One line, never broken mid-word: a long address (33 characters is 242 pt bold)
+                    // shrinks a little, then loses its middle, so the start and the domain both
+                    // stay. The whole of it is on hover.
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .truncationMode(.middle)
+                    .help(identity.primary)
                 if let chip {
                     Badge(text: chip.label, color: chip.tone.fill)
                 }

@@ -322,7 +322,7 @@ enum UsageNotice: Equatable {
     case paused(until: Date)
     /// "Waiting for Claude Code to renew this login."
     case waitingForClaudeCode
-    /// "Session expired. Re-authenticate (↻) to fix."
+    /// "Session expired. Click Re-sign to fix."
     case resign
 
     /// What the card says now, for `choose`.

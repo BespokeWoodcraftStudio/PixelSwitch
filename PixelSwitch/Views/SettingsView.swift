@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// The tabs of the Settings window. The one last open is remembered
+/// (`SettingsView.selectedTab`), so Settings opens where it was left and, once Accounts
+/// has been opened, it is one click from the gear.
+enum SettingsTab: String {
+    case general, accounts, menuBar, claudeCLI, about
+}
+
 /// Settings window for configuring the app.
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
@@ -22,37 +29,46 @@ struct SettingsView: View {
     @AppStorage(AutoSwitchSettings.drainWithinHoursKey) private var autoSwitchDrainWithinHours = AutoSwitchSettings.fallbackDrainWithinHours
     @AppStorage("transcriptLookbackHours") private var transcriptLookbackHours = 24
     @State private var launchAtLogin = false
+    /// The tab last opened. An unknown stored value (an older or newer build's) falls back to General.
+    @AppStorage("settingsSelectedTab") private var selectedTab: SettingsTab = .general
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             generalTab
                 .tabItem {
                     Label("General", systemImage: "gear")
                 }
+                .tag(SettingsTab.general)
 
             SettingsAccountsTab()
                 .tabItem {
                     Label("Accounts", systemImage: "person.2")
                 }
+                .tag(SettingsTab.accounts)
 
             menuBarTab
                 .tabItem {
                     Label("Menu Bar", systemImage: "menubar.rectangle")
                 }
+                .tag(SettingsTab.menuBar)
 
             ClaudeCLITabView()
                 .tabItem {
                     Label("Claude CLI", systemImage: "terminal")
                 }
+                .tag(SettingsTab.claudeCLI)
 
             aboutTab
                 .tabItem {
                     Label("About", systemImage: "info.circle")
                 }
+                .tag(SettingsTab.about)
         }
-        // Wide enough that the Accounts tab's rows (Priority, the account, Session
-        // and Weekly) leave an address at least 28 characters.
-        .frame(width: 820, height: 520)
+        // Wide enough that the Accounts tab's rows (drag handle, Priority, the account,
+        // Session, Weekly and the Switch / Re-sign / More actions column) leave an
+        // address of 33 characters (claude@bespokewoodcraftstudio.com) whole in English
+        // and nearly whole in German and French. Was 820 before the actions column.
+        .frame(width: 940, height: 520)
         .onAppear {
             launchAtLogin = SettingsStore.shared.launchAtLogin
         }
@@ -136,7 +152,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.textSecondary)
                 Toggle("Give each account its own color", isOn: $colorCodeAccounts)
-                Text("Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards.")
+                Text("Each account gets a colored edge and icon on the Usage tab, so you can tell whose numbers you are looking at. Turn it off for plain cards.")
                     .font(.caption)
                     .foregroundStyle(.textSecondary)
             }

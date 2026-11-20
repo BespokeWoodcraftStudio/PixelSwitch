@@ -12,7 +12,8 @@ private let popoverLog = FileLog("Popover")
 //
 // Contract for future contributors:
 //   * Every chrome element in MainMenuView.body must call `.measureChromeHeight()`.
-//     Currently: headerView, promoBanner (when shown), tabBar, footerView.
+//     Currently: headerView, promoBanner (when shown), tabBar, the sign-in or
+//     add-account bar (when shown), footerView.
 //   * UsageDashboardView's scrollable content must call `.measureUsageContentHeight()`
 //     on its inner VStack (the one inside the ScrollView, not the ScrollView itself).
 //   * The Divider between content and footer is intentionally not measured
@@ -70,6 +71,8 @@ struct MainMenuView: View {
     @AppStorage("refreshInterval") private var refreshInterval: Double = 300
     @AppStorage(EmailDisplay.key) private var maskEmails = false
     @State private var selectedTab: Tab = .usage
+    /// "Add current account" was clicked and is waiting for its confirmation (the bar above the footer).
+    @State private var confirmingAddCurrent = false
 
     // Measured heights driving the popover frame.
     // Defaults are reasonable fallbacks for the first render pass, before
@@ -77,14 +80,15 @@ struct MainMenuView: View {
     @State private var usageContentHeight: CGFloat = 420
     @State private var chromeHeight: CGFloat = 180
 
+    /// Usage and Costs only. Accounts are managed in Settings → Accounts (2.3), and the
+    /// footer adds one, so the popover has no Accounts tab.
     enum Tab: String, CaseIterable {
-        case usage, costs, accounts
+        case usage, costs
 
         var localizedTitle: LocalizedStringKey {
             switch self {
             case .usage: "Usage"
             case .costs: "Costs"
-            case .accounts: "Accounts"
             }
         }
 
@@ -92,7 +96,6 @@ struct MainMenuView: View {
             switch self {
             case .usage: "chart.bar.fill"
             case .costs: "dollarsign.circle.fill"
-            case .accounts: "person.2.fill"
             }
         }
     }
@@ -119,13 +122,22 @@ struct MainMenuView: View {
                     UsageDashboardView()
                 case .costs:
                     CostDetailView()
-                case .accounts:
-                    AccountSwitcherView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
+
+            // A sign-in is running (its window may have gone behind another), or "Add current
+            // account" is waiting for its confirmation: one bar, never both, since both add
+            // icons are off while a sign-in runs.
+            if appState.isLoggingIn {
+                signingInBar
+                    .measureChromeHeight()
+            } else if confirmingAddCurrent {
+                addCurrentConfirmBar
+                    .measureChromeHeight()
+            }
 
             // Footer
             footerView
@@ -151,6 +163,10 @@ struct MainMenuView: View {
         .background(Color.popoverBackground)
         .onAppear {
             popoverLog.info("[appear] tab=\(self.selectedTab.rawValue) chrome=\(self.chromeHeight) usage=\(self.usageContentHeight) popover=\(self.popoverHeight)")
+        }
+        // A sign-in that has started takes over the add bar; a stale question is not left behind.
+        .onChange(of: appState.isLoggingIn) { _, loggingIn in
+            if loggingIn { confirmingAddCurrent = false }
         }
         .onPreferenceChange(UsageContentHeightKey.self) { value in
             if value > 0 { usageContentHeight = value }
@@ -327,62 +343,72 @@ struct MainMenuView: View {
                 }
             }
         }
-        .frame(width: 260, height: 44)
+        // Two tabs (Usage, Costs) in a 200 pt bar; with the Accounts tab it was three in 260.
+        .frame(width: 200, height: 44)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
     }
 
     // MARK: - Footer
 
+    /// The footer (`PopoverFooter`, five icons with tooltips and spoken labels) with the
+    /// actions behind them. Add current account only asks here; the account is added by the
+    /// confirmation bar above the footer.
     private var footerView: some View {
-        HStack {
-            if let error = appState.errorMessage {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.limitWarn)
-                    .font(.caption)
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.textSecondary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            Button {
+        PopoverFooter(
+            errorMessage: appState.errorMessage,
+            busyReason: addIconsBusy
+                ? String(localized: "Wait for the current switch or sign-in to finish.", bundle: L10n.bundle)
+                : nil,
+            onAddCurrent: {
+                withAnimation(.easeInOut(duration: 0.15)) { confirmingAddCurrent = true }
+            },
+            onSignInNew: {
+                appState.loginNewAccount()
+            },
+            onRefresh: {
                 Task { await appState.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.caption)
-            }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .help("Refresh")
-
-            Button {
+            },
+            onSettings: {
                 NSApp.activate(ignoringOtherApps: true)
                 NotificationCenter.default.post(
                     name: .pixelswitchOpenSettings,
                     object: nil
                 )
-            } label: {
-                Image(systemName: "gear")
-                    .font(.caption)
-            }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .help("Settings")
-
-            Button {
+            },
+            onQuit: {
                 NSApplication.shared.terminate(nil)
-            } label: {
-                Image(systemName: "power")
-                    .font(.caption)
             }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .help("Quit")
+        )
+    }
+
+    // MARK: - Sign-in and add-account bars
+
+    private var signingInBar: some View {
+        SigningInBar {
+            NotificationCenter.default.post(name: .pixelswitchShowSignIn, object: nil)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+    }
+
+    private var addCurrentConfirmBar: some View {
+        AddCurrentConfirmBar(
+            onCancel: {
+                withAnimation(.easeInOut(duration: 0.15)) { confirmingAddCurrent = false }
+            },
+            onAdd: {
+                confirmingAddCurrent = false
+                // A switch may have started while the question was up; the control API refuses then.
+                guard !addIconsBusy else {
+                    appState.errorMessage = String(localized: "A switch or sign-in is in progress. Try again in a moment.", bundle: L10n.bundle)
+                    return
+                }
+                Task { await appState.addAccount() }
+            }
+        )
+    }
+
+    /// A switch or a sign-in is running: the two add icons wait (`SwitchAvailability`, the control API's rule).
+    private var addIconsBusy: Bool {
+        !SwitchAvailability.canAddOrRemove(isSwitching: appState.switchingTo != nil, isLoggingIn: appState.isLoggingIn)
     }
 }

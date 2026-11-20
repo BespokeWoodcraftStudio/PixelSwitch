@@ -36,8 +36,8 @@ COOLDOWN = engine.COOLDOWN_SECONDS
 SPACING_SECONDS = 1.5
 
 MESSAGE_WAITING = "Waiting for Claude Code to renew this login. It renews the next time a session runs."
-MESSAGE_RESIGN = "Session expired. Re-authenticate (↻) to fix."
-MESSAGE_BELONGED = "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix."
+MESSAGE_RESIGN = "Session expired. Click Re-sign to fix."
+MESSAGE_BELONGED = "Its saved login belonged to another account and was removed. Click Re-sign to fix."
 MESSAGE_STORE_RETRY = "Could not save the refreshed sign-in; will retry automatically."
 MESSAGE_NO_SUBSCRIPTION = "No active subscription on this account (OAuth not allowed)."
 

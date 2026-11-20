@@ -21,6 +21,7 @@
 //     PixelSwitch/Views/Components/CardFooterRow.swift \
 //     PixelSwitch/Views/Components/FooterAgeLabel.swift PixelSwitch/Models/FooterAge.swift \
 //     PixelSwitch/Views/Components/AccountIdentityHeader.swift PixelSwitch/Views/Components/PriorityTag.swift \
+//     PixelSwitch/Views/Components/PopoverFooter.swift \
 //     PixelSwitch/Models/Account.swift PixelSwitch/Models/AccountPlan.swift PixelSwitch/Models/UsageData.swift \
 //     PixelSwitch/Models/String+Obfuscation.swift \
 //     PixelSwitch/Models/MenuBarConfig.swift PixelSwitch/Models/MenuBarModule.swift \
@@ -274,7 +275,7 @@ private struct Card: View {
                     HStack(alignment: .top) {
                         Image(systemName: problem == .expired ? "exclamationmark.triangle" : "xmark.circle")
                             .foregroundStyle(problem == .expired ? .limitWarn : .limitCrit)
-                        Text(problem == .expired ? "Session expired. Re-authenticate (↻) to fix."
+                        Text(problem == .expired ? "Session expired. Click Re-sign to fix."
                              : (problem == .noSubscription ? "No active subscription on this account (OAuth not allowed)."
                                                            : "Can't reach Anthropic right now; PixelSwitch keeps trying."))
                             .font(.caption)
@@ -352,6 +353,49 @@ private func write<V: View>(_ view: V, width: CGFloat, scheme: ColorScheme, to p
     }
 }
 
+/// Like `write`, but through a real AppKit hosting view, so real buttons draw (`ImageRenderer`
+/// paints a prohibition sign over a `Button`). Used for the popover footer, whose icons are
+/// the app's own buttons. English only: the tool runs outside an app bundle with no string tables.
+@MainActor
+private func writeHosted<V: View>(_ view: V, width: CGFloat, scheme: ColorScheme, to path: String) {
+    let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+    let framed = view
+        .padding(14)
+        .frame(width: width)
+        .background(Color.popoverBackground)
+        .environment(\.colorScheme, scheme)
+    let host = NSHostingView(rootView: framed)
+    host.appearance = appearance
+    let size = host.fittingSize
+    host.frame = NSRect(origin: .zero, size: size)
+    let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.appearance = appearance
+    window.contentView = host
+    host.layoutSubtreeIfNeeded()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+    host.layoutSubtreeIfNeeded()
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * 2), pixelsHigh: Int(size.height * 2),
+                                     bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                     colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else {
+        print("could not make a bitmap for \(path)")
+        return
+    }
+    rep.size = size
+    NSGraphicsContext.saveGraphicsState()
+    host.cacheDisplay(in: host.bounds, to: rep)
+    NSGraphicsContext.restoreGraphicsState()
+    guard let png = rep.representation(using: .png, properties: [:]) else {
+        print("could not encode \(path)")
+        return
+    }
+    do {
+        try png.write(to: URL(fileURLWithPath: path))
+        print("wrote \(path)")
+    } catch {
+        print("could not write \(path): \(error)")
+    }
+}
+
 /// What auto-switch does, drawn with the same cards the app draws: the account
 /// that has run out of Fable, and the one PixelSwitch moves to.
 @MainActor
@@ -383,11 +427,12 @@ private func autoSwitch(config: MenuBarConfig, logo: Image, scheme: ColorScheme)
     }
 }
 
-/// The rest of the popover's colours: header, promo banner, tab bar, an Accounts
-/// row, a cost-history row and the footer error. MainMenuView, AccountSwitcherView
+/// The rest of the popover's colours: header, promo banner, tab bar (Usage and Costs;
+/// the Accounts tab went in 2.3), a cost-history row and the footer error. MainMenuView
 /// and CostDetailView need AppState, so this is hand-copied markup that uses the
 /// same tokens; it exists to check those colours, not to be shipped as a picture.
-/// Keep it in step with those views by hand.
+/// Keep it in step with those views by hand. The footer itself is the app's own
+/// `PopoverFooter` (see `FooterFixtures`).
 private struct Chrome: View {
     private func tab(_ symbol: String, _ title: String, selected: Bool) -> some View {
         VStack(spacing: 2) {
@@ -397,28 +442,6 @@ private struct Chrome: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 6)
         .foregroundStyle(selected ? .textOnFill : .textSecondary)
-    }
-
-    private func accountRow(_ email: String, active: Bool) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(email).font(.subheadline.weight(.medium))
-                    if active { Badge(text: "Active", color: .green) }
-                }
-                Text("Max").font(.caption2).foregroundStyle(.textSecondary)
-            }
-            Spacer()
-            Image(systemName: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.limitWarn)
-            Image(systemName: "trash").font(.caption).foregroundStyle(.red)
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(active ? .cardFillStrong : .cardFill)
-                .strokeBorder(active ? Color.activeAccountRing : .cardBorder, lineWidth: active ? 2 : 1)
-                .shadow(color: AppStyle.cardShadowColor, radius: AppStyle.cardShadowRadius, x: 0, y: AppStyle.cardShadowY)
-        )
     }
 
     private func costRow(_ date: String, _ amount: String, ratio: Double, today: Bool) -> some View {
@@ -459,18 +482,14 @@ private struct Chrome: View {
             ZStack {
                 Capsule().fill(.tabFill).overlay(Capsule().stroke(.tabBorder, lineWidth: 1))
                 GeometryReader { geo in
-                    Capsule().fill(Color.brand).padding(2).frame(width: geo.size.width / 3)
+                    Capsule().fill(Color.brand).padding(2).frame(width: geo.size.width / 2)
                 }
                 HStack(spacing: 0) {
                     tab("chart.bar", "Usage", selected: true)
-                    tab("person.2", "Accounts", selected: false)
-                    tab("dollarsign.circle", "Cost", selected: false)
+                    tab("dollarsign.circle", "Costs", selected: false)
                 }
             }
-            .frame(width: 260, height: 44)
-
-            accountRow("personal@example.com", active: true)
-            accountRow("studio@example.com", active: false)
+            .frame(width: 200, height: 44)
 
             VStack(spacing: 4) {
                 costRow("Nov 10", "$12.40", ratio: 0.9, today: true)
@@ -546,12 +565,80 @@ private struct HeaderFixtures: View {
                       account: account("team@example.com", org: "Example Woodcraft Studio", plan: "team", tier: nil), priority: 2)
             HeaderRow(caption: "A custom label: label over the address",
                       account: account("work@example.com", org: "work@example.com's Organization", label: "Work"))
-            HeaderRow(caption: "The longest sensible address, with P1 and a Max chip",
-                      account: account("operations@example-woodcraft.com", org: "operations@example-woodcraft.com's Organization"), priority: 1)
+            // 33 characters with no hyphen (the founder's longest, claude@bespokewoodcraftstudio.com, is 33): it
+            // used to break mid-word with no line limit. .test is reserved (RFC 2606).
+            HeaderRow(caption: "A 33-character address with no hyphen, P1 and a Max chip: one line, shrunk, then middle-truncated",
+                      account: account("build@bespokewoodcraftstudio.test", org: "build@bespokewoodcraftstudio.test's Organization"), priority: 1)
             HeaderRow(caption: "Masking on, default organization name: masked address once",
                       account: account("personal@example.com", org: "personal@example.com's Organization"), masked: true)
             HeaderRow(caption: "Masking on, real organization name: both lines, address masked",
                       account: account("team@example.com", org: "Example Woodcraft Studio", plan: "team", tier: nil), masked: true)
+        }
+    }
+}
+
+/// The popover's footer as the app draws it (`PopoverFooter`, `SigningInBar`, `AddCurrentConfirmBar`
+/// and `FooterIconLabel` are the app's own views, compiled in), at the popover's 360 pt width with
+/// the divider the popover draws above it. Resting, with a message, while signing in (both add icons
+/// dimmed, the Signing in bar above) and with the add confirmation open, then the icons with the
+/// pointer over one. Tooltips cannot be shown in a still.
+private struct FooterFixtures: View {
+    private func caption(_ text: String) -> some View {
+        Text(verbatim: text).font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+    }
+
+    private func popover<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        VStack(spacing: 0) {
+            Divider()
+            content()
+        }
+        .frame(width: 360)
+        .background(Color.popoverBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.cardBorder, lineWidth: 1))
+    }
+
+    private func footer(error: String? = nil, loggingIn: Bool = false) -> PopoverFooter {
+        PopoverFooter(errorMessage: error,
+                      busyReason: loggingIn ? "Wait for the current switch or sign-in to finish." : nil,
+                      onAddCurrent: {}, onSignInNew: {}, onRefresh: {}, onSettings: {}, onQuit: {})
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            caption("Footer: Add current account, Sign in a new account | Refresh, Settings, Quit")
+            popover { footer() }
+
+            caption("With a message from the app (the whole text is on hover)")
+            popover { footer(error: "Claude CLI not found") }
+            popover { footer(error: "Could not reach the server, trying again in 30 seconds") }
+
+            caption("Signing in: the bar above, both add icons off")
+            popover {
+                SigningInBar(onShowWindow: {})
+                footer(loggingIn: true)
+            }
+
+            caption("Add current account clicked: it asks first")
+            popover {
+                AddCurrentConfirmBar(onCancel: {}, onAdd: {})
+                footer()
+            }
+
+            caption("Pointer over Refresh (the third icon)")
+            popover {
+                HStack(spacing: 2) {
+                    Spacer()
+                    FooterIconLabel(symbol: "plus.circle")
+                    FooterIconLabel(symbol: "person.badge.plus")
+                    Divider().frame(height: 16).padding(.horizontal, 4)
+                    FooterIconLabel(symbol: "arrow.clockwise", hovering: true)
+                    FooterIconLabel(symbol: "gear")
+                    FooterIconLabel(symbol: "power")
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+            }
         }
     }
 }
@@ -623,6 +710,9 @@ enum Screenshots {
         let logo = Image(nsImage: logoImage)
 
         MainActor.assumeIsolated {
+            // The footer fixture is drawn through AppKit (real buttons): it needs the application object.
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
             reportFooterWidths()
             let config = MenuBarConfig.shared
             // The stock palette, so the pictures match a fresh install.
@@ -638,6 +728,9 @@ enum Screenshots {
                       width: 380, scheme: scheme, to: "\(out)/limits-\(name).png")
 
                 write(Chrome(), width: 360, scheme: scheme, to: "\(out)/chrome-\(name).png")
+
+                // The popover's footer: five icons, the bar a sign-in shows, and the add confirmation.
+                writeHosted(FooterFixtures(), width: 388, scheme: scheme, to: "\(out)/popover-footer-\(name).png")
 
                 // The popover header's name lines (the address is never on both): default organization
                 // name, no name, a real name, a custom label, a long address, and masking on.

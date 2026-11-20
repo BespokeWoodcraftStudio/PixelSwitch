@@ -43,6 +43,7 @@ import SwiftUI
     planChipTests()
     planChipContrastTests()
     resignAndChipWiringTests()
+    runPopoverTidyTests()
     cardButtonTextTests()
     resetsRuleTests()
     resetsWiringTests()
@@ -970,8 +971,10 @@ private func chipHex(_ text: String?) -> UInt32? {
 @MainActor private func resignAndChipWiringTests() {
     let dashboard = planSource("PixelSwitch/Views/UsageDashboardView.swift")
     let menu = planSource("PixelSwitch/Views/MainMenuView.swift")
-    let accounts = planSource("PixelSwitch/Views/AccountSwitcherView.swift")
-    check(!dashboard.isEmpty && !menu.isEmpty && !accounts.isEmpty, "resign pins: the view sources are found from the repo root")
+    // The popover's Accounts tab is gone (2.3): the Re-sign it had is a button on each Settings row.
+    let settingsRow = planSource("PixelSwitch/Views/SettingsAccountRow.swift")
+    let settingsTab = planSource("PixelSwitch/Views/SettingsAccountsTab.swift")
+    check(!dashboard.isEmpty && !menu.isEmpty && !settingsRow.isEmpty && !settingsTab.isEmpty, "resign pins: the view sources are found from the repo root")
 
     // The chip at both call sites comes from the one function, with the no-subscription state.
     let chipLine = "account.planChip(noSubscription: appState.accountUsageErrors[account.id]?.isNoSubscription == true)"
@@ -990,10 +993,13 @@ private func chipHex(_ text: String?) -> UInt32? {
     // The Re-sign button.
     let button = planMember(dashboard, startingAt: "private func resignButton(")
     check(!button.isEmpty && button.contains("appState.reauthenticateAccount(account)"),
-          "resign pins: the button calls the same appState.reauthenticateAccount the Accounts tab calls")
-    check(button.contains("systemImage: \"arrow.triangle.2.circlepath\"") && accounts.contains("Image(systemName: \"arrow.triangle.2.circlepath\")")
-          && button.contains("String(localized: \"Re-authenticate (fix stale token)\", bundle: L10n.bundle)") && accounts.contains(".help(\"Re-authenticate (fix stale token)\")"),
-          "resign pins: it carries the Accounts tab's icon and help text")
+          "resign pins: the button calls appState.reauthenticateAccount")
+    check(settingsTab.contains("onResign: { appState.reauthenticateAccount(account) }"),
+          "resign pins: Settings -> Accounts calls the same appState.reauthenticateAccount from each row's Re-sign")
+    check(button.contains("systemImage: \"arrow.triangle.2.circlepath\"") && settingsRow.contains("Image(systemName: \"arrow.triangle.2.circlepath\")")
+          && button.contains("String(localized: \"Re-authenticate (fix stale token)\", bundle: L10n.bundle)")
+          && settingsRow.contains("Text(\"Re-authenticate (fix stale token)\")"),
+          "resign pins: the card's Re-sign and the Settings row's carry the same icon and help text")
     check(button.contains("String(localized: \"Re-sign\", bundle: L10n.bundle)"), "resign pins: it has a short visible label, Re-sign")
     check(button.contains(".buttonStyle(.borderless)") && button.contains(".focusable(false)"),
           "resign pins: it is a real borderless button like Retry, so a click never counts toward the card's double-click to switch")

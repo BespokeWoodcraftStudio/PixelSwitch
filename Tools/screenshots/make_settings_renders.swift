@@ -1,7 +1,9 @@
-// Renders PixelSwitch 2.0's Settings pieces offscreen, with invented sample data:
+// Renders PixelSwitch's Settings pieces offscreen, with invented sample data:
 // the Accounts row (SettingsAccountRow: Priority, account, Session and Weekly
-// menus) for equal windows, the 90/50 split, a Manual only account and
-// priorities P1, P3 and none; and the General defaults (SettingsThresholdDefaults).
+// menus, and since 2.3 Switch, Re-sign and the More actions menu) for equal windows,
+// the 90/50 split, a Manual only account, priorities P1, P3 and none, the account in
+// use (Switch off), an account whose sign-in ended (Re-sign in the warning colour,
+// Switch off) and a busy app; and the General defaults (SettingsThresholdDefaults).
 //
 // These are the app's own views, drawn through an AppKit hosting view so the
 // menus and sliders are real controls, light and dark, at 2x. Nothing here
@@ -24,8 +26,14 @@ private let defaultsSplit = AutoSwitchEngine.WindowPair(session: 90, weekly: 50)
 /// One sample row, built from an Account the way Settings builds it.
 @MainActor
 private func row(_ account: Account, defaults: AutoSwitchEngine.WindowPair, reset: Text = Text(verbatim: "Weekly resets Mon 11:00 AM"),
-                 active: Bool = false, label: String? = nil, help: String = "") -> some View {
+                 active: Bool = false, label: String? = nil, help: String = "",
+                 signInEnded: Bool = false, busy: Bool = false) -> some View {
     let manual = AutoSwitchSettings.isManualOnly(own: account.switchThreshold)
+    // Switch is off for the account in use, for one whose sign-in ended, and while the app is busy:
+    // the reasons are the app's own sentences (SettingsAccountsTab.switchOffReason), here in English.
+    let off: String? = active ? "You're using this account now."
+        : (signInEnded ? "Sign in to this account again before you switch to it."
+           : (busy ? "Wait for the current switch or sign-in to finish." : nil))
     return SettingsAccountRow(
         title: label ?? account.email,
         subtitle: label == nil ? nil : account.email,
@@ -40,7 +48,12 @@ private func row(_ account: Account, defaults: AutoSwitchEngine.WindowPair, rese
         manualOnly: manual,
         defaults: defaults,
         help: Text(verbatim: help),
-        onPriority: { _ in }, onSession: { _ in }, onWeekly: { _ in })
+        customLabel: label ?? "",
+        needsResign: signInEnded,
+        switchOffReason: off,
+        actionsBusy: busy,
+        onPriority: { _ in }, onSession: { _ in }, onWeekly: { _ in },
+        onSwitch: {}, onResign: {}, onLabel: { _ in }, onRemove: {})
 }
 
 /// The inset list Settings puts the rows in, drawn plainly: alternating rows.
@@ -66,7 +79,8 @@ private func accountsSample() -> some View {
     let split = Account(email: "studio@example.com", displayName: "Studio", sessionThreshold: 90, weeklyThreshold: 50, priority: 2)
     let both70 = Account(email: "side-project@example.com", displayName: "Side", switchThreshold: 70, priority: 3)
     let manual = Account(email: "archive@example.com", displayName: "Archive", switchThreshold: 0, priority: 4)
-    let none = Account(email: "studio-team-accounts@example.com", displayName: "Team", priority: nil)
+    // 34 characters, one more than the founder's longest (claude@bespokewoodcraftstudio.com, 33); .test is reserved (RFC 2606).
+    let none = Account(email: "claude@bespokewoodcraftstudio.test", displayName: "Team", priority: nil)
     let widest = Account(email: "overnight-batch@example.com", displayName: "Batch", sessionThreshold: 100, weeklyThreshold: 100, priority: 99)
     return VStack(alignment: .leading, spacing: 10) {
         SampleList(rows: [
@@ -74,7 +88,8 @@ private func accountsSample() -> some View {
             row(split, defaults: defaultsEqual, reset: Text(verbatim: "Weekly resets in 2 days")),
             row(both70, defaults: defaultsEqual),
             row(manual, defaults: defaultsEqual, reset: Text("Weekly reset not known yet")),
-            row(none, defaults: defaultsEqual),
+            // Its sign-in ended: Re-sign takes the warning colour, Switch is off with its reason.
+            row(none, defaults: defaultsEqual, signInEnded: true),
             // The widest content a row can have: 100% in both windows (the longest label with its
             // stepper) and the highest priority.
             row(widest, defaults: defaultsEqual),
@@ -165,9 +180,9 @@ enum SettingsRenders {
             NSApp.setActivationPolicy(.prohibited)
             for dark in [false, true] {
                 let name = dark ? "dark" : "light"
-                // 812 wide: the Settings window (820) less its padding and the list's insets.
-                writePNG(accountsSample(), width: 812, dark: dark, language: language, to: "\(out)/settings-accounts-rows\(suffix)-\(name).png")
-                writePNG(splitDefaultsSample(), width: 812, dark: dark, language: language, to: "\(out)/settings-accounts-split-defaults\(suffix)-\(name).png")
+                // 932 wide: the Settings window (940) less its padding and the list's insets.
+                writePNG(accountsSample(), width: 932, dark: dark, language: language, to: "\(out)/settings-accounts-rows\(suffix)-\(name).png")
+                writePNG(splitDefaultsSample(), width: 932, dark: dark, language: language, to: "\(out)/settings-accounts-split-defaults\(suffix)-\(name).png")
                 if language == "en" {
                     writePNG(generalSample(session: 90, weekly: 50), width: 560, dark: dark, language: language, to: "\(out)/settings-general-defaults-split-\(name).png")
                     writePNG(generalSample(session: 98, weekly: 98), width: 560, dark: dark, language: language, to: "\(out)/settings-general-defaults-equal-\(name).png")

@@ -89,7 +89,6 @@
 "Custom label" = "Custom label";
 "Edit label" = "Edit label";
 "Switch" = "Switch";
-"Login New Account" = "Login New Account";
 "Add Current Account" = "Add Current Account";
 "Waiting for browser login..." = "Waiting for browser login...";
 "Complete the login in your browser, then return here." = "Complete the login in your browser, then return here.";
@@ -177,7 +176,7 @@
 /* Auto-switch & rate-limit resilience */
 "Waiting for usage data..." = "Waiting for usage data...";
 "No active subscription on this account (OAuth not allowed)." = "No active subscription on this account (OAuth not allowed).";
-"Session expired. Re-authenticate (↻) to fix." = "Session expired. Re-authenticate (↻) to fix.";
+"Session expired. Click Re-sign to fix." = "Session expired. Click Re-sign to fix.";
 "Auto-switch" = "Auto-switch";
 "Switch account before hitting the limit" = "Switch account before hitting the limit";
 "Switch at" = "Switch at";
@@ -189,7 +188,7 @@
 /* Login ownership (1.0.3) */
 "The login saved for %@ belongs to %@. Re-authenticate %@ to fix it." = "The login saved for %1$@ belongs to %2$@. Re-authenticate %3$@ to fix it.";
 "The login saved for %@ is also saved under another account. Re-authenticate %@ to fix it." = "The login saved for %1$@ is also saved under another account. Re-authenticate %2$@ to fix it.";
-"Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix.";
+"Its saved login belonged to another account and was removed. Click Re-sign to fix." = "Its saved login belonged to another account and was removed. Click Re-sign to fix.";
 "The saved login for %@ has expired and could not be renewed. Re-authenticate %@ to fix it." = "The saved login for %1$@ has expired and could not be renewed. Re-authenticate %2$@ to fix it.";
 "The saved details for %@ belong to another account. Re-authenticate %@ to fix it." = "The saved details for %1$@ belong to another account. Re-authenticate %2$@ to fix it.";
 
@@ -210,7 +209,7 @@
 "30 days" = "30 days";
 "%lld hours" = "%lld hours";
 "Give each account its own color" = "Give each account its own color";
-"Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards.";
+"Each account gets a colored edge and icon on the Usage tab, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "Each account gets a colored edge and icon on the Usage tab, so you can tell whose numbers you are looking at. Turn it off for plain cards.";
 "Also switch when Fable runs out" = "Also switch when Fable runs out";
 
 /* Auto-switch rules: Settings → General (1.2) */
@@ -352,3 +351,18 @@
 /* 2.2: the Usage card footer's hover hint (also its tooltip) and its switch-in-progress text */
 "Double-click to switch" = "Double-click to switch";
 "Switching…" = "Switching…";
+
+/* 2.3: popover footer tooltips, Settings account row actions and their Remove confirmation, the last-updated tooltip */
+"Add current account: save the one Claude Code is signed in to now" = "Add current account: save the one Claude Code is signed in to now";
+"Sign in a new account: open the sign-in window" = "Sign in a new account: open the sign-in window";
+"Switch to this account" = "Switch to this account";
+"Switch to %@" = "Switch to %@";
+"You're using this account now." = "You're using this account now.";
+"Sign in to this account again before you switch to it." = "Sign in to this account again before you switch to it.";
+"Wait for the current switch or sign-in to finish." = "Wait for the current switch or sign-in to finish.";
+"Save label" = "Save label";
+"More actions" = "More actions";
+"More actions for %@" = "More actions for %@";
+"Remove %@?" = "Remove %@?";
+"PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account." = "PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account.";
+"Usage last refreshed at %@. It refreshes on its own." = "Usage last refreshed at %@. It refreshes on its own.";

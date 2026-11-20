@@ -48,8 +48,9 @@ class AccountCard(Adw.PreferencesGroup):
         self.badge = Gtk.Label(label="Active")
         self.badge.add_css_class("active-badge")
         self.badge.set_valign(Gtk.Align.CENTER)
-        # The Mac's re-authenticate button is on every account row, and the daemon's own sentences ("Re-authenticate
-        # (↻) to fix.") name that glyph, so this button carries it. It is highlighted when signing in again is the fix.
+        # The Mac's Re-sign button is on every account row, and the message on an expired account says "Click Re-sign
+        # to fix.", so this button is called Re-sign too (the glyph is the Mac's icon). It is highlighted when signing in
+        # again is the fix.
         self.resign_button = Gtk.Button(label="↻ Re-sign")
         self.resign_button.set_valign(Gtk.Align.CENTER)
         self.resign_button.connect("clicked", lambda _b: window.start_resign(self.info))

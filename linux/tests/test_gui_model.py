@@ -71,7 +71,7 @@ class AccountTextTests(unittest.TestCase):
         self.assertIn("isn't responding", model.message_of(self.b))
         self.assertTrue(model.can_retry(self.b))
         self.assertFalse(model.needs_resign(self.b))
-        self.assertEqual(model.message_of(self.c), "Session expired. Re-authenticate (↻) to fix.")
+        self.assertEqual(model.message_of(self.c), "Session expired. Click Re-sign to fix.")
         self.assertTrue(model.needs_resign(self.c))
         self.assertFalse(model.can_retry(self.c))
         self.assertIsNone(model.message_of(self.a))
@@ -80,6 +80,18 @@ class AccountTextTests(unittest.TestCase):
         waiting = {"email": "x", "isSwitchable": True, "usage": {"error": "Waiting for Claude Code to renew this login. It renews the next time a session runs."}}
         self.assertFalse(model.can_retry(waiting))
         self.assertFalse(model.needs_resign(waiting))
+
+    def test_both_re_sign_sentences_need_a_sign_in_even_when_the_account_is_switchable(self):
+        # What the daemon sends (usagecycle) must be recognised by the face, as the Mac's card says "Click Re-sign to fix."
+        from pixelswitch.usagecycle import MESSAGE_BELONGED, MESSAGE_RESIGN
+
+        for message in (MESSAGE_RESIGN, MESSAGE_BELONGED,
+                        "Session expired. Click Re-sign to fix.",
+                        "Its saved login belonged to another account and was removed. Click Re-sign to fix."):
+            info = {"email": "x@y.z", "isSwitchable": True, "usage": {"error": message}}
+            self.assertTrue(model.needs_resign(info), message)
+            self.assertFalse(model.can_retry(info), message)
+            self.assertEqual(model.message_of(info), message)
         # The daemon's own sentence for an unexpected failure offers Retry too (usagecycle: canRetry)
         unexpected = {"email": "x", "isSwitchable": True, "usage": {"error": "Could not fetch usage: JSONDecodeError"}}
         self.assertTrue(model.can_retry(unexpected))
@@ -114,7 +126,7 @@ class AccountTextTests(unittest.TestCase):
         self.assertEqual(model.dbusmenu_label("no underscore"), "no underscore")
 
     def test_short_message(self):
-        self.assertEqual(model.short_message("Session expired. Re-authenticate (↻) to fix."), "Session expired.")
+        self.assertEqual(model.short_message("Session expired. Click Re-sign to fix."), "Session expired.")
         long = model.short_message("Anthropic's usage service isn't responding at all right now, and has not for a while (HTTP 503). Your account is fine.")
         self.assertLessEqual(len(long), 60)
         self.assertTrue(long.endswith("…"))
