@@ -292,6 +292,16 @@ struct UsageDashboardView: View {
                 }
                 .padding(.top, 4)
             }
+            // A card with a reading has its Resets button in the footer row. One
+            // with no reading (expired, waiting) has no footer, so it gets a row
+            // of its own, under the message and Re-sign, which stay where they are.
+            if usage == nil, resetsVisible(account) {
+                HStack(spacing: 6) {
+                    resetsButton(account)
+                    Spacer(minLength: 4)
+                }
+                .frame(minHeight: 14)
+            }
         }
         }
         // The account you are signed in to right now is ringed in orange, all
@@ -426,6 +436,41 @@ struct UsageDashboardView: View {
         .help(String(localized: "Re-authenticate (fix stale token)", bundle: L10n.bundle))
         .accessibilityLabel(String(format: String(localized: "Re-authenticate %@", bundle: L10n.bundle),
                                    account.displayEmail(obfuscated: maskEmails)))
+        // Voice Control: "Click Re-sign" still works now that the spoken label names the account.
+        .accessibilityInputLabels([String(localized: "Re-sign", bundle: L10n.bundle)])
+        .fixedSize()
+    }
+
+    /// True when this card offers Resets: the account has a plan and is not the
+    /// no-subscription card. The rule itself is `Account.showsResetsButton`
+    /// (pure and tested); this only hands it the card's no-subscription state.
+    private func resetsVisible(_ account: Account) -> Bool {
+        account.showsResetsButton(noSubscription: appState.accountUsageErrors[account.id]?.isNoSubscription == true)
+    }
+
+    /// Resets: opens this account's own claude.ai window (`ClaudeWebWindows`), on
+    /// its usage page, so the founder can use claude.ai's own "Reset for free"
+    /// button for the right account. It ONLY opens the window: nothing is clicked,
+    /// submitted or called on claude.ai from here. A real borderless button like
+    /// Retry and Re-sign, in the same `.brandText` label, so a click on it never
+    /// counts toward the card's double-click-to-switch. Not disabled while a
+    /// sign-in or a switch runs: opening a web page touches neither. `account.email`
+    /// is passed whole on purpose (the window checks which address it is signed in
+    /// as); the window masks it itself when masking is on.
+    private func resetsButton(_ account: Account) -> some View {
+        Button {
+            ClaudeWebWindows.shared.open(accountID: account.id.uuidString, email: account.email)
+        } label: {
+            Label(String(localized: "Resets", bundle: L10n.bundle), systemImage: "arrow.counterclockwise.circle")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.brandText)
+        }
+        .buttonStyle(.borderless)
+        .focusable(false)
+        .help(String(localized: "Open this account's claude.ai usage page to use a reset", bundle: L10n.bundle))
+        .accessibilityLabel(String(format: String(localized: "Resets for %@", bundle: L10n.bundle),
+                                   account.displayEmail(obfuscated: maskEmails)))
+        .accessibilityInputLabels([String(localized: "Resets", bundle: L10n.bundle)])
         .fixedSize()
     }
 
@@ -444,6 +489,10 @@ struct UsageDashboardView: View {
     private func cardFooter(_ account: Account) -> some View {
         HStack(spacing: 6) {
             sampleAgeLabel(account)
+            // Beside "Updated … ago". It never shrinks; the age label gives way first.
+            if resetsVisible(account) {
+                resetsButton(account)
+            }
             Spacer(minLength: 4)
             if appState.switchingTo == account.id {
                 HStack(spacing: 4) {
@@ -457,6 +506,8 @@ struct UsageDashboardView: View {
                 Text("Double-click to switch")
                     .font(.caption2)
                     .foregroundStyle(.textSecondary)
+                    .lineLimit(1)
+                    .fixedSize()
                     .transition(.opacity)
             } else if autoSwitchEnabled && AutoSwitchSettings.isManualOnly(own: account.switchThreshold) {
                 Label("Manual only", systemImage: "hand.raised")
@@ -478,6 +529,7 @@ struct UsageDashboardView: View {
                     .font(.caption2)
                 Text("Updated \(Text(sampledAt, style: .relative)) ago")
                     .font(.caption2)
+                    .lineLimit(1)
             }
             .foregroundStyle(.textSecondary)
         }

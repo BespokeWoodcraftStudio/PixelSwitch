@@ -45,6 +45,9 @@ private struct SampleAccount {
     /// A usage request that left no reading: the sign-in ended (the card offers
     /// Re-sign) or the account has no active subscription (it offers nothing).
     var problem: Problem?
+    /// Whether the card offers Resets. True for an account with a plan; the
+    /// no-subscription sample sets it from the real `Account.showsResetsButton`.
+    var showsResets = true
 
     enum Problem { case expired, noSubscription, unreachable }
 }
@@ -105,7 +108,11 @@ private let expiredUltraSample = SampleAccount(email: "expired-ultra@example.com
 private let unreachableSample = SampleAccount(email: "offline@example.com", swatch: 7, chip: chip("max", "max_5x"), active: false,
                                               session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", problem: .unreachable)
 private let lapsedSample = SampleAccount(email: "lapsed@example.com", swatch: 5, chip: chip("max", "max_20x", noSubscription: true), active: false,
-                                         session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", problem: .noSubscription)
+                                         session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", problem: .noSubscription,
+                                         // The real rule decides: a lapsed account has no Resets button.
+                                         showsResets: Account(email: "lapsed@example.com", displayName: "Lapsed",
+                                                              subscriptionType: "max", planTier: "max_20x")
+                                             .showsResetsButton(noSubscription: true))
 
 private struct Card: View {
     let account: SampleAccount
@@ -115,6 +122,18 @@ private struct Card: View {
     /// "", "hover" or "switching": the three states a card can be in once
     /// double-click-to-switch exists.
     var interaction: String = ""
+    /// The footer's age text. The app prints "Updated <relative time> ago" and only
+    /// once a reading is 90 seconds old; a long one is the tightest case for the row.
+    var updated: String = "Updated 1 min ago"
+
+    /// The app's Resets button, as a look (see the note beside Re-sign below):
+    /// the same Label, symbol and font, in `.brandText`.
+    private var resetsLabel: some View {
+        Label("Resets", systemImage: "arrow.counterclockwise.circle")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.brandText)
+            .fixedSize()
+    }
 
     private func row(_ kind: LimitBarKind, _ title: LocalizedStringKey, _ used: Double, _ reset: String) -> UsageLimitRow {
         UsageLimitRow(kind: kind, title: title, utilization: used, resetText: reset,
@@ -151,6 +170,8 @@ private struct Card: View {
                 if let problem = account.problem {
                     // Hand copy of the Usage card's no-reading branch (UsageDashboardView):
                     // keep it in step by hand. Re-sign only when the sign-in has ended.
+                    // Like the app's, this kind of card has no footer: Resets sits in a row
+                    // of its own under the message, and only when `showsResets`.
                     HStack(alignment: .top) {
                         Image(systemName: problem == .expired ? "exclamationmark.triangle" : "xmark.circle")
                             .foregroundStyle(problem == .expired ? .limitWarn : .limitCrit)
@@ -186,26 +207,39 @@ private struct Card: View {
                     row(.fable, "Fable", account.fable, account.weekReset)
                 }
 
-                HStack(spacing: 6) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "clock").font(.caption2)
-                        Text("Updated 1 min ago").font(.caption2)
-                    }
-                    .foregroundStyle(.textSecondary)
-                    Spacer(minLength: 4)
-                    if interaction == "switching" {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.2.circlepath").font(.caption2)
-                            Text("Switching…").font(.caption2.weight(.semibold))
+                if account.problem == nil {
+                    // The footer row of a card with a reading: the age, Resets beside it,
+                    // and what clicking would do on the right (as UsageDashboardView.cardFooter).
+                    HStack(spacing: 6) {
+                        HStack(spacing: 3) {
+                            Image(systemName: "clock").font(.caption2)
+                            Text(updated).font(.caption2).lineLimit(1)
                         }
-                        .foregroundStyle(Color.brandText)
-                    } else if interaction == "hover" {
-                        Text("Double-click to switch")
-                            .font(.caption2)
-                            .foregroundStyle(.textSecondary)
+                        .foregroundStyle(.textSecondary)
+                        if account.showsResets { resetsLabel }
+                        Spacer(minLength: 4)
+                        if interaction == "switching" {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.triangle.2.circlepath").font(.caption2)
+                                Text("Switching…").font(.caption2.weight(.semibold))
+                            }
+                            .foregroundStyle(Color.brandText)
+                        } else if interaction == "hover" {
+                            Text("Double-click to switch")
+                                .font(.caption2)
+                                .foregroundStyle(.textSecondary)
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
                     }
+                    .frame(minHeight: 14)
+                } else if account.showsResets {
+                    HStack(spacing: 6) {
+                        resetsLabel
+                        Spacer(minLength: 4)
+                    }
+                    .frame(minHeight: 14)
                 }
-                .frame(minHeight: 14)
             }
         }
         .scaleEffect(interaction == "hover" ? 1.01 : 1.0)
@@ -469,6 +503,26 @@ enum Screenshots {
                         Card(account: lapsedSample, config: config, logo: logo)
                       },
                       width: 380, scheme: scheme, to: "\(out)/resign-\(name).png")
+
+                // The Resets button at the popover's real width (a 360 pt popover leaves a card
+                // 328 pt wide; the pictures above are wider): a normal card, an expired card with
+                // Re-sign beside the message and Resets under it, and the lapsed card with neither.
+                write(VStack(alignment: .leading, spacing: 12) {
+                        Text("Normal card: Resets beside the age").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Card(account: sample[1], config: config, logo: logo, updated: "Updated 4 min ago")
+                        Text("Sign-in ended: Re-sign stays, Resets under it").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Card(account: expiredSample, config: config, logo: logo)
+                        Text("No active subscription: no Resets").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Card(account: lapsedSample, config: config, logo: logo)
+                      },
+                      width: 356, scheme: scheme, to: "\(out)/resets-\(name).png")
+
+                // The tightest the footer gets: the longest age text and the pointer over the card.
+                write(VStack(alignment: .leading, spacing: 12) {
+                        Text("Pointer over a card, oldest age text").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Card(account: sample[2], config: config, logo: logo, interaction: "hover", updated: "Updated 1 hr, 5 min ago")
+                      },
+                      width: 356, scheme: scheme, to: "\(out)/resets-hover-\(name).png")
 
                 write(autoSwitch(config: config, logo: logo, scheme: scheme),
                       width: 420, scheme: scheme, to: "\(out)/auto-switch-\(name).png")

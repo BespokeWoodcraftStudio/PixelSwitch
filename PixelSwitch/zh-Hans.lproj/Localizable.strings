@@ -358,3 +358,8 @@
 /* 2.2: Re-sign on a Usage card whose sign-in has ended; the plan chip of an account with no active subscription */
 "Re-sign" = "重新登录";
 "No plan" = "无套餐";
+
+/* 2.2: Resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+"Resets" = "重置";
+"Resets for %@" = "%@ 的重置";
+"Open this account's claude.ai usage page to use a reset" = "打开此账户的 claude.ai 用量页面以使用重置";
