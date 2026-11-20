@@ -62,6 +62,7 @@ swiftc -swift-version 6 \
   PixelSwitch/ClaudeWeb/ClaudeWebStoreMap.swift \
   PixelSwitch/ClaudeWeb/ClaudeWebPolicy.swift \
   PixelSwitch/ClaudeWeb/ClaudeWebAccountCheck.swift \
+  PixelSwitch/ClaudeWeb/ClaudeWebRemovalGate.swift \
   Tests/UnitTests/ClaudeWebTests.swift \
   PixelSwitch/Models/FooterAge.swift \
   Tests/UnitTests/FooterAgeTests.swift \

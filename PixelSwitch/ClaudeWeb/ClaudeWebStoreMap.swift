@@ -38,6 +38,13 @@ enum ClaudeWebStoreMap {
         mapping(defaults: defaults)[normalized(accountID)]
     }
 
+    /// True while this account's saved identifier is `id`. A removal asks before it
+    /// reopens a store by an identifier: once the mapping is gone (or points
+    /// elsewhere) that store belongs to nobody, and opening it would only create it.
+    static func isCurrent(_ id: UUID, for accountID: String, defaults: UserDefaults = .standard) -> Bool {
+        existingIdentifier(for: accountID, defaults: defaults) == id
+    }
+
     /// The identifier for this account: the saved one, or a new one that is saved
     /// first. A new identifier is never one another account already holds (and
     /// never the all-zero UUID, which WebKit refuses). `makeID` is a seam for tests.

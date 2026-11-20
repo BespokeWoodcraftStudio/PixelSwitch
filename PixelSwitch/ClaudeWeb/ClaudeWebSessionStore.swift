@@ -22,6 +22,10 @@ enum ClaudeWebSessionStore {
         ClaudeWebStoreMap.existingIdentifier(for: accountID, defaults: defaults) != nil
     }
 
+    /// One removal per account at a time, whoever asks: the window's "Sign out of
+    /// claude.ai here" and account removal both come through `removeSignIn`.
+    private static let removals = ClaudeWebRemovalGate()
+
     /// Removes the account's web sign-in: deletes its data store and forgets the
     /// identifier, so the next window starts signed out under a new one.
     ///
@@ -29,8 +33,19 @@ enum ClaudeWebSessionStore {
     /// otherwise), so the caller closes the account's window before calling this.
     /// If WebKit still refuses after one retry, the store's data is wiped in
     /// place and the identifier is kept. Returns false only if neither worked.
+    ///
+    /// A second call for an account whose removal is already running does not start
+    /// another: it waits and returns that one's answer (`ClaudeWebRemovalGate`), so
+    /// two removals can never race each other into recreating a deleted store.
     @discardableResult
     static func removeSignIn(for accountID: String, defaults: UserDefaults = .standard) async -> Bool {
+        let saved = SendableDefaults(defaults)
+        return await removals.run(accountID: accountID) {
+            await performRemoval(for: accountID, defaults: saved.value)
+        }
+    }
+
+    private static func performRemoval(for accountID: String, defaults: UserDefaults) async -> Bool {
         let tag = shortID(accountID)
         guard let id = ClaudeWebStoreMap.existingIdentifier(for: accountID, defaults: defaults) else {
             storeLog.info("[claudeWeb] sign-out for account \(tag): no web sign-in was saved")
@@ -47,7 +62,13 @@ enum ClaudeWebSessionStore {
                 if attempt == 1 { try? await Task.sleep(for: .milliseconds(400)) }
             }
         }
-        // Still in use or refused. Wipe what it holds; the identifier stays.
+        // Still in use or refused. Wipe what it holds; the identifier stays. But only if the
+        // account still owns this identifier: opening a store by an identifier nobody holds
+        // would create an orphan that nothing could ever remove.
+        guard ClaudeWebStoreMap.isCurrent(id, for: accountID, defaults: defaults) else {
+            storeLog.info("[claudeWeb] sign-out for account \(tag): the data store was already removed; nothing to wipe")
+            return true
+        }
         let store = WKWebsiteDataStore(forIdentifier: id)
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
         let remaining = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
