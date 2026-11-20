@@ -271,3 +271,41 @@ Reasons, with the evidence (`docs/investigations/2026-11-19-limit-reset-endpoint
 - So a button that resets straight from PixelSwitch exists only if PixelSwitch pretends to be claude.ai or Claude Code. We will not do that. Option A uses claude.ai itself, signed in as the right account, so it is honest and cannot hit the wrong account.
 
 **Decision NOT to build a direct reset call (a later session must not "fix" this).** Do not add any PixelSwitch code (app, CLI, MCP, Linux port) that calls Anthropic's reset or grant endpoints to use a reset, or that presents itself as claude.ai or Claude Code to see or take one. A reset is only ever clicked by him, on claude.ai's own page. Read-only checks of what is offered are allowed. If option A's window cannot hold a claude.ai sign-in (Google sign-in unproven in the app window; the emailed code is the backup), the fallback is option B (open claude.ai/settings/usage in his browser), never a direct call.
+
+## Limit resets round 2: Limit resets opens the account's claude.ai usage page in its own Chrome profile, 2026-11-20
+
+Card "The Limit resets button, second try" [limit-resets-second-try] on `docs/decisions/pixelswitch-limit-resets-round2-2026-11-20.html`. Answered in chat on November 20, 2026 at about 7:55 AM PST. His words, verbatim:
+
+> "PIXELSWITCH: FOUNDER QUESTIONS, LIMIT RESETS ROUND 2 (Nov 20, 2026)
+> 1. The Limit resets button, second try [limit-resets-second-try]
+>    ANSWER: A (Recommended). Open it in your own Chrome, in the right profile. (the recommended one)
+> (1 of 1 answered)"
+
+What led to round 2, his earlier words that morning, verbatim:
+
+> "The limits reset button just takes you to the claude login page, that is not good enough, even worse when I try to login it does not even remember my login information.  Really it was a poor attempt."
+
+His later requests the same morning, verbatim:
+
+> "I don't want the email address to show 2 times"
+
+> "Check the image, you can see you have the wrong icon to the left of "to fix" and also we should make the icons on at the bottom be a little bigger and easier to see and have hover over for them so people know what they are for.  Also there should be 2 more icons at the bottom for add current account and login new account.  This way people don't need to click on the accounts tab.  Also, thinking about it, do we really need the accounts tab?  Why not just move that stuff into the settings window since we already have an accounts tab in the settings window."
+
+Decision (A): Limit resets opens that account's claude.ai usage page in the Chrome profile that belongs to that account. The profile is matched by its Google account email. For an account with no matching profile, PixelSwitch creates a Chrome profile named after the account on the first click, and he signs in to claude.ai there once. He clicks claude.ai's own Reset button; the 2.2 in-app claude.ai window is removed. This replaces the 2026-11-19 option A (a window per account inside PixelSwitch). The standing order of November 19 still holds: no agent and no PixelSwitch code ever uses a reset.
+
+Reasons, with the evidence (`docs/investigations/2026-11-20-claude-web-signin-failure.md`, `docs/investigations/2026-11-20-genuine-cli-limit-reset-route.md`):
+- The embedded window was a fresh browser for each account, so it never knew his logins. Google refuses sign-in in app-embedded windows. claude.ai's emailed sign-in link opens in Chrome, not in that window.
+- Claude Code's own reset is switched off by Anthropic for the account that could be checked, and its confirm prompt defaults to Yes, so PixelSwitch will not drive it.
+- A one-click reset inside PixelSwitch needs PixelSwitch to pretend to be claude.ai or Claude Code, which we will not do.
+
+Decisions NOT taken (a later session must not "fix" these):
+- B, show a Reset button only if Anthropic turns on Claude Code's reset and open Terminal at its prompt: not taken. Today the button would never appear and there is no sign Anthropic will turn it on. Revisit only if that changes.
+- C, remove the Limit resets button for now: not taken; A gives 2 clicks per reset on the right account.
+- Any in-app claude.ai sign-in window, or any direct call to Anthropic's reset or grant endpoints: not taken, for the reasons above and the 2026-11-19 decision.
+
+Other requests of that morning, accepted, all to ship in 2.3:
+- The account's email shows once, not twice.
+- The wrong glyph to the left of "to fix" (the ↻ re-authenticate mark) is corrected.
+- The icons at the bottom are bigger and easier to see, each with a hover tooltip saying what it is for.
+- Two new bottom icons: add current account, and sign in a new account, so he need not open the Accounts tab.
+- The popover's Accounts tab is removed and its functions move into the Settings window's Accounts tab.
