@@ -3,12 +3,12 @@ import Foundation
 /// Which Chrome profile belongs to which PixelSwitch account.
 ///
 /// Pure and Foundation only, so the unit harness compiles it. Three steps, in this order:
-/// 1. `directory(forEmail:in:)` looks for a profile Chrome already has that is signed
+/// 1. The account's stored choice (`ChromeProfileChoice`, set in Settings or from a shell)
+///    when it has one: an explicit choice, even "its own profile", is always honoured.
+/// 2. `directory(forEmail:in:)` looks for a profile Chrome already has that is signed
 ///    in to the account's Google address (only possible while Chrome's `Local State`
 ///    can be read, which macOS can refuse).
-/// 2. When there is none, the account's stored choice (`ChromeProfileChoice`, set in
-///    Settings or from a shell) says which profile to open.
-/// 3. With no stored choice, `PixelSwitchChromeProfile` gives the account a profile
+/// 3. When there is none, `PixelSwitchChromeProfile` gives the account a profile
 ///    folder of PixelSwitch's own, named from its address and saved so it never changes.
 ///    Chrome creates that profile the first time it is launched with the name.
 enum ChromeProfileMatcher {
@@ -128,9 +128,11 @@ enum PixelSwitchChromeProfile {
 /// address no profile has silently opens the profile used last, which can be a
 /// different account. So the address flag is only ever sent when the choice says so.
 enum ChromeProfileChoice: Equatable, Hashable, Sendable {
-    /// The default: PixelSwitch's own folder for the account (`PixelSwitchChromeProfile`),
-    /// opened with `--profile-directory`. Chrome makes it on first use; it is signed out
-    /// until the person signs in to claude.ai there once.
+    /// PixelSwitch's own folder for the account (`PixelSwitchChromeProfile`), opened with
+    /// `--profile-directory`. Chrome makes it on first use; it is signed out until the
+    /// person signs in to claude.ai there once. Kept as a choice, it is honoured even when
+    /// Chrome's profile list shows a profile signed in to the address. What an account with
+    /// no kept choice gets is the same folder unless that list does show such a profile.
     case ownProfile
     /// Chrome's profile that is signed in with the account's address, found by Chrome
     /// itself (`--profile-email=<address>` and nothing else). Only right when such a
@@ -155,7 +157,10 @@ enum ChromeProfileChoice: Equatable, Hashable, Sendable {
 ///
 /// A dictionary in UserDefaults under `defaultsKey`: the account id (lower case UUID text)
 /// to one of
-///   `own`                   the account's own PixelSwitch profile (also what no entry means)
+///   `own`                   the account's own PixelSwitch profile, even if Chrome's list shows a
+///                           profile signed in to the address
+/// No entry at all means no choice: a profile Chrome's list shows for the address if the list can
+/// be read, else the account's own PixelSwitch profile.
 ///   `signedInAs`            the Chrome profile signed in with the account's address
 ///   `directory:<name>`      the Chrome profile folder `<name>`, for example `directory:Profile 1`
 /// The keywords ignore case. A value that is none of these, or a `directory:` name that
@@ -199,21 +204,28 @@ enum ChromeProfileChoiceStore {
         return choice(fromText: text)
     }
 
-    /// The account's choice: the kept one, else its own PixelSwitch profile.
+    /// The account's choice as a menu shows it: the kept one, else its own PixelSwitch profile.
+    /// (Whether a choice was kept is `saved(forAccountID:)`, which the click uses.)
     static func choice(forAccountID accountID: String, defaults: UserDefaults = .standard) -> ChromeProfileChoice {
         saved(forAccountID: accountID, defaults: defaults) ?? .ownProfile
     }
 
-    /// Keeps a choice for the account. `.ownProfile` removes the entry (it is what no
-    /// entry means). Returns false, and changes nothing, for a `.directory` with an
+    /// Keeps a choice for the account, `.ownProfile` included (an explicit own profile is a
+    /// choice, kept as `own`). Returns false, and changes nothing, for a `.directory` with an
     /// invalid name. Call it from the main thread: a read then a write is not atomic.
     @discardableResult
     static func set(_ choice: ChromeProfileChoice, forAccountID accountID: String, defaults: UserDefaults = .standard) -> Bool {
         guard let text = text(for: choice) else { return false }
-        let id = PixelSwitchChromeProfile.normalizedAccountID(accountID)
         var all = defaults.dictionary(forKey: defaultsKey) as? [String: String] ?? [:]
-        if choice == .ownProfile { all.removeValue(forKey: id) } else { all[id] = text }
-        if all.isEmpty { defaults.removeObject(forKey: defaultsKey) } else { defaults.set(all, forKey: defaultsKey) }
+        all[PixelSwitchChromeProfile.normalizedAccountID(accountID)] = text
+        defaults.set(all, forKey: defaultsKey)
         return true
+    }
+
+    /// Forgets the account's kept choice, so it has none again.
+    static func clear(forAccountID accountID: String, defaults: UserDefaults = .standard) {
+        var all = defaults.dictionary(forKey: defaultsKey) as? [String: String] ?? [:]
+        all.removeValue(forKey: PixelSwitchChromeProfile.normalizedAccountID(accountID))
+        if all.isEmpty { defaults.removeObject(forKey: defaultsKey) } else { defaults.set(all, forKey: defaultsKey) }
     }
 }

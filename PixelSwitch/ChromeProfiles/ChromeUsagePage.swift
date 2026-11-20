@@ -23,7 +23,10 @@ enum ChromeUsagePage {
     /// and names a new one; it is never logged).
     static func open(accountID: String, email: String) {
         let tag = shortID(accountID)
-        let read = readLocalState()
+        // An account with a stored choice never looks at Chrome's profile list (the choice wins), so
+        // Chrome's folder is not even touched for it.
+        let read: (data: Data?, failure: ChromeLocalState.ReadFailure?) =
+            ChromeProfileChoiceStore.saved(forAccountID: accountID) == nil ? readLocalState() : (data: nil, failure: nil)
         let route = ChromeUsageLaunch.route(accountID: accountID, email: email, localState: read.data,
                                             chromeInstalled: isChromeInstalled(), localStateFailure: read.failure)
         switch route {
@@ -39,6 +42,8 @@ enum ChromeUsagePage {
                 chromeLog.info("[chromeResets] account \(tag): opening the usage page in Chrome profile \"\(directory)\" (signed in to this account's address)")
             case .chosenDirectory:
                 chromeLog.info("[chromeResets] account \(tag): opening the usage page in Chrome profile \"\(directory)\" (the account's saved choice)")
+            case .chosenOwn:
+                chromeLog.info("[chromeResets] account \(tag): opening the usage page in this account's own PixelSwitch profile (the account's saved choice)")
             case .owned:
                 chromeLog.info("[chromeResets] account \(tag): no Chrome profile is signed in to this address, opening the usage page in this account's own PixelSwitch profile")
             case .ownedProfileListUnreadable(.accessDenied):

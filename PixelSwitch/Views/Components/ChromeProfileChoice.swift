@@ -4,8 +4,10 @@ import SwiftUI
 ///
 /// A compact menu for one account. It reads and writes the account's stored choice
 /// (`ChromeProfileChoiceStore`, in UserDefaults, keyed by the account's id):
-/// - "Its own PixelSwitch Chrome profile" (the default): a profile of PixelSwitch's own, made
-///   for this account and signed out until the person signs in to claude.ai in it once.
+/// - "Its own PixelSwitch Chrome profile": a profile of PixelSwitch's own, made for this
+///   account and signed out until the person signs in to claude.ai in it once. It is what the
+///   menu shows while nothing is stored; picking it stores it, and from then on it is honoured
+///   even if Chrome's profile list shows a profile signed in to the address.
 /// - "The Chrome profile signed in as <address>": Chrome picks the profile signed in with the
 ///   account's address. Only right when Chrome has one; if it has none, Chrome opens whichever
 ///   profile was used last, so the control says so out loud (a menu bar tooltip is unreliable,

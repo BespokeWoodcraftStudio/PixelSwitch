@@ -569,12 +569,17 @@ private extension Data {
     check(!S.set(.directory("../evil"), forAccountID: b, defaults: defaults) && S.choice(forAccountID: b, defaults: defaults) == .directory("Profile 1")
           && !S.set(.directory(""), forAccountID: b, defaults: defaults) && !S.set(.directory("-x"), forAccountID: b, defaults: defaults),
           "chrome choice: an invalid folder name is refused and the kept choice is left alone")
-    check(S.set(.ownProfile, forAccountID: a, defaults: defaults) && S.saved(forAccountID: a, defaults: defaults) == nil
+    check(S.set(.ownProfile, forAccountID: a, defaults: defaults) && S.saved(forAccountID: a, defaults: defaults) == .ownProfile
           && S.choice(forAccountID: a, defaults: defaults) == .ownProfile
+          && (defaults.dictionary(forKey: S.defaultsKey) as? [String: String] ?? [:]) == [a.lowercased(): "own", b.lowercased(): "directory:Profile 1"],
+          "chrome choice: choosing the own profile is a kept choice (own), not the same as having none")
+    S.clear(forAccountID: a, defaults: defaults)
+    check(S.saved(forAccountID: a, defaults: defaults) == nil && S.choice(forAccountID: a, defaults: defaults) == .ownProfile
           && (defaults.dictionary(forKey: S.defaultsKey) as? [String: String] ?? [:]) == [b.lowercased(): "directory:Profile 1"],
-          "chrome choice: choosing the own profile removes the entry, since no entry means it")
-    S.set(.ownProfile, forAccountID: b, defaults: defaults)
-    check(defaults.object(forKey: S.defaultsKey) == nil, "chrome choice: with no entries left the key is gone")
+          "chrome choice: clearing an account's choice leaves it with none, and the other account alone")
+    S.clear(forAccountID: b, defaults: defaults)
+    S.clear(forAccountID: "never-had-one", defaults: defaults)
+    check(defaults.object(forKey: S.defaultsKey) == nil, "chrome choice: with no entries left the key is gone, and clearing an account with none is harmless")
     // A shell can write the documented form; a damaged value or a wrong type counts as no choice.
     defaults.set([a.lowercased(): "directory:Profile 2", b.lowercased(): "nonsense"], forKey: S.defaultsKey)
     check(S.choice(forAccountID: a, defaults: defaults) == .directory("Profile 2") && S.saved(forAccountID: b, defaults: defaults) == nil
@@ -611,44 +616,56 @@ private extension Data {
     defaults.removeObject(forKey: PixelSwitchChromeProfile.defaultsKey)
     let id = "CCCCCCCC-3333-4333-8333-CCCCCCCCCCCC"
 
-    // 1. A profile Chrome's list shows wins over any stored choice, which is left alone.
-    for stored in [Ch.ownProfile, .chromeProfileSignedInAs, .directory("Profile 2")] {
-        S.set(stored, forAccountID: id, defaults: defaults)
-        check(route(id, "beta@example.org", state, nil) == .chrome(profileDirectory: "Profile 1", source: .matched),
-              "chrome order: a readable list that has the address wins over the stored choice \(stored)")
-        check(S.saved(forAccountID: id, defaults: defaults) == (stored == .ownProfile ? nil : stored),
-              "chrome order: and the stored choice \(stored) is left as it was")
-    }
-    // 2. Otherwise the stored choice.
+    // 1. An explicit stored choice, whatever it is, wins over a profile Chrome's list shows for the address.
+    let matchingList = ("beta@example.org", Optional(state), Optional<ChromeLocalState.ReadFailure>.none)   // Profile 1 is signed in as beta
     S.set(.directory("Profile 2"), forAccountID: id, defaults: defaults)
-    check(route(id, "new@example.com", state, nil) == .chrome(profileDirectory: "Profile 2", source: .chosenDirectory),
-          "chrome order: with no match, a stored folder is opened")
-    check(route(id, "new@example.com", nil, .accessDenied) == .chrome(profileDirectory: "Profile 2", source: .chosenDirectory),
-          "chrome order: with the list unreadable, a stored folder is opened")
+    check(route(id, matchingList.0, matchingList.1, matchingList.2) == .chrome(profileDirectory: "Profile 2", source: .chosenDirectory),
+          "chrome order: a stored folder beats a readable list that has the address")
+    S.set(.ownProfile, forAccountID: id, defaults: defaults)
+    check(route(id, matchingList.0, matchingList.1, matchingList.2) == .chrome(profileDirectory: "PixelSwitch beta@example.org", source: .chosenOwn),
+          "chrome order: a stored own profile beats a readable list that has the address (and makes and saves the own folder)")
+    check(PixelSwitchChromeProfile.savedDirectory(forAccountID: id, defaults: defaults) == "PixelSwitch beta@example.org",
+          "chrome order: the own folder an explicit own choice opens is the account's saved PixelSwitch folder")
+    S.set(.chromeProfileSignedInAs, forAccountID: id, defaults: defaults)
+    check(route(id, matchingList.0, matchingList.1, matchingList.2) == .chromeSignedInAs(email: "beta@example.org"),
+          "chrome order: a stored signed-in-as choice beats a readable list too (Chrome is asked for the address, not the folder the list names)")
+    // 2. With no stored choice, a profile the list shows wins, even over a PixelSwitch folder saved earlier.
+    S.clear(forAccountID: id, defaults: defaults)
+    check(route(id, matchingList.0, matchingList.1, matchingList.2) == .chrome(profileDirectory: "Profile 1", source: .matched),
+          "chrome order: with no stored choice a readable list that has the address wins, over the saved PixelSwitch folder too")
+    check(S.saved(forAccountID: id, defaults: defaults) == nil && PixelSwitchChromeProfile.savedDirectory(forAccountID: id, defaults: defaults) == "PixelSwitch beta@example.org",
+          "chrome order: and neither the saved folder nor the absent choice is changed by it")
+    // A stored choice is honoured when the list cannot be read, and makes nothing it does not need.
+    defaults.removeObject(forKey: PixelSwitchChromeProfile.defaultsKey)
+    S.set(.directory("Profile 2"), forAccountID: id, defaults: defaults)
+    check(route(id, "new@example.com", state, nil) == .chrome(profileDirectory: "Profile 2", source: .chosenDirectory)
+          && route(id, "new@example.com", nil, .accessDenied) == .chrome(profileDirectory: "Profile 2", source: .chosenDirectory),
+          "chrome order: a stored folder is opened whether the list had no match or could not be read")
     check(defaults.dictionary(forKey: PixelSwitchChromeProfile.defaultsKey) == nil,
           "chrome order: a stored folder makes and saves no PixelSwitch folder")
     S.set(.chromeProfileSignedInAs, forAccountID: id, defaults: defaults)
     check(route(id, "new@example.com", nil, .accessDenied) == .chromeSignedInAs(email: "new@example.com")
           && route(id, "  New@Example.com ", state, nil) == .chromeSignedInAs(email: "New@Example.com"),
-          "chrome order: with no match, the signed-in-as choice sends the (trimmed) address, whether the list was unreadable or just had no match")
+          "chrome order: the signed-in-as choice sends the (trimmed) address, whether the list was unreadable or just had no match")
     check(defaults.dictionary(forKey: PixelSwitchChromeProfile.defaultsKey) == nil, "chrome order: the signed-in-as choice makes and saves no PixelSwitch folder")
     for (index, unusable) in ["", "   ", "no-at-sign", "a b@x.com"].enumerated() {
         let other = "unusable-\(index)"   // its own account each time: the first own folder an account gets is saved for good
         S.set(.chromeProfileSignedInAs, forAccountID: other, defaults: defaults)
         check(route(other, unusable, nil, .accessDenied) == .chrome(profileDirectory: PixelSwitchChromeProfile.directoryName(forEmail: unusable, accountID: other), source: .ownedProfileListUnreadable(.accessDenied)),
-              "chrome order: the signed-in-as choice with the unusable address \(unusable.debugDescription) falls back to the own profile, never a blank flag")
+              "chrome order: the signed-in-as choice with the unusable address \(unusable.debugDescription) counts as no choice and falls back to the own profile, never a blank flag")
     }
-    // 3. Otherwise its own profile.
-    S.set(.ownProfile, forAccountID: id, defaults: defaults)
+    // 3. With no stored choice and no match, its own profile.
+    S.clear(forAccountID: id, defaults: defaults)
     defaults.removeObject(forKey: PixelSwitchChromeProfile.defaultsKey)
     check(route(id, "new@example.com", state, nil) == .chrome(profileDirectory: "PixelSwitch new@example.com", source: .owned)
           && route(id, "new@example.com", nil, .accessDenied) == .chrome(profileDirectory: "PixelSwitch new@example.com", source: .ownedProfileListUnreadable(.accessDenied)),
-          "chrome order: with no stored choice the account's own PixelSwitch profile opens")
+          "chrome order: with no stored choice and no match the account's own PixelSwitch profile opens")
     // A damaged stored text is no choice.
     defaults.removeObject(forKey: PixelSwitchChromeProfile.defaultsKey)
     defaults.set([PixelSwitchChromeProfile.normalizedAccountID(id): "directory:../x"], forKey: S.defaultsKey)
-    check(route(id, "new@example.com", nil, .accessDenied) == .chrome(profileDirectory: "PixelSwitch new@example.com", source: .ownedProfileListUnreadable(.accessDenied)),
-          "chrome order: a damaged stored choice is ignored and the own profile opens")
+    check(route(id, "new@example.com", nil, .accessDenied) == .chrome(profileDirectory: "PixelSwitch new@example.com", source: .ownedProfileListUnreadable(.accessDenied))
+          && route(id, "beta@example.org", state, nil) == .chrome(profileDirectory: "Profile 1", source: .matched),
+          "chrome order: a damaged stored choice is no choice: the list's match wins, else the own profile opens")
     // Chrome missing: the default browser, whatever is stored.
     for stored in [Ch.ownProfile, .chromeProfileSignedInAs, .directory("Profile 1")] {
         S.set(stored, forAccountID: id, defaults: defaults)
@@ -656,23 +673,38 @@ private extension Data {
               "chrome order: with Chrome not installed the default browser opens, with the choice \(stored)")
     }
 
-    // --profile-email is never sent without the stored choice that asks for it: try every way the click can arrive.
+    // --profile-email is never sent without the stored choice that asks for it, and an explicit stored
+    // choice is always honoured: try every way the click can arrive.
     let emails = ["", "   ", "beta@example.org", "BETA@example.org", "new@example.com", "no-at-sign", "a b@x.com", "x;y@z.com"]
     let locals: [(Data?, ChromeLocalState.ReadFailure?)] = [(state, nil), (nil, nil), (nil, .accessDenied), (nil, .notFound), (nil, .other), (Data(), nil), (chromeJSON("{{{"), nil)]
     var sentEmail: [String] = []
+    var notHonoured: [String] = []
     var routes = 0
     for stored in [nil, Ch.ownProfile, .directory("Default"), .directory("Profile 1")] as [Ch?] {
         let key = "never-\(String(describing: stored))"
         defaults.removeObject(forKey: S.defaultsKey)
+        defaults.removeObject(forKey: PixelSwitchChromeProfile.defaultsKey)
         if let stored { S.set(stored, forAccountID: key, defaults: defaults) }
         for email in emails { for (local, failure) in locals {
             let r = C.route(accountID: key, email: email, localState: local, chromeInstalled: true, localStateFailure: failure, defaults: defaults)
             routes += 1
             if case .chromeSignedInAs = r { sentEmail.append("\(String(describing: stored)) \(email.debugDescription)") }
+            switch stored {
+            case .directory(let name)?:
+                if r != .chrome(profileDirectory: name, source: .chosenDirectory) { notHonoured.append("\(name) \(email.debugDescription) \(r)") }
+            case .ownProfile?:
+                // the first click saves the folder named from the first address; it never changes after that
+                let wanted = PixelSwitchChromeProfile.directoryName(forEmail: emails[0], accountID: key)
+                if r != .chrome(profileDirectory: wanted, source: .chosenOwn) { notHonoured.append("own \(email.debugDescription) \(r)") }
+            default:
+                break
+            }
         } }
     }
     check(routes == 4 * emails.count * locals.count && sentEmail.isEmpty,
           "chrome order: across \(routes) clicks with no stored signed-in-as choice, --profile-email is never chosen", sentEmail.joined(separator: " | "))
+    check(notHonoured.isEmpty, "chrome order: across the same clicks a stored own profile or folder is always the one opened, whatever Chrome's list shows",
+          notHonoured.joined(separator: " | "))
     check(S.set(.chromeProfileSignedInAs, forAccountID: "only", defaults: defaults)
           && C.route(accountID: "only", email: "beta@example.org", localState: nil, chromeInstalled: true, defaults: defaults) == .chromeSignedInAs(email: "beta@example.org"),
           "chrome order: the one stored choice that asks for it does send it")
@@ -776,6 +808,8 @@ private func chromeSource(_ name: String) -> String {
     check(page.contains("ChromeLocalState.readFailure(from: error)") && page.contains("localStateFailure: read.failure")
           && page.contains("case .ownedProfileListUnreadable(.accessDenied):") && page.contains("macOS did not let PixelSwitch read Chrome's profile list"),
           "chrome pins: a read macOS refused is logged as that, not as no profile being signed in")
+    check(page.contains("ChromeProfileChoiceStore.saved(forAccountID: accountID) == nil ? readLocalState() : (data: nil, failure: nil)"),
+          "chrome pins: an account with a stored choice never has Chrome's profile list read at all")
     check(page.components(separatedBy: "try? Data(contentsOf").count == 1,
           "chrome pins: the read is never a try? that hides why it failed")
 

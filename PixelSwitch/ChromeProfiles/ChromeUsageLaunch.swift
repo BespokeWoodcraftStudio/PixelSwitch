@@ -37,6 +37,9 @@ enum ChromeUsageLaunch {
         case ownedProfileListUnreadable(ChromeLocalState.ReadFailure)
         /// The folder the account's stored choice names (`ChromeProfileChoice.directory`).
         case chosenDirectory
+        /// PixelSwitch's own folder because the account's stored choice is its own profile
+        /// (kept on purpose, so Chrome's profile list is not even looked at).
+        case chosenOwn
     }
 
     enum Route: Equatable {
@@ -75,14 +78,14 @@ enum ChromeUsageLaunch {
 
     /// Where to open the account's page, in this order. With Chrome missing nothing is read
     /// or saved. Otherwise:
-    /// 1. A profile Chrome's own list (`localState`) shows signed in to the address wins,
-    ///    always, even over a stored choice or a saved PixelSwitch folder (neither is even
-    ///    looked at, and both are left as they are). Only possible when the list could be read.
-    /// 2. The account's stored choice (`ChromeProfileChoiceStore`): a named folder, or the
-    ///    profile signed in as the address (only with a usable address, else it falls
-    ///    through to 3).
-    /// 3. The account's own PixelSwitch folder (made and saved on first use), which is also
-    ///    what an account with no stored choice gets.
+    /// 1. The account's stored choice (`ChromeProfileChoiceStore`), when it has one, wins over
+    ///    everything: its own PixelSwitch folder, a named folder, or the profile signed in as
+    ///    the address (that one only with a usable address, else it counts as no choice).
+    ///    Chrome's profile list is not looked at for an account that has a choice.
+    /// 2. A profile Chrome's own list (`localState`) shows signed in to the address, which
+    ///    is only possible when the list could be read. It wins over a PixelSwitch folder
+    ///    that was merely saved earlier (the saved folder is left as it is).
+    /// 3. The account's own PixelSwitch folder (made and saved on first use).
     /// `--profile-email` is therefore sent only for the one stored choice that asks for it.
     /// `localStateFailure` is why `localState` is nil when the read failed (nil when it did
     /// not fail): it only changes which `Source` the own folder reports, never the folder.
@@ -90,11 +93,7 @@ enum ChromeUsageLaunch {
                       localStateFailure: ChromeLocalState.ReadFailure? = nil,
                       defaults: UserDefaults = .standard) -> Route {
         guard chromeInstalled else { return .defaultBrowser }
-        let profiles = ChromeLocalState.parseProfiles(localState)
-        if let directory = ChromeProfileMatcher.directory(forEmail: email, in: profiles) {
-            return .chrome(profileDirectory: directory, source: .matched)
-        }
-        switch ChromeProfileChoiceStore.choice(forAccountID: accountID, defaults: defaults) {
+        switch ChromeProfileChoiceStore.saved(forAccountID: accountID, defaults: defaults) {
         case .directory(let name):
             return .chrome(profileDirectory: name, source: .chosenDirectory)
         case .chromeProfileSignedInAs:
@@ -102,7 +101,14 @@ enum ChromeUsageLaunch {
                 return .chromeSignedInAs(email: email.trimmingCharacters(in: .whitespacesAndNewlines))
             }
         case .ownProfile:
+            let owned = PixelSwitchChromeProfile.directory(forAccountID: accountID, email: email, defaults: defaults)
+            return .chrome(profileDirectory: owned, source: .chosenOwn)
+        case nil:
             break
+        }
+        let profiles = ChromeLocalState.parseProfiles(localState)
+        if let directory = ChromeProfileMatcher.directory(forEmail: email, in: profiles) {
+            return .chrome(profileDirectory: directory, source: .matched)
         }
         let owned = PixelSwitchChromeProfile.directory(forAccountID: accountID, email: email, defaults: defaults)
         if localState == nil, let failure = localStateFailure, failure != .notFound {
