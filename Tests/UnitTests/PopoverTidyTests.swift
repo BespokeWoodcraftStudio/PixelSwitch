@@ -138,8 +138,13 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     // Bigger and easier to hit: a 15 pt symbol in a 28 pt square, the whole square clickable, a hover state, the muted tone.
     check(look.contains(".font(.system(size: 15))") && look.contains(".frame(width: 28, height: 28)") && look.contains(".contentShape(Rectangle())"),
           "footer pins: each icon is a 15 pt symbol in a 28 x 28 pt target the whole of which is clickable")
-    check(look.contains("Color.textSecondary") && look.contains("hovering && !isDisabled") && button.contains(".onHover") && button.contains(".disabled(isDisabled)"),
+    check(look.contains("Color.textSecondary") && look.contains("hovering && !isDisabled") && button.contains(".disabled(isDisabled)"),
           "footer pins: each icon is in the muted text tone, lights up under the pointer and can be disabled")
+    // The highlight comes from the label's always-active tracking area, like the Settings row's icons: no SwiftUI hover is left in the footer file.
+    check(!file.contains(".onHover") && !file.contains(".onContinuousHover")
+          && button.contains("dismissTrigger: presses, alwaysShown: labelShown, onHover: { if hovering != $0 { hovering = $0 } })")
+          && button.contains("FooterIconLabel(symbol: symbol, hovering: hovering || labelShown, isDisabled: isDisabled)"),
+          "footer pins: a footer icon's highlight follows the hover label's tracking area (the pointer in any window state), with no SwiftUI onHover left in PopoverFooter.swift")
     check(!footer.contains(" Button {") && !footer.contains(" Button("),
           "footer pins: the footer draws no buttons of its own, only FooterIconButton")
 

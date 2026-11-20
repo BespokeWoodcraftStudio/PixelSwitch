@@ -129,7 +129,9 @@ struct FooterIconLabel: View {
 /// accessibility tools, and a spoken label for VoiceOver. With `disabledHelp` set the icon is off,
 /// dimmed, and the label says why instead. The label and the tooltip are on a wrapper around the
 /// button, not the button: a disabled control gets no pointer events, and the reason it is off is
-/// the very thing the label has to show.
+/// the very thing the label has to show. The icon's hover highlight comes from the label's own
+/// always-active tracking area (`hoverLabel(... onHover:)`), not SwiftUI's hover, which reports only in
+/// the key window of the active app, and a popover is often neither.
 struct FooterIconButton: View {
     let symbol: String
     /// The label and the tooltip: what the icon is for.
@@ -161,13 +163,12 @@ struct FooterIconButton: View {
             .buttonStyle(.plain)
             .focusable(false)
             .disabled(isDisabled)
-            .onHover { hovering = $0 }
             .accessibilityLabel(label)
         }
         .contentShape(Rectangle())
         .help(disabledHelp ?? help)
         .hoverLabel(disabledHelp ?? help, anchor: anchor, maxWidth: 230, gap: -2,
-                    dismissTrigger: presses, alwaysShown: labelShown)
+                    dismissTrigger: presses, alwaysShown: labelShown, onHover: { if hovering != $0 { hovering = $0 } })
     }
 }
 

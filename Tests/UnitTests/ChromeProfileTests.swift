@@ -20,6 +20,7 @@ import Foundation
     chromeLocalStateTests()
     chromeProfileMatcherTests()
     chromeOwnedProfileTests()
+    chromeOwnedDirectoryRobustnessTests()
     chromeLaunchTests()
     chromeRealShapeTests()
     chromeReadFailureTests()
@@ -546,35 +547,33 @@ private extension Data {
     defer { defaults.removePersistentDomain(forName: suite) }
     let a = "AAAAAAAA-1111-4111-8111-AAAAAAAAAAAA", b = "BBBBBBBB-2222-4222-8222-BBBBBBBBBBBB"
     check(S.defaultsKey == "ai.pixelventures.pixelswitch.chromeProfiles.choices", "chrome choice: the key is PixelSwitch-namespaced and fixed", S.defaultsKey)
-    check(S.saved(forAccountID: a, defaults: defaults) == nil && S.choice(forAccountID: a, defaults: defaults) == .ownProfile,
-          "chrome choice: an account with nothing kept has no saved choice and uses its own profile")
-    check(S.set(.chromeProfileSignedInAs, forAccountID: a, defaults: defaults) && S.choice(forAccountID: a, defaults: defaults) == .chromeProfileSignedInAs
-          && S.saved(forAccountID: a, defaults: defaults) == .chromeProfileSignedInAs,
+    check(S.saved(forAccountID: a, defaults: defaults) == nil,
+          "chrome choice: an account with nothing kept has no saved choice (the menu calls that Automatic)")
+    check(S.set(.chromeProfileSignedInAs, forAccountID: a, defaults: defaults) && S.saved(forAccountID: a, defaults: defaults) == .chromeProfileSignedInAs,
           "chrome choice: a kept choice is read back")
-    check(S.choice(forAccountID: a.lowercased(), defaults: defaults) == .chromeProfileSignedInAs && S.choice(forAccountID: " \(a)\n", defaults: defaults) == .chromeProfileSignedInAs,
+    check(S.saved(forAccountID: a.lowercased(), defaults: defaults) == .chromeProfileSignedInAs && S.saved(forAccountID: " \(a)\n", defaults: defaults) == .chromeProfileSignedInAs,
           "chrome choice: any spelling of the account id finds it")
-    check(S.choice(forAccountID: b, defaults: defaults) == .ownProfile, "chrome choice: another account is not affected")
-    check(S.set(.directory("Profile 1"), forAccountID: b, defaults: defaults) && S.choice(forAccountID: b, defaults: defaults) == .directory("Profile 1")
-          && S.choice(forAccountID: a, defaults: defaults) == .chromeProfileSignedInAs,
+    check(S.saved(forAccountID: b, defaults: defaults) == nil, "chrome choice: another account is not affected")
+    check(S.set(.directory("Profile 1"), forAccountID: b, defaults: defaults) && S.saved(forAccountID: b, defaults: defaults) == .directory("Profile 1")
+          && S.saved(forAccountID: a, defaults: defaults) == .chromeProfileSignedInAs,
           "chrome choice: two accounts keep two choices")
     let raw = defaults.dictionary(forKey: S.defaultsKey) as? [String: String] ?? [:]
     check(raw == [a.lowercased(): "signedInAs", b.lowercased(): "directory:Profile 1"],
           "chrome choice: what is kept is the lower case account id to the text, exactly", "\(raw)")
     if let relaunched = UserDefaults(suiteName: suite) {
-        check(S.choice(forAccountID: a, defaults: relaunched) == .chromeProfileSignedInAs && S.choice(forAccountID: b, defaults: relaunched) == .directory("Profile 1"),
+        check(S.saved(forAccountID: a, defaults: relaunched) == .chromeProfileSignedInAs && S.saved(forAccountID: b, defaults: relaunched) == .directory("Profile 1"),
               "chrome choice: both survive a relaunch (read back from saved defaults)")
     } else {
         check(false, "chrome choice: reopen the suite")
     }
-    check(!S.set(.directory("../evil"), forAccountID: b, defaults: defaults) && S.choice(forAccountID: b, defaults: defaults) == .directory("Profile 1")
+    check(!S.set(.directory("../evil"), forAccountID: b, defaults: defaults) && S.saved(forAccountID: b, defaults: defaults) == .directory("Profile 1")
           && !S.set(.directory(""), forAccountID: b, defaults: defaults) && !S.set(.directory("-x"), forAccountID: b, defaults: defaults),
           "chrome choice: an invalid folder name is refused and the kept choice is left alone")
     check(S.set(.ownProfile, forAccountID: a, defaults: defaults) && S.saved(forAccountID: a, defaults: defaults) == .ownProfile
-          && S.choice(forAccountID: a, defaults: defaults) == .ownProfile
           && (defaults.dictionary(forKey: S.defaultsKey) as? [String: String] ?? [:]) == [a.lowercased(): "own", b.lowercased(): "directory:Profile 1"],
           "chrome choice: choosing the own profile is a kept choice (own), not the same as having none")
     S.clear(forAccountID: a, defaults: defaults)
-    check(S.saved(forAccountID: a, defaults: defaults) == nil && S.choice(forAccountID: a, defaults: defaults) == .ownProfile
+    check(S.saved(forAccountID: a, defaults: defaults) == nil
           && (defaults.dictionary(forKey: S.defaultsKey) as? [String: String] ?? [:]) == [b.lowercased(): "directory:Profile 1"],
           "chrome choice: clearing an account's choice leaves it with none, and the other account alone")
     S.clear(forAccountID: b, defaults: defaults)
@@ -582,13 +581,12 @@ private extension Data {
     check(defaults.object(forKey: S.defaultsKey) == nil, "chrome choice: with no entries left the key is gone, and clearing an account with none is harmless")
     // A shell can write the documented form; a damaged value or a wrong type counts as no choice.
     defaults.set([a.lowercased(): "directory:Profile 2", b.lowercased(): "nonsense"], forKey: S.defaultsKey)
-    check(S.choice(forAccountID: a, defaults: defaults) == .directory("Profile 2") && S.saved(forAccountID: b, defaults: defaults) == nil
-          && S.choice(forAccountID: b, defaults: defaults) == .ownProfile,
+    check(S.saved(forAccountID: a, defaults: defaults) == .directory("Profile 2") && S.saved(forAccountID: b, defaults: defaults) == nil,
           "chrome choice: a value written from a shell is read, and a damaged one is ignored")
     defaults.set("not a dictionary", forKey: S.defaultsKey)
-    check(S.saved(forAccountID: a, defaults: defaults) == nil && S.choice(forAccountID: a, defaults: defaults) == .ownProfile,
+    check(S.saved(forAccountID: a, defaults: defaults) == nil,
           "chrome choice: a value of the wrong type is no choice")
-    check(S.set(.directory("Default"), forAccountID: a, defaults: defaults) && S.choice(forAccountID: a, defaults: defaults) == .directory("Default"),
+    check(S.set(.directory("Default"), forAccountID: a, defaults: defaults) && S.saved(forAccountID: a, defaults: defaults) == .directory("Default"),
           "chrome choice: a wrong-typed value is replaced by the next kept choice")
 
     // One bad entry never hides or overwrites the other accounts' choices (the dictionary is read as [String: Any], String values kept).
@@ -769,6 +767,36 @@ private extension Data {
           "chrome order: the one stored choice that asks for it does send it")
 }
 
+@MainActor private func chromeOwnedDirectoryRobustnessTests() {
+    typealias P = PixelSwitchChromeProfile
+    let suite = "ai.pixelventures.pixelswitch.tests.chromeowned.\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suite) else { check(false, "chrome owned: a throwaway defaults suite could not be made"); return }
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let a = "AAAAAAAA-1111-4111-8111-AAAAAAAAAAAA", b = "BBBBBBBB-2222-4222-8222-BBBBBBBBBBBB", c = "CCCCCCCC-3333-4333-8333-CCCCCCCCCCCC"
+    // One entry of another type never hides the other accounts' saved folders.
+    defaults.set([a.lowercased(): "PixelSwitch a@example.com", b.lowercased(): 42, c.lowercased(): ["nested": "x"]] as [String: Any], forKey: P.defaultsKey)
+    check(P.savedDirectory(forAccountID: a, defaults: defaults) == "PixelSwitch a@example.com"
+          && P.savedDirectory(forAccountID: b, defaults: defaults) == nil && P.savedDirectory(forAccountID: c, defaults: defaults) == nil,
+          "chrome owned: with a number and a dictionary among the entries, the String entries are still read and the bad ones count as no folder")
+    check(P.storedDirectories(defaults: defaults) == [a.lowercased(): "PixelSwitch a@example.com"],
+          "chrome owned: the folders read are exactly the String entries")
+    // Making a folder for another account next to the bad entries keeps the saved one (its profile holds a sign-in) and drops only the bad ones.
+    let made = P.directory(forAccountID: b, email: "b@example.com", defaults: defaults)
+    check(made == "PixelSwitch b@example.com" && P.savedDirectory(forAccountID: a, defaults: defaults) == "PixelSwitch a@example.com"
+          && P.savedDirectory(forAccountID: b, defaults: defaults) == "PixelSwitch b@example.com"
+          && (defaults.dictionary(forKey: P.defaultsKey) as? [String: String]) == [a.lowercased(): "PixelSwitch a@example.com", b.lowercased(): "PixelSwitch b@example.com"],
+          "chrome owned: making a folder next to a bad entry never drops another account's saved folder, and the bad entries go", "\(made)")
+    // A saved folder is returned as it was and never remade.
+    check(P.directory(forAccountID: a, email: "other@example.com", defaults: defaults) == "PixelSwitch a@example.com",
+          "chrome owned: an account's saved folder never changes, even with a different address")
+    // A value that is not a usable PixelSwitch folder name is still no folder; a value of the wrong type for the whole key is replaced.
+    defaults.set([a.lowercased(): "Profile 1"], forKey: P.defaultsKey)
+    check(P.savedDirectory(forAccountID: a, defaults: defaults) == nil, "chrome owned: a saved name that is not a PixelSwitch folder is no folder")
+    defaults.set("not a dictionary", forKey: P.defaultsKey)
+    check(P.savedDirectory(forAccountID: a, defaults: defaults) == nil && P.directory(forAccountID: a, email: "a@example.com", defaults: defaults) == "PixelSwitch a@example.com",
+          "chrome owned: a value of the wrong type is no folder and is replaced by the next one made")
+}
+
 // MARK: - The data the 2.2 window left behind
 
 @MainActor private func chromeLegacyCleanupTests() {
@@ -896,6 +924,9 @@ private func chromeSource(_ name: String) -> String {
     check(doc.contains("defaults write ai.pixelventures.pixelswitch ai.pixelventures.pixelswitch.chromeProfiles.choices")
           && doc.contains("-dict-add <account-id-lower-case> 'directory:Profile 1'"),
           "chrome pins: the store documents the exact defaults write form")
+    check(doc.contains("storedDirectories(defaults: defaults)[normalizedAccountID(accountID)]") && doc.contains("var all = storedDirectories(defaults: defaults)")
+          && !doc.contains("as? [String: String]") && !doc.contains("static func choice(forAccountID"),
+          "chrome pins: both dictionaries (the choices and the saved PixelSwitch folders) are read as String values only, and the unused choice(forAccountID:) is gone")
     check(doc.contains("The account-id keys must be lower case") && doc.contains("an upper case key is never found"),
           "chrome pins: the documented defaults form says the account-id keys are lower case")
 

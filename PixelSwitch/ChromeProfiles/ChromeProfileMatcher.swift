@@ -95,11 +95,22 @@ enum PixelSwitchChromeProfile {
         accountID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
+    /// Every saved folder name by account id, from the dictionary read as `[String: Any]` with only its
+    /// String values kept. An entry of another type is skipped by itself, so it can never hide the other
+    /// accounts' folders, and it is never the reason they are lost on the next write: the profile Chrome
+    /// keeps under each folder holds that account's claude.ai sign-in.
+    static func storedDirectories(defaults: UserDefaults = .standard) -> [String: String] {
+        var folders: [String: String] = [:]
+        for (key, value) in defaults.dictionary(forKey: defaultsKey) ?? [:] {
+            if let folder = value as? String { folders[key] = folder }
+        }
+        return folders
+    }
+
     /// The saved folder for this account, or nil when it has none yet. A saved value
     /// that is not a usable folder name counts as none.
     static func savedDirectory(forAccountID accountID: String, defaults: UserDefaults = .standard) -> String? {
-        let saved = defaults.dictionary(forKey: defaultsKey) as? [String: String]
-        guard let value = saved?[normalizedAccountID(accountID)], value.hasPrefix(prefix),
+        guard let value = storedDirectories(defaults: defaults)[normalizedAccountID(accountID)], value.hasPrefix(prefix),
               ChromeLocalState.isUsableDirectory(value) else { return nil }
         return value
     }
@@ -111,7 +122,7 @@ enum PixelSwitchChromeProfile {
     static func directory(forAccountID accountID: String, email: String, defaults: UserDefaults = .standard) -> String {
         if let saved = savedDirectory(forAccountID: accountID, defaults: defaults) { return saved }
         let made = directoryName(forEmail: email, accountID: accountID)
-        var all = defaults.dictionary(forKey: defaultsKey) as? [String: String] ?? [:]
+        var all = storedDirectories(defaults: defaults)
         all[normalizedAccountID(accountID)] = made
         defaults.set(all, forKey: defaultsKey)
         return made
@@ -217,12 +228,6 @@ enum ChromeProfileChoiceStore {
             if let text = value as? String { texts[key] = text }
         }
         return texts
-    }
-
-    /// The account's choice as a menu shows it: the kept one, else its own PixelSwitch profile.
-    /// (Whether a choice was kept is `saved(forAccountID:)`, which the click uses.)
-    static func choice(forAccountID accountID: String, defaults: UserDefaults = .standard) -> ChromeProfileChoice {
-        saved(forAccountID: accountID, defaults: defaults) ?? .ownProfile
     }
 
     /// Keeps a choice for the account, `.ownProfile` included (an explicit own profile is a
