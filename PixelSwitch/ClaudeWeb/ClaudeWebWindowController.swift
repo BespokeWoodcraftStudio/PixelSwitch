@@ -28,6 +28,12 @@ final class ClaudeWebWindowController: NSObject, NSWindowDelegate, WKNavigationD
     private var checkTask: Task<Void, Never>?
     private var isSigningOut = false
     private var isClosed = false
+    /// False until the current web view has shown a page. A page that never loaded has nothing
+    /// to reload, so Reload then loads the usage page again.
+    private var hasCommittedPage = false
+    /// True after the one automatic reload that follows the page process ending; cleared when a
+    /// page finishes loading, so the next, separate crash gets its own reload.
+    private var reloadedAfterProcessEnded = false
 
     // Chrome
     private let contentContainer = NSView()
@@ -39,6 +45,7 @@ final class ClaudeWebWindowController: NSObject, NSWindowDelegate, WKNavigationD
     private let signOutButton = NSButton()
     private let signInBanner = ClaudeWebBannerView(style: .info, symbol: "person.crop.circle")
     private let mismatchBanner = ClaudeWebBannerView(style: .warning, symbol: "exclamationmark.triangle.fill")
+    private let loadFailureBanner = ClaudeWebBannerView(style: .warning, symbol: "wifi.exclamationmark")
     private let pasteBox = NSStackView()
     private let pasteField = NSTextField()
     private let pasteError = NSTextField(labelWithString: "")
@@ -157,8 +164,11 @@ final class ClaudeWebWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
         signInBanner.isHidden = true
         mismatchBanner.isHidden = true
+        loadFailureBanner.setText(String(localized: "Couldn't load claude.ai. Check your connection.", bundle: L10n.bundle))
+        loadFailureBanner.setAction(title: String(localized: "Reload", bundle: L10n.bundle), target: self, action: #selector(reloadFromBanner))
+        loadFailureBanner.isHidden = true
 
-        topStack.setViews([toolbar, signInBanner, mismatchBanner, pasteBox], in: .top)
+        topStack.setViews([toolbar, signInBanner, mismatchBanner, loadFailureBanner, pasteBox], in: .top)
         topStack.orientation = .vertical
         topStack.alignment = .leading
         topStack.spacing = 0
@@ -169,7 +179,7 @@ final class ClaudeWebWindowController: NSObject, NSWindowDelegate, WKNavigationD
             topStack.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
             topStack.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
         ])
-        for view in [toolbar, signInBanner, mismatchBanner, pasteBox] as [NSView] {
+        for view in [toolbar, signInBanner, mismatchBanner, loadFailureBanner, pasteBox] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             view.widthAnchor.constraint(equalTo: topStack.widthAnchor).isActive = true
         }
@@ -179,6 +189,9 @@ final class ClaudeWebWindowController: NSObject, NSWindowDelegate, WKNavigationD
     // MARK: The web view
 
     private func installWebView() {
+        hasCommittedPage = false
+        reloadedAfterProcessEnded = false
+        loadFailureBanner.isHidden = true
         let config = WKWebViewConfiguration()
         config.websiteDataStore = ClaudeWebSessionStore.dataStore(for: accountID)
         let view = WKWebView(frame: .zero, configuration: config)
@@ -298,8 +311,12 @@ final class ClaudeWebWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     func reload() {
         guard let view = webView else { return }
-        if view.url == nil { loadUsagePage() } else { view.reload() }
+        loadFailureBanner.isHidden = true
+        // WebKit's reload does nothing for a page that never loaded, so start the usage page over.
+        if view.url == nil || !hasCommittedPage { loadUsagePage() } else { view.reload() }
     }
+
+    @objc private func reloadFromBanner() { reload() }
 
     @objc private func openInBrowser() {
         guard let url = webView?.url, let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" else { return }
@@ -409,8 +426,47 @@ final class ClaudeWebWindowController: NSObject, NSWindowDelegate, WKNavigationD
         decisionHandler(applyPolicy(to: navigationAction, in: self))
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        hasCommittedPage = true
+        loadFailureBanner.isHidden = true
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        reloadedAfterProcessEnded = false
         pageChanged(rescan: true)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        loadFailed(error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        loadFailed(error)
+    }
+
+    /// The page process ended and the page is blank. Reload once; if it ends again before a page
+    /// has loaded, show the banner instead of looping.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        let tag = ClaudeWebSessionStore.shortID(accountID)
+        switch ClaudeWebLoadFailure.reaction(toProcessEnding: reloadedAfterProcessEnded) {
+        case .reload:
+            reloadedAfterProcessEnded = true
+            webLog.warning("[claudeWeb] account \(tag): the page's process ended; reloading once")
+            reload()
+        case .showBanner:
+            webLog.warning("[claudeWeb] account \(tag): the page's process ended again; showing the reload banner")
+            loadFailureBanner.isHidden = false
+        }
+    }
+
+    /// A load that did not finish. Loads stopped on purpose (a new load, a refused address) say
+    /// nothing; any other failure shows the banner. The log gets the error's domain and code only,
+    /// never an address, so no query string can reach it.
+    private func loadFailed(_ error: Error) {
+        let failure = error as NSError
+        guard ClaudeWebLoadFailure.shouldShowBanner(domain: failure.domain, code: failure.code) else { return }
+        webLog.warning("[claudeWeb] account \(ClaudeWebSessionStore.shortID(accountID)): a page did not load (\(failure.domain) \(failure.code))")
+        loadFailureBanner.isHidden = false
     }
 
     // MARK: WKUIDelegate
@@ -537,6 +593,7 @@ final class ClaudeWebBannerView: NSView {
 
     private let style: Style
     private let label = NSTextField(wrappingLabelWithString: "")
+    private let actionButton = NSButton()
 
     init(style: Style, symbol: String) {
         self.style = style
@@ -550,7 +607,11 @@ final class ClaudeWebBannerView: NSView {
         label.textColor = .labelColor
         label.maximumNumberOfLines = 3
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let row = NSStackView(views: [icon, label])
+        actionButton.bezelStyle = .texturedRounded
+        actionButton.setContentHuggingPriority(.required, for: .horizontal)
+        actionButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        actionButton.isHidden = true
+        let row = NSStackView(views: [icon, label, actionButton])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 8
@@ -571,6 +632,15 @@ final class ClaudeWebBannerView: NSView {
     func setText(_ text: String) {
         label.stringValue = text
         setAccessibilityLabel(text)
+    }
+
+    /// Adds a button at the end of the bar (Reload on the load-failure bar).
+    func setAction(title: String, target: AnyObject, action: Selector) {
+        actionButton.title = title
+        actionButton.target = target
+        actionButton.action = action
+        actionButton.setAccessibilityLabel(title)
+        actionButton.isHidden = false
     }
 
     override func viewDidChangeEffectiveAppearance() {

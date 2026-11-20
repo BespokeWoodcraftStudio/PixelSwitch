@@ -369,3 +369,6 @@
 /* 2.2: the Usage card footer's hover hint (also its tooltip) and its switch-in-progress text */
 "Double-click to switch" = "Double-click to switch";
 "Switching…" = "Switching…";
+
+/* 2.2: the claude.ai window's bar when a page does not load (its button is the existing Reload) */
+"Couldn't load claude.ai. Check your connection." = "Couldn't load claude.ai. Check your connection.";

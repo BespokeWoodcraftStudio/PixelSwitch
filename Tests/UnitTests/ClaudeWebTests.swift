@@ -16,6 +16,7 @@ import Foundation
     claudeWebPageKindAndLogTests()
     claudeWebAccountCheckTests()
     claudeWebRemovalTests()
+    claudeWebLoadFailureTests()
     claudeWebSourcePins()
     claudeWebRepoWidePins()
     claudeWebStringTests()
@@ -425,6 +426,79 @@ private func u(_ text: String) -> URL? { URL(string: text) }
     check(all.components(separatedBy: "WKWebsiteDataStore.remove(forIdentifier:").count == 2
           && all.components(separatedBy: "ClaudeWebSessionStore.removeSignIn(for:").count == 3,
           "claudeWeb removal pins: a data store is removed in one place, reached by exactly two callers (sign-out and account removal)")
+}
+
+// MARK: - A page that does not load
+
+@MainActor private func claudeWebLoadFailureTests() {
+    let url = NSURLErrorDomain
+    let web = ClaudeWebLoadFailure.webKitDomain
+    // Stopped on purpose: nothing to report.
+    check(!ClaudeWebLoadFailure.shouldShowBanner(domain: url, code: NSURLErrorCancelled),
+          "claudeWeb load failure: a cancelled load (a new load, Stop, a refused address) shows no banner")
+    check(!ClaudeWebLoadFailure.shouldShowBanner(domain: web, code: 102),
+          "claudeWeb load failure: WebKit's 'frame load interrupted' (a policy decision stopped it) shows no banner")
+    // Everything that leaves a page blank or broken does.
+    let real: [(String, Int, String)] = [
+        (url, NSURLErrorNotConnectedToInternet, "offline"), (url, NSURLErrorTimedOut, "timed out"),
+        (url, NSURLErrorCannotFindHost, "cannot find host"), (url, NSURLErrorCannotConnectToHost, "cannot connect"),
+        (url, NSURLErrorNetworkConnectionLost, "connection lost"), (url, NSURLErrorDNSLookupFailed, "DNS"),
+        (url, NSURLErrorSecureConnectionFailed, "TLS failed"), (url, NSURLErrorServerCertificateUntrusted, "bad certificate"),
+        (url, NSURLErrorInternationalRoamingOff, "roaming off"), (web, 100, "cannot show this type"), (web, 101, "cannot show this address"),
+    ]
+    let silent = real.filter { !ClaudeWebLoadFailure.shouldShowBanner(domain: $0.0, code: $0.1) }.map(\.2)
+    check(silent.isEmpty, "claudeWeb load failure: offline, timeout, host, TLS and other real failures all show the banner", silent.joined(separator: ", "))
+    check(ClaudeWebLoadFailure.shouldShowBanner(domain: "SomeOtherDomain", code: NSURLErrorCancelled)
+          && ClaudeWebLoadFailure.shouldShowBanner(domain: url, code: 102),
+          "claudeWeb load failure: only the cancel code of the URL domain and 102 of WebKit's domain are ignored, not the same numbers elsewhere")
+
+    // The page's process ends: reload once, then stop and say so.
+    check(ClaudeWebLoadFailure.reaction(toProcessEnding: false) == .reload && ClaudeWebLoadFailure.reaction(toProcessEnding: true) == .showBanner,
+          "claudeWeb load failure: the first end of the page process reloads, the next one without a page in between shows the banner")
+    var reloaded = false
+    var reactions: [ClaudeWebLoadFailure.ProcessEndedReaction] = []
+    for event in ["ended", "ended", "finished", "ended", "ended"] {
+        if event == "finished" { reloaded = false; continue }
+        let reaction = ClaudeWebLoadFailure.reaction(toProcessEnding: reloaded)
+        if reaction == .reload { reloaded = true }
+        reactions.append(reaction)
+    }
+    check(reactions == [.reload, .showBanner, .reload, .showBanner], "claudeWeb load failure: a page that finishes loading earns the next crash its own reload", "\(reactions)")
+
+    // Wiring a view cannot compile here.
+    let controller = claudeWebSources().first { $0.name == "ClaudeWebWindowController.swift" }?.text ?? ""
+    let all = claudeWebSources().map(\.text).joined(separator: "\n")
+    check(controller.contains("didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error")
+          && controller.contains("didFail navigation: WKNavigation!, withError error: Error")
+          && controller.contains("func webViewWebContentProcessDidTerminate(_ webView: WKWebView)"),
+          "claudeWeb load failure pins: the window answers a load that failed before and after it began, and the page process ending")
+    let failed = String((controller.range(of: "private func loadFailed(_ error: Error) {").map { controller[$0.lowerBound...] } ?? "").prefix(600))
+    let failedBody = failed.components(separatedBy: "\n    }\n").first ?? failed
+    check(failedBody.contains("guard ClaudeWebLoadFailure.shouldShowBanner(domain: failure.domain, code: failure.code) else { return }")
+          && failedBody.contains("loadFailureBanner.isHidden = false"),
+          "claudeWeb load failure pins: the banner shows only for a failure that is not a deliberate stop")
+    check(failedBody.contains("(\\(failure.domain) \\(failure.code))")
+          && !failedBody.contains("userInfo") && !failedBody.contains("localizedDescription") && !failedBody.contains("\\(error)") && !failedBody.contains("absoluteString"),
+          "claudeWeb load failure pins: the log line for a failed load carries the error's domain and code only, never an address or the error's own text")
+    check(!all.contains("NSURLErrorFailingURL") && !all.contains("NSErrorFailingURL"),
+          "claudeWeb load failure pins: nothing reads the failing address out of an error (it can carry a query string)")
+    check(controller.contains("ClaudeWebLoadFailure.reaction(toProcessEnding: reloadedAfterProcessEnded)")
+          && controller.contains("reloadedAfterProcessEnded = true")
+          && controller.contains("didFinish navigation: WKNavigation!) {\n        reloadedAfterProcessEnded = false")
+          && controller.contains("private func installWebView() {\n        hasCommittedPage = false\n        reloadedAfterProcessEnded = false"),
+          "claudeWeb load failure pins: one automatic reload per crash, cleared when a page finishes and when the web view is rebuilt")
+    check(controller.contains("loadFailureBanner.setText(String(localized: \"Couldn't load claude.ai. Check your connection.\", bundle: L10n.bundle))")
+          && controller.contains("loadFailureBanner.setAction(title: String(localized: \"Reload\", bundle: L10n.bundle), target: self, action: #selector(reloadFromBanner))")
+          && controller.contains("topStack.setViews([toolbar, signInBanner, mismatchBanner, loadFailureBanner, pasteBox], in: .top)"),
+          "claudeWeb load failure pins: the bar sits with the other bars, says its line, and carries the existing Reload button")
+    check(controller.contains("if view.url == nil || !hasCommittedPage { loadUsagePage() } else { view.reload() }"),
+          "claudeWeb load failure pins: Reload on a page that never loaded starts the usage page over (WebKit's reload does nothing then)")
+    let languages = ["en", "de", "fr", "ja", "zh-Hans"]
+    let tables = languages.map { NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String] ?? [:] }
+    let line = "Couldn't load claude.ai. Check your connection."
+    check(tables[0][line] == line && tables.dropFirst().allSatisfy { ($0[line] ?? "").isEmpty == false && $0[line] != line && ($0[line] ?? "").contains("claude.ai") },
+          "claudeWeb load failure strings: the bar's line is in all five tables, translated, with claude.ai kept as it is")
+    check(tables.allSatisfy { !($0[line] ?? "").contains("\u{2014}") }, "claudeWeb load failure strings: no em dash in any language")
 }
 
 // MARK: - Source pins
