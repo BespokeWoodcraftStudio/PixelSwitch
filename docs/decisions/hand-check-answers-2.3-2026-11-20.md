@@ -37,7 +37,10 @@ PIXELSWITCH: HAND CHECKS FOR 2.3 (Nov 20, 2026)
 
 Earlier the same morning, after updating to 2.3 (verbatim): "i updated to the newer version and now its 100% broken, it does NOT show up in my menu bar anymore"
 
-## What we found and are doing (2.4)
+## What we found and did (all shipped in 2.4, released 2026-11-20)
+
+**Status: every item below is shipped in 2.4** (launch crash, Limit resets and the stored Chrome profile choice for checks 6 and 7, plain icons for check 5, app-drawn hover labels for check 3). Whether they work in his hands is asked on `docs/decisions/pixelswitch-hand-checks-2.4-2026-11-20.html`.
+
 
 - **Launch crash (his message above).** 2.3's one-time cleanup of the 2.2 window's data called WebKit's
   `WKWebsiteDataStore.remove(forIdentifier:)`, which crashed in WebKit on every launch (crash report

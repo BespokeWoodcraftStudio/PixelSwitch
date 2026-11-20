@@ -65,3 +65,4 @@ that file for the full entry. Start here to get up to speed on the project.
 
 ## 2026-11-20
 - [WL-2026-11-20-001](./2026-11-20.md) — 2.3: email once, Limit resets in the account's Chrome profile, Accounts tab moved into Settings, bigger footer icons; records and hand-check page for the release — _feature/partial_
+- [WL-2026-11-20-002](./2026-11-20.md) — 2.4: launch-crash fix, Limit resets per-account Chrome profile, five Settings icons, app-drawn hover labels; live launch test, records and hand-check page for the release — _fix/partial_
