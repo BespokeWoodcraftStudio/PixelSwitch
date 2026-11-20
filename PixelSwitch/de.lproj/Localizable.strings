@@ -337,3 +337,7 @@
 
 /* Ultra (Max 20x) has no 5-hour limit: what the Session column of its Settings row says */
 "No 5-hour limit" = "Kein 5-Stunden-Limit";
+
+/* 2.2: Re-sign on a Usage card whose sign-in has ended; the plan chip of an account with no active subscription */
+"Re-sign" = "Neu anmelden";
+"No plan" = "Kein Tarif";
