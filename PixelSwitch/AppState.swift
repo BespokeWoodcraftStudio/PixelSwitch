@@ -1713,7 +1713,7 @@ final class AppState: ObservableObject {
                 accountUsage[account.id] = nil
                 accountUsageErrors[account.id] = UsageErrorState(
                     isExpired: true, isRateLimited: false,
-                    message: String(localized: "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix.", bundle: L10n.bundle))
+                    message: String(localized: "Its saved login belonged to another account and was removed. Click Re-sign to fix.", bundle: L10n.bundle))
             }
         }
     }
@@ -2030,11 +2030,11 @@ final class AppState: ObservableObject {
         accountUsageSampledAt[account.id] = nil
         accountUsageErrors[account.id] = UsageErrorState(
             isExpired: true, isRateLimited: false,
-            message: message ?? String(localized: "Session expired. Re-authenticate (↻) to fix.", bundle: L10n.bundle))
+            message: message ?? String(localized: "Session expired. Click Re-sign to fix.", bundle: L10n.bundle))
     }
 
     private static var belongedToAnotherMessage: String {
-        String(localized: "Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix.", bundle: L10n.bundle)
+        String(localized: "Its saved login belonged to another account and was removed. Click Re-sign to fix.", bundle: L10n.bundle)
     }
 
     /// One usage reading for `account`. Asks the guard first; on "send nothing"

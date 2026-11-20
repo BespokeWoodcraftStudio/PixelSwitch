@@ -207,7 +207,7 @@ class GuardInTheCycleTests(unittest.TestCase):
         self.assertEqual(len(rig.api.calls_to("token")), 1)
         self.assertEqual(rig.api.calls_to("usage", b.access), [])
         self.assertTrue(app.guard.is_needs_reauth(b.id))
-        self.assertEqual(app.card_errors[b.id].message, "Session expired. Re-authenticate (↻) to fix.")
+        self.assertEqual(app.card_errors[b.id].message, "Session expired. Click Re-sign to fix.")
         self.assertTrue(app.card_errors[b.id].is_expired)
         self.assertFalse(app.is_switchable(app.account_by_id(b.id)))
         self.assertEqual(read_json(rig.paths.needs_reauth), [b.id], "ids only, never a token")

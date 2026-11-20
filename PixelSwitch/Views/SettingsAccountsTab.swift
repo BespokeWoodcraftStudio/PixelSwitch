@@ -12,6 +12,10 @@ import SwiftUI
 ///
 /// Add Current Account and Sign In New Account sit under the list
 /// (`SettingsSignInButtons`); both open the same sign-in window as the popover.
+///
+/// This tab is where accounts are managed. The popover has no Accounts tab (2.3): its
+/// footer adds an account, and everything else about one account is a row here:
+/// Switch, Re-sign, Edit label and Remove account, beside the priority and limits.
 struct SettingsAccountsTab: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage(EmailDisplay.key) private var maskEmails = false
@@ -22,6 +26,8 @@ struct SettingsAccountsTab: View {
     @AppStorage(AutoSwitchSettings.weeklyThresholdKey) private var weeklyDefault = 0.0
     @AppStorage(AutoSwitchSettings.enabledKey) private var autoSwitchEnabled = false
     @AppStorage(AutoSwitchSettings.strategyKey) private var strategyName = AutoSwitchStrategy.mostRoom.rawValue
+    /// The account the person asked to remove and has not yet confirmed.
+    @State private var pendingRemoval: Account?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -72,6 +78,24 @@ struct SettingsAccountsTab: View {
             SettingsSignInButtons()
         }
         .padding()
+        // Removing deletes the saved login, so it is asked first (the popover removed at once).
+        .confirmationDialog(
+            removalTitle,
+            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingRemoval
+        ) { account in
+            Button("Remove account", role: .destructive) { appState.removeAccount(account) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account.")
+        }
+    }
+
+    /// "Remove <label or address>?", in the language in use.
+    private var removalTitle: String {
+        let name = pendingRemoval.map(primaryLabel(for:)) ?? ""
+        return String(format: String(localized: "Remove %@?", bundle: L10n.bundle), name)
     }
 
     // MARK: - Row
@@ -91,14 +115,44 @@ struct SettingsAccountsTab: View {
             hasSessionLimit: account.hasSessionLimit,
             defaults: defaults,
             help: thresholdHelp(for: account),
+            customLabel: account.customLabel ?? "",
+            needsResign: signInEnded(account),
+            switchOffReason: switchOffReason(for: account),
+            actionsBusy: !SwitchAvailability.canResign(isSwitching: appState.switchingTo != nil, isLoggingIn: appState.isLoggingIn),
             onPriority: { appState.setPriority($0, for: account) },
             onSession: { choose($0, window: .session, for: account) },
-            onWeekly: { choose($0, window: .weekly, for: account) }
+            onWeekly: { choose($0, window: .weekly, for: account) },
+            onSwitch: { Task { await appState.switchTo(account) } },
+            onResign: { appState.reauthenticateAccount(account) },
+            onLabel: { appState.updateAccountLabel(account, label: $0) },
+            onRemove: { pendingRemoval = account }
         )
     }
 
+    // MARK: - Switch and Re-sign
+
+    /// The card says this account's sign-in has ended (not "no subscription", which
+    /// signing in again does not fix).
+    private func signInEnded(_ account: Account) -> Bool {
+        let state = appState.accountUsageErrors[account.id]
+        return state?.isExpired == true && state?.isNoSubscription != true
+    }
+
+    /// Why Switch is off for this account, in the language in use, or nil while it is on.
+    private func switchOffReason(for account: Account) -> String? {
+        switch SwitchAvailability.of(isActive: account.isActive,
+                                     signInEnded: signInEnded(account),
+                                     isSwitching: appState.switchingTo != nil,
+                                     isLoggingIn: appState.isLoggingIn) {
+        case .available: return nil
+        case .alreadyActive: return String(localized: "You're using this account now.", bundle: L10n.bundle)
+        case .needsSignIn: return String(localized: "Sign in to this account again before you switch to it.", bundle: L10n.bundle)
+        case .busy: return String(localized: "Wait for the current switch or sign-in to finish.", bundle: L10n.bundle)
+        }
+    }
+
     /// A custom label if one is set, otherwise the address (masked when the
-    /// user has asked for that), as on the popover's Accounts tab.
+    /// user has asked for that), as the popover's Accounts tab did.
     private func primaryLabel(for account: Account) -> String {
         if let label = account.customLabel, !label.isEmpty { return label }
         return account.displayEmail(obfuscated: maskEmails)

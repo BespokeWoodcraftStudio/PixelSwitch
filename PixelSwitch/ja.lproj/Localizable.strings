@@ -175,7 +175,7 @@
 /* Auto-switch & rate-limit resilience */
 "Waiting for usage data..." = "使用データを待っています...";
 "No active subscription on this account (OAuth not allowed)." = "このアカウントに有効なサブスクリプションがありません（OAuth は許可されていません）。";
-"Session expired. Re-authenticate (↻) to fix." = "セッションの期限が切れました。再認証（↻）で修復してください。";
+"Session expired. Click Re-sign to fix." = "セッションの期限が切れました。「再サインイン」をクリックして修復してください。";
 "Auto-switch" = "自動切り替え";
 "Switch account before hitting the limit" = "上限に達する前にアカウントを切り替える";
 "Switch at" = "切り替えしきい値";
@@ -187,7 +187,7 @@
 /* Login ownership (1.0.3) */
 "The login saved for %@ belongs to %@. Re-authenticate %@ to fix it." = "%1$@ に保存されたログインは %2$@ のものです。%3$@ を再認証して修正してください。";
 "The login saved for %@ is also saved under another account. Re-authenticate %@ to fix it." = "%1$@ に保存されたログインは別のアカウントにも保存されています。%2$@ を再認証して修正してください。";
-"Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "保存されたログインは別のアカウントのものだったため削除しました。再認証（↻）して修正してください。";
+"Its saved login belonged to another account and was removed. Click Re-sign to fix." = "保存されたログインは別のアカウントのものだったため削除しました。「再サインイン」をクリックして修正してください。";
 "The saved login for %@ has expired and could not be renewed. Re-authenticate %@ to fix it." = "%1$@ の保存されたログインは期限切れで、更新できませんでした。%2$@ を再認証して修正してください。";
 "The saved details for %@ belong to another account. Re-authenticate %@ to fix it." = "%1$@ に保存されたアカウント情報は別のアカウントのものです。%2$@ を再認証して修正してください。";
 
@@ -208,7 +208,7 @@
 "30 days" = "30 日";
 "%lld hours" = "%lld 時間";
 "Give each account its own color" = "アカウントごとに色を割り当てる";
-"Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "使用状況タブとアカウントタブで、各アカウントに色付きの縁とアイコンが付き、どのアカウントの数値か一目でわかります。オフにすると装飾なしのカードになります。";
+"Each account gets a colored edge and icon on the Usage tab, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "使用状況タブで、各アカウントに色付きの縁とアイコンが付き、どのアカウントの数値か一目でわかります。オフにすると装飾なしのカードになります。";
 "Also switch when Fable runs out" = "Fable を使い切ったときも切り替える";
 
 /* Auto-switch rules: Settings → General (1.2) */
@@ -370,3 +370,18 @@
 
 /* 2.2: the claude.ai window's bar when a page does not load (its button is the existing Reload) */
 "Couldn't load claude.ai. Check your connection." = "claude.ai を読み込めませんでした。接続を確認してください。";
+
+/* 2.3: popover footer tooltips, Settings account row actions and their Remove confirmation, the last-updated tooltip */
+"Add current account: save the one Claude Code is signed in to now" = "現在のアカウントを追加：Claude Code が今サインインしているアカウントを保存します";
+"Sign in a new account: open the sign-in window" = "新しいアカウントでサインイン：サインインウィンドウを開きます";
+"Switch to this account" = "このアカウントに切り替える";
+"Switch to %@" = "%@に切り替える";
+"You're using this account now." = "このアカウントは現在使用中です。";
+"Sign in to this account again before you switch to it." = "切り替える前に、このアカウントでもう一度サインインしてください。";
+"Wait for the current switch or sign-in to finish." = "進行中の切り替えまたはサインインが終わるまでお待ちください。";
+"Save label" = "ラベルを保存";
+"More actions" = "その他の操作";
+"More actions for %@" = "%@のその他の操作";
+"Remove %@?" = "%@を削除しますか？";
+"PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account." = "PixelSwitch はこのアカウントを忘れ、保存されたログインを削除します。使用中のアカウントの場合は、別のアカウントに切り替えます。";
+"Usage last refreshed at %@. It refreshes on its own." = "使用状況は %@ に更新されました。自動的に更新されます。";

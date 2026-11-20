@@ -38,7 +38,7 @@ def fixture_accounts(now: float | None = None) -> list[dict]:
         {"id": "33333333-3333-3333-3333-333333333333", "email": "ahmed@bespokewoodcraftstudio.com", "label": "Studio",
          "isActive": False, "isSwitchable": False, "position": 3, "manualOnly": True, "threshold": 0,
          "effectiveThreshold": 90, "effectiveSessionThreshold": 90, "effectiveWeeklyThreshold": 90,
-         "usage": {"error": "Session expired. Re-authenticate (↻) to fix."}},
+         "usage": {"error": "Session expired. Click Re-sign to fix."}},
     ]
 
 

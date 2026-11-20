@@ -49,7 +49,7 @@ TEXT_OVERFLOW = "When no account under its weekly limit can take you, the sessio
 TEXT_FABLE = "Fable uses the weekly limit."
 TEXT_NOWHERE_TO_GO = "Every account except the one you're using is Manual only, so auto-switch has nowhere to move you."
 TEXT_PRIORITY_HELP = "Auto-switch tries accounts with lower numbers first when it chooses by Priority. Accounts with no number come last."
-TEXT_RESIGN_MESSAGE = "Session expired. Re-authenticate (↻) to fix."
+TEXT_RESIGN_MESSAGE = "Session expired. Click Re-sign to fix."
 UPDATE_STALE_SECONDS = 90.0
 
 #: The usage-service sentences a Retry makes sense for (UsageRequestError.canRetry): the wire does not
@@ -164,7 +164,8 @@ def needs_resign(info: Mapping) -> bool:
     if not info.get("isSwitchable", True):
         return True
     message = (info.get("usage") or {}).get("error") or ""
-    return "Re-authenticate" in message or message.startswith("Session expired")
+    # The Mac card says "Click Re-sign to fix."; the daemon's own sentences say "Re-authenticate <address> to fix it."
+    return "Re-sign" in message or "Re-authenticate" in message or message.startswith("Session expired")
 
 
 def can_retry(info: Mapping) -> bool:

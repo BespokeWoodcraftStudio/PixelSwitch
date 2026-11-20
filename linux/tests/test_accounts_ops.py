@@ -278,7 +278,7 @@ class AuditTests(unittest.TestCase):
         self.assertIsNone(rig.backup_of(b), "B's wrong backup was deleted")
         self.assertIsNotNone(rig.backup_of(a))
         self.assertEqual(app.card_errors[b.id].message, "Its saved login belonged to another account and was removed. "
-                         "Re-authenticate (↻) to fix.")
+                         "Click Re-sign to fix.")
         self.assertTrue(app.card_errors[b.id].is_expired)
 
     def test_a_healthy_set_is_checked_once_per_launch_and_then_only_shared_grants(self):

@@ -6,6 +6,8 @@
 # because SwiftUI reads translations from the main bundle: without the wrapper
 # every language would draw as English. Nothing here touches a real login or a
 # real reading. Needs only the Swift compiler and a Mac with a window server.
+# (BrandColor.swift gives the row its colour tokens and the card colours AppStyle
+# needs; the old AssetColorStubs.swift clashed with it and is no longer compiled.)
 #
 #   bash Tools/screenshots/run_settings_renders.sh <output folder> [language ...]
 set -euo pipefail
@@ -27,7 +29,7 @@ swiftc -swift-version 6 -target arm64-apple-macos14.0 -parse-as-library \
   PixelSwitch/Models/Account.swift PixelSwitch/Models/AccountOrder.swift \
   PixelSwitch/Services/AutoSwitchEngine.swift PixelSwitch/Models/UsageData.swift \
   PixelSwitch/Models/String+Obfuscation.swift PixelSwitch/Services/L10n.swift \
-  Tools/screenshots/AssetColorStubs.swift Tools/screenshots/make_settings_renders.swift
+  PixelSwitch/Models/BrandColor.swift PixelSwitch/Models/AccountPlan.swift Tools/screenshots/make_settings_renders.swift
 for lproj in PixelSwitch/*.lproj; do cp -R "$lproj" "$APP/Contents/Resources/"; done
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

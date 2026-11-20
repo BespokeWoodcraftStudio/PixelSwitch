@@ -20,6 +20,7 @@ swiftc -swift-version 6 \
   PixelSwitch/Models/Account.swift \
   PixelSwitch/Models/AccountPlan.swift \
   PixelSwitch/Models/AccountOrder.swift \
+  PixelSwitch/Models/SwitchAvailability.swift \
   PixelSwitch/Models/String+Obfuscation.swift \
   PixelSwitch/Models/EmailDisplay.swift \
   PixelSwitch/Services/AutoSwitchEngine.swift \
@@ -70,6 +71,7 @@ swiftc -swift-version 6 \
   Shared/WidgetData.swift \
   Tests/UnitTests/AccountPlanTests.swift \
   Tests/UnitTests/AccountIdentityTests.swift \
+  Tests/UnitTests/PopoverTidyTests.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
 "$OUT/pixelswitch-unit-tests"

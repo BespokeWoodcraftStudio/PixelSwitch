@@ -1,7 +1,9 @@
-// Renders PixelSwitch 2.0's Settings pieces offscreen, with invented sample data:
+// Renders PixelSwitch's Settings pieces offscreen, with invented sample data:
 // the Accounts row (SettingsAccountRow: Priority, account, Session and Weekly
-// menus) for equal windows, the 90/50 split, a Manual only account and
-// priorities P1, P3 and none; and the General defaults (SettingsThresholdDefaults).
+// menus, and since 2.3 Switch, Re-sign and the More actions menu) for equal windows,
+// the 90/50 split, a Manual only account, priorities P1, P3 and none, the account in
+// use (Switch off), an account whose sign-in ended (Re-sign in the warning colour,
+// Switch off) and a busy app; and the General defaults (SettingsThresholdDefaults).
 //
 // These are the app's own views, drawn through an AppKit hosting view so the
 // menus and sliders are real controls, light and dark, at 2x. Nothing here
@@ -24,8 +26,14 @@ private let defaultsSplit = AutoSwitchEngine.WindowPair(session: 90, weekly: 50)
 /// One sample row, built from an Account the way Settings builds it.
 @MainActor
 private func row(_ account: Account, defaults: AutoSwitchEngine.WindowPair, reset: Text = Text(verbatim: "Weekly resets Mon 11:00 AM"),
-                 active: Bool = false, label: String? = nil, help: String = "") -> some View {
+                 active: Bool = false, label: String? = nil, help: String = "",
+                 signInEnded: Bool = false, busy: Bool = false) -> some View {
     let manual = AutoSwitchSettings.isManualOnly(own: account.switchThreshold)
+    // Switch is off for the account in use, for one whose sign-in ended, and while the app is busy:
+    // the reasons are the app's own sentences (SettingsAccountsTab.switchOffReason), here in English.
+    let off: String? = active ? "You're using this account now."
+        : (signInEnded ? "Sign in to this account again before you switch to it."
+           : (busy ? "Wait for the current switch or sign-in to finish." : nil))
     return SettingsAccountRow(
         title: label ?? account.email,
         subtitle: label == nil ? nil : account.email,
@@ -40,7 +48,12 @@ private func row(_ account: Account, defaults: AutoSwitchEngine.WindowPair, rese
         manualOnly: manual,
         defaults: defaults,
         help: Text(verbatim: help),
-        onPriority: { _ in }, onSession: { _ in }, onWeekly: { _ in })
+        customLabel: label ?? "",
+        needsResign: signInEnded,
+        switchOffReason: off,
+        actionsBusy: busy,
+        onPriority: { _ in }, onSession: { _ in }, onWeekly: { _ in },
+        onSwitch: {}, onResign: {}, onLabel: { _ in }, onRemove: {})
 }
 
 /// The inset list Settings puts the rows in, drawn plainly: alternating rows.
@@ -74,7 +87,8 @@ private func accountsSample() -> some View {
             row(split, defaults: defaultsEqual, reset: Text(verbatim: "Weekly resets in 2 days")),
             row(both70, defaults: defaultsEqual),
             row(manual, defaults: defaultsEqual, reset: Text("Weekly reset not known yet")),
-            row(none, defaults: defaultsEqual),
+            // Its sign-in ended: Re-sign takes the warning colour, Switch is off with its reason.
+            row(none, defaults: defaultsEqual, signInEnded: true),
             // The widest content a row can have: 100% in both windows (the longest label with its
             // stepper) and the highest priority.
             row(widest, defaults: defaultsEqual),

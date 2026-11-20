@@ -175,7 +175,7 @@
 /* Auto-switch & rate-limit resilience */
 "Waiting for usage data..." = "正在等待用量数据...";
 "No active subscription on this account (OAuth not allowed)." = "该账户没有有效订阅（不允许 OAuth）。";
-"Session expired. Re-authenticate (↻) to fix." = "会话已过期。请重新认证（↻）来修复。";
+"Session expired. Click Re-sign to fix." = "会话已过期。请点击“重新登录”来修复。";
 "Auto-switch" = "自动切换";
 "Switch account before hitting the limit" = "在达到限额前切换账户";
 "Switch at" = "切换阈值";
@@ -187,7 +187,7 @@
 /* Login ownership (1.0.3) */
 "The login saved for %@ belongs to %@. Re-authenticate %@ to fix it." = "为 %1$@ 保存的登录属于 %2$@。请重新验证 %3$@ 以修复。";
 "The login saved for %@ is also saved under another account. Re-authenticate %@ to fix it." = "为 %1$@ 保存的登录也保存在另一个账户下。请重新验证 %2$@ 以修复。";
-"Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "其保存的登录属于另一个账户，已被移除。请重新验证（↻）以修复。";
+"Its saved login belonged to another account and was removed. Click Re-sign to fix." = "其保存的登录属于另一个账户，已被移除。请点击“重新登录”以修复。";
 "The saved login for %@ has expired and could not be renewed. Re-authenticate %@ to fix it." = "为 %1$@ 保存的登录已过期且无法续期。请重新验证 %2$@ 以修复。";
 "The saved details for %@ belong to another account. Re-authenticate %@ to fix it." = "为 %1$@ 保存的账户信息属于另一个账户。请重新验证 %2$@ 以修复。";
 
@@ -208,7 +208,7 @@
 "30 days" = "30 天";
 "%lld hours" = "%lld 小时";
 "Give each account its own color" = "为每个账户分配专属颜色";
-"Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "在用量和账户标签页中，每个账户都有彩色边条和图标，便于分辨这是谁的数据。关闭后显示朴素卡片。";
+"Each account gets a colored edge and icon on the Usage tab, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "在用量标签页中，每个账户都有彩色边条和图标，便于分辨这是谁的数据。关闭后显示朴素卡片。";
 "Also switch when Fable runs out" = "Fable 用尽时也切换账户";
 
 /* Auto-switch rules: Settings → General (1.2) */
@@ -370,3 +370,18 @@
 
 /* 2.2: the claude.ai window's bar when a page does not load (its button is the existing Reload) */
 "Couldn't load claude.ai. Check your connection." = "无法加载 claude.ai。请检查网络连接。";
+
+/* 2.3: popover footer tooltips, Settings account row actions and their Remove confirmation, the last-updated tooltip */
+"Add current account: save the one Claude Code is signed in to now" = "添加当前账户：保存 Claude Code 当前登录的账户";
+"Sign in a new account: open the sign-in window" = "登录新账户：打开登录窗口";
+"Switch to this account" = "切换到此账户";
+"Switch to %@" = "切换到 %@";
+"You're using this account now." = "你正在使用此账户。";
+"Sign in to this account again before you switch to it." = "切换之前，请先重新登录此账户。";
+"Wait for the current switch or sign-in to finish." = "请等待当前的切换或登录完成。";
+"Save label" = "保存标签";
+"More actions" = "更多操作";
+"More actions for %@" = "%@的更多操作";
+"Remove %@?" = "移除 %@？";
+"PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account." = "PixelSwitch 会忘记此账户并删除其保存的登录。如果你正在使用它，PixelSwitch 会切换到另一个账户。";
+"Usage last refreshed at %@. It refreshes on its own." = "用量最近一次刷新于 %@。它会自动刷新。";

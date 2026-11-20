@@ -542,7 +542,7 @@ diagnoseTokenHealth()
     │  SwiftUI Views           │
     │  ├── MainMenuView        │
     │  ├── UsageDashboardView  │
-    │  ├── AccountSwitcherView │
+    │  ├── SettingsAccountsTab │
     │  └── SettingsView        │
     └──────────────────────────┘
 ```

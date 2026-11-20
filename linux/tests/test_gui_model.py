@@ -71,7 +71,7 @@ class AccountTextTests(unittest.TestCase):
         self.assertIn("isn't responding", model.message_of(self.b))
         self.assertTrue(model.can_retry(self.b))
         self.assertFalse(model.needs_resign(self.b))
-        self.assertEqual(model.message_of(self.c), "Session expired. Re-authenticate (↻) to fix.")
+        self.assertEqual(model.message_of(self.c), "Session expired. Click Re-sign to fix.")
         self.assertTrue(model.needs_resign(self.c))
         self.assertFalse(model.can_retry(self.c))
         self.assertIsNone(model.message_of(self.a))
@@ -114,7 +114,7 @@ class AccountTextTests(unittest.TestCase):
         self.assertEqual(model.dbusmenu_label("no underscore"), "no underscore")
 
     def test_short_message(self):
-        self.assertEqual(model.short_message("Session expired. Re-authenticate (↻) to fix."), "Session expired.")
+        self.assertEqual(model.short_message("Session expired. Click Re-sign to fix."), "Session expired.")
         long = model.short_message("Anthropic's usage service isn't responding at all right now, and has not for a while (HTTP 503). Your account is fine.")
         self.assertLessEqual(len(long), 60)
         self.assertTrue(long.endswith("…"))

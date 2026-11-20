@@ -98,9 +98,28 @@ struct SettingsAccountRow: View {
     /// What the account's setting does, in numbers.
     let help: Text
 
+    /// The account's own label, "" when it has none: where the inline editor starts.
+    var customLabel = ""
+    /// The account's sign-in has ended, so Re-sign is the fix: its icon takes the
+    /// warning colour instead of the quiet one.
+    var needsResign = false
+    /// nil while Switch is on; otherwise why it is off, which is also its tooltip.
+    var switchOffReason: String?
+    /// A switch or a sign-in is running: Re-sign waits too (the Usage card's rule).
+    var actionsBusy = false
+
     let onPriority: @MainActor (Int?) -> Void
     let onSession: @MainActor (ThresholdMenuChoice) -> Void
     let onWeekly: @MainActor (ThresholdMenuChoice) -> Void
+    /// The four things the popover's Accounts tab did and Settings did not.
+    /// Switch to this account.
+    let onSwitch: @MainActor () -> Void
+    /// Re-sign: the same sign-in the Usage card's Re-sign button starts.
+    let onResign: @MainActor () -> Void
+    /// Save a new label (the text as typed; the app trims it, and empty clears it).
+    let onLabel: @MainActor (String) -> Void
+    /// Ask to remove the account. The row only asks; the tab confirms and removes.
+    let onRemove: @MainActor () -> Void
 
     /// The priority a person is stepping to with the arrows, not yet saved. The
     /// list sorts by priority, so saving every click would move the row out
@@ -136,6 +155,16 @@ struct SettingsAccountRow: View {
         nonmutating set { hoverStorage.wrappedValue = newValue }
     }
 
+    /// The label editor: whether it is open, the text being typed, and its focus
+    /// (written out like `pendingStorage`, for the same reason).
+    private let editingStorage = State<Bool>(initialValue: false)
+    private let draftStorage = State<String>(initialValue: "")
+    private let focusStorage = FocusState<Bool>()
+    private var editing: Bool {
+        get { editingStorage.wrappedValue }
+        nonmutating set { editingStorage.wrappedValue = newValue }
+    }
+
     var body: some View {
         // Measured once per row from the language in use (see WindowColumnMetrics).
         let columnWidth = WindowColumnMetrics.width(bundle: L10n.bundle)
@@ -148,14 +177,18 @@ struct SettingsAccountRow: View {
                 .frame(width: 92, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(verbatim: title)
-                        .font(.body.weight(.medium))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if isActive {
-                        Badge(text: activeBadge, color: .green)
-                            .fixedSize()
+                if editing {
+                    labelEditor
+                } else {
+                    HStack(spacing: 6) {
+                        Text(verbatim: title)
+                            .font(.body.weight(.medium))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        if isActive {
+                            Badge(text: activeBadge, color: .green)
+                                .fixedSize()
+                        }
                     }
                 }
                 if let subtitle {
@@ -185,6 +218,8 @@ struct SettingsAccountRow: View {
             }
             windowControl(.weekly, own: weeklyOwn, caption: Text("Weekly"), spoken: Text("Weekly limit for \(title)"),
                           width: columnWidth, choose: onWeekly)
+
+            actions
         }
         .padding(.vertical, 4)
         // A step waits while the pointer is over the row, and is saved when it
@@ -204,6 +239,93 @@ struct SettingsAccountRow: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             commitPriority()
         }
+    }
+
+    // MARK: - Actions
+
+    /// Switch over two small icons, Re-sign and a "..." menu (Edit label, Remove account), in one
+    /// narrow column at the row's end. Stacked rather than side by side because the row has no
+    /// width to spare: Settings is 820 pt wide and the address must keep as much of it as it can.
+    /// Switch and Re-sign are one click; the two that change the account itself are one menu away.
+    private var actions: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Button { onSwitch() } label: { Text("Switch") }
+                .controlSize(.small)
+                .disabled(switchOffReason != nil)
+                // The reason it is off, else what it does.
+                .help(switchOffReason.map { Text(verbatim: $0) } ?? Text("Switch to this account"))
+                .accessibilityLabel(Text("Switch to \(title)"))
+                // Voice Control: "Click Switch" still works with the spoken label naming the account.
+                .accessibilityInputLabels([Text("Switch")])
+
+            HStack(spacing: 4) {
+                // The Usage card's Re-sign icon and tooltip, so it is the same button everywhere.
+                Button { onResign() } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(needsResign ? Color.limitWarn : Color.textSecondary)
+                        .frame(width: 24, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(actionsBusy)
+                .help(Text("Re-authenticate (fix stale token)"))
+                .accessibilityLabel(Text("Re-authenticate \(title)"))
+                .accessibilityInputLabels([Text("Re-sign")])
+
+                Menu {
+                    Button("Edit label") { beginEditing() }
+                    Divider()
+                    Button("Remove account", role: .destructive) { onRemove() }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(Color.textSecondary)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help(Text("More actions"))
+                .accessibilityLabel(Text("More actions for \(title)"))
+            }
+        }
+        .fixedSize()
+    }
+
+    // MARK: - Label editor
+
+    /// The popover's inline edit: a text field with Save and Cancel. Return saves.
+    private var labelEditor: some View {
+        HStack(spacing: 4) {
+            TextField("Custom label", text: draftStorage.projectedValue)
+                .textFieldStyle(.roundedBorder)
+                .focused(focusStorage.projectedValue)
+                .onSubmit { commitLabel() }
+                .onExitCommand { editing = false }
+                .onAppear { focusStorage.wrappedValue = true }
+
+            Button { commitLabel() } label: {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.costGreen)
+            }
+            .buttonStyle(.plain)
+            .help(Text("Save label"))
+            .accessibilityLabel(Text("Save label"))
+
+            Button { editing = false } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(Color.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .help(Text("Cancel"))
+            .accessibilityLabel(Text("Cancel"))
+        }
+    }
+
+    private func beginEditing() {
+        draftStorage.wrappedValue = customLabel
+        editing = true
+    }
+
+    private func commitLabel() {
+        onLabel(draftStorage.wrappedValue)
+        editing = false
     }
 
     // MARK: - Priority

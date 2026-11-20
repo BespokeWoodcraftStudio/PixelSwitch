@@ -175,7 +175,7 @@
 /* Auto-switch & rate-limit resilience */
 "Waiting for usage data..." = "En attente des données d'utilisation...";
 "No active subscription on this account (OAuth not allowed)." = "Aucun abonnement actif sur ce compte (OAuth non autorisé).";
-"Session expired. Re-authenticate (↻) to fix." = "Session expirée. Réauthentifiez-vous (↻) pour corriger.";
+"Session expired. Click Re-sign to fix." = "Session expirée. Cliquez sur « Se reconnecter » pour corriger.";
 "Auto-switch" = "Changement automatique";
 "Switch account before hitting the limit" = "Changer de compte avant d'atteindre la limite";
 "Switch at" = "Changer à";
@@ -187,7 +187,7 @@
 /* Login ownership (1.0.3) */
 "The login saved for %@ belongs to %@. Re-authenticate %@ to fix it." = "La connexion enregistrée pour %1$@ appartient à %2$@. Réauthentifiez %3$@ pour corriger cela.";
 "The login saved for %@ is also saved under another account. Re-authenticate %@ to fix it." = "La connexion enregistrée pour %1$@ est aussi enregistrée sous un autre compte. Réauthentifiez %2$@ pour corriger cela.";
-"Its saved login belonged to another account and was removed. Re-authenticate (↻) to fix." = "Sa connexion enregistrée appartenait à un autre compte et a été supprimée. Réauthentifiez (↻) pour corriger cela.";
+"Its saved login belonged to another account and was removed. Click Re-sign to fix." = "Sa connexion enregistrée appartenait à un autre compte et a été supprimée. Cliquez sur « Se reconnecter » pour corriger cela.";
 "The saved login for %@ has expired and could not be renewed. Re-authenticate %@ to fix it." = "La connexion enregistrée pour %1$@ a expiré et n’a pas pu être renouvelée. Réauthentifiez %2$@ pour corriger cela.";
 "The saved details for %@ belong to another account. Re-authenticate %@ to fix it." = "Les informations enregistrées pour %1$@ appartiennent à un autre compte. Réauthentifiez %2$@ pour corriger cela.";
 
@@ -208,7 +208,7 @@
 "30 days" = "30 jours";
 "%lld hours" = "%lld heures";
 "Give each account its own color" = "Donner à chaque compte sa propre couleur";
-"Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "Chaque compte reçoit un liseré et une icône colorés dans les onglets Utilisation et Comptes, pour savoir de quel compte viennent les chiffres. Désactivez pour des cartes neutres.";
+"Each account gets a colored edge and icon on the Usage tab, so you can tell whose numbers you are looking at. Turn it off for plain cards." = "Chaque compte reçoit un liseré et une icône colorés dans l'onglet Utilisation, pour savoir de quel compte viennent les chiffres. Désactivez pour des cartes neutres.";
 "Also switch when Fable runs out" = "Basculer aussi quand Fable est épuisé";
 
 /* Auto-switch rules: Settings → General (1.2) */
@@ -370,3 +370,18 @@
 
 /* 2.2: the claude.ai window's bar when a page does not load (its button is the existing Reload) */
 "Couldn't load claude.ai. Check your connection." = "Impossible de charger claude.ai. Vérifiez votre connexion.";
+
+/* 2.3: popover footer tooltips, Settings account row actions and their Remove confirmation, the last-updated tooltip */
+"Add current account: save the one Claude Code is signed in to now" = "Ajouter le compte actuel : enregistrer celui auquel Claude Code est connecté en ce moment";
+"Sign in a new account: open the sign-in window" = "Connecter un nouveau compte : ouvrir la fenêtre de connexion";
+"Switch to this account" = "Basculer vers ce compte";
+"Switch to %@" = "Basculer vers %@";
+"You're using this account now." = "Vous utilisez ce compte en ce moment.";
+"Sign in to this account again before you switch to it." = "Reconnectez-vous à ce compte avant de basculer vers lui.";
+"Wait for the current switch or sign-in to finish." = "Attendez la fin du changement de compte ou de la connexion en cours.";
+"Save label" = "Enregistrer le libellé";
+"More actions" = "Autres actions";
+"More actions for %@" = "Autres actions pour %@";
+"Remove %@?" = "Supprimer %@ ?";
+"PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account." = "PixelSwitch oublie ce compte et supprime sa connexion enregistrée. Si vous l'utilisez en ce moment, PixelSwitch vous bascule vers un autre compte.";
+"Usage last refreshed at %@. It refreshes on its own." = "Utilisation actualisée pour la dernière fois à %@. Elle s'actualise toute seule.";

@@ -89,6 +89,11 @@ struct UsageDashboardView: View {
                     .font(.caption)
                     .foregroundStyle(.textSecondary)
                     .padding(.horizontal, 16)
+                    .contentShape(Rectangle())
+                    // The age ticks by itself, so the tooltip names the clock time instead: a
+                    // "25 sec ago" fixed when the row was drawn would be wrong a minute later.
+                    .help(String(format: String(localized: "Usage last refreshed at %@. It refreshes on its own.", bundle: L10n.bundle),
+                                 lastRefresh.formatted(.dateTime.hour().minute().locale(L10n.locale))))
                 }
             }
             .padding(.vertical, 12)
@@ -417,8 +422,8 @@ struct UsageDashboardView: View {
         .fixedSize()
     }
 
-    /// Re-sign: starts the same sign-in as the circle-arrows button on the
-    /// Accounts tab (`reauthenticateAccount`, with that button's icon and help).
+    /// Re-sign: starts the same sign-in as the circle-arrows button on each row of
+    /// Settings → Accounts (`reauthenticateAccount`, with that button's icon and help).
     /// A real borderless button like Retry, so a click on it never counts toward
     /// the card's double-click-to-switch. Its label, like Retry's, is `.brandText`
     /// (at least 4.5:1 on the card in light and dark; the system accent tint was

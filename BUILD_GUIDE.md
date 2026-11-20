@@ -34,7 +34,7 @@ PixelSwitch/
 │   │   ├── MainMenuView.swift     # Main popover content
 │   │   ├── UsageDashboardView.swift  # Usage stats display
 │   │   ├── UsageChartView.swift   # Bar chart for daily activity
-│   │   ├── AccountSwitcherView.swift # Account list + switching UI
+│   │   ├── SettingsAccountsTab.swift # Accounts: switch, re-sign, label, remove, limits
 │   │   └── SettingsView.swift     # Settings window (TabView)
 │   ├── Services/
 │   │   ├── KeychainService.swift  # macOS Keychain read/write
