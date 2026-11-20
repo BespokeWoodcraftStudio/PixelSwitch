@@ -337,3 +337,20 @@
 
 /* Ultra (Max 20x) has no 5-hour limit: what the Session column of its Settings row says */
 "No 5-hour limit" = "5時間の上限なし";
+
+/* Resets button: each account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+"Back" = "戻る";
+"Reload" = "再読み込み";
+"Open in browser" = "ブラウザで開く";
+"Paste sign-in link" = "サインインリンクを貼り付け";
+"Sign out of claude.ai here" = "ここで claude.ai からサインアウト";
+"Sign in as %@" = "%@ としてサインインしてください";
+"Paste the sign-in link from your email" = "メールのサインインリンクを貼り付けてください";
+"Load" = "読み込む";
+"That is not one whole link. Paste the full link from your email." = "リンクが完全ではありません。メールのリンク全体を貼り付けてください。";
+"Only a link on claude.ai loads here. Paste the sign-in link from your email." = "ここでは claude.ai のリンクだけが読み込まれます。メールのサインインリンクを貼り付けてください。";
+"Sign out of claude.ai here?" = "ここで claude.ai からサインアウトしますか？";
+"This removes the claude.ai sign-in that PixelSwitch keeps for %@. Your browser and your other accounts are not affected." = "PixelSwitch が %@ 用に保存している claude.ai のサインインを削除します。ブラウザやほかのアカウントには影響しません。";
+"Sign out" = "サインアウト";
+"This window is signed in as %1$@, not %2$@. Sign out here and sign in as %2$@." = "このウィンドウは %2$@ ではなく %1$@ としてサインインしています。ここでサインアウトし、%2$@ としてサインインしてください。";
+"PixelSwitch could not remove this sign-in. Quit and reopen PixelSwitch, then try again." = "PixelSwitch はこのサインインを削除できませんでした。PixelSwitch を終了して開き直し、もう一度お試しください。";

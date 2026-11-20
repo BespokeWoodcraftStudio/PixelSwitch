@@ -339,3 +339,20 @@
 
 /* Ultra (Max 20x) has no 5-hour limit: what the Session column of its Settings row says */
 "No 5-hour limit" = "No 5-hour limit";
+
+/* Resets button: each account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+"Back" = "Back";
+"Reload" = "Reload";
+"Open in browser" = "Open in browser";
+"Paste sign-in link" = "Paste sign-in link";
+"Sign out of claude.ai here" = "Sign out of claude.ai here";
+"Sign in as %@" = "Sign in as %@";
+"Paste the sign-in link from your email" = "Paste the sign-in link from your email";
+"Load" = "Load";
+"That is not one whole link. Paste the full link from your email." = "That is not one whole link. Paste the full link from your email.";
+"Only a link on claude.ai loads here. Paste the sign-in link from your email." = "Only a link on claude.ai loads here. Paste the sign-in link from your email.";
+"Sign out of claude.ai here?" = "Sign out of claude.ai here?";
+"This removes the claude.ai sign-in that PixelSwitch keeps for %@. Your browser and your other accounts are not affected." = "This removes the claude.ai sign-in that PixelSwitch keeps for %@. Your browser and your other accounts are not affected.";
+"Sign out" = "Sign out";
+"This window is signed in as %1$@, not %2$@. Sign out here and sign in as %2$@." = "This window is signed in as %1$@, not %2$@. Sign out here and sign in as %2$@.";
+"PixelSwitch could not remove this sign-in. Quit and reopen PixelSwitch, then try again." = "PixelSwitch could not remove this sign-in. Quit and reopen PixelSwitch, then try again.";
