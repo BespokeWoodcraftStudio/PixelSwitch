@@ -1,9 +1,11 @@
 // Renders PixelSwitch's Settings pieces offscreen, with invented sample data:
 // the Accounts row (SettingsAccountRow: Priority, account, Session and Weekly
-// menus, and since 2.3 Switch, Re-sign and the More actions menu) for equal windows,
+// menus, and Switch, Re-sign, Edit label and Remove account as four icon buttons) for equal windows,
 // the 90/50 split, a Manual only account, priorities P1, P3 and none, the account in
 // use (Switch off), an account whose sign-in ended (Re-sign in the warning colour,
-// Switch off) and a busy app; and the General defaults (SettingsThresholdDefaults).
+// Switch off) and a busy app; the same icons with a hover label held open on each (the
+// label the app draws, HoverLabel.swift: a still has no pointer); and the General defaults
+// (SettingsThresholdDefaults).
 //
 // These are the app's own views, drawn through an AppKit hosting view so the
 // menus and sliders are real controls, light and dark, at 2x. Nothing here
@@ -27,13 +29,14 @@ private let defaultsSplit = AutoSwitchEngine.WindowPair(session: 90, weekly: 50)
 @MainActor
 private func row(_ account: Account, defaults: AutoSwitchEngine.WindowPair, reset: Text = Text(verbatim: "Weekly resets Mon 11:00 AM"),
                  active: Bool = false, label: String? = nil, help: String = "",
-                 signInEnded: Bool = false, busy: Bool = false) -> some View {
+                 signInEnded: Bool = false, busy: Bool = false, previewLabel: SettingsRowIcon? = nil) -> some View {
     let manual = AutoSwitchSettings.isManualOnly(own: account.switchThreshold)
     // Switch is off for the account in use, for one whose sign-in ended, and while the app is busy:
-    // the reasons are the app's own sentences (SettingsAccountsTab.switchOffReason), here in English.
-    let off: String? = active ? "You're using this account now."
-        : (signInEnded ? "Sign in to this account again before you switch to it."
-           : (busy ? "Wait for the current switch or sign-in to finish." : nil))
+    // the reasons are the app's own sentences (SettingsAccountsTab.switchOffReason), in the language drawn.
+    func said(_ key: String) -> String { String(localized: String.LocalizationValue(key), bundle: L10n.bundle) }
+    let off: String? = active ? said("You're using this account now.")
+        : (signInEnded ? said("Sign in to this account again before you switch to it.")
+           : (busy ? said("Wait for the current switch or sign-in to finish.") : nil))
     return SettingsAccountRow(
         title: label ?? account.email,
         subtitle: label == nil ? nil : account.email,
@@ -52,6 +55,7 @@ private func row(_ account: Account, defaults: AutoSwitchEngine.WindowPair, rese
         needsResign: signInEnded,
         switchOffReason: off,
         actionsBusy: busy,
+        previewLabel: previewLabel,
         onPriority: { _ in }, onSession: { _ in }, onWeekly: { _ in },
         onSwitch: {}, onResign: {}, onLabel: { _ in }, onRemove: {})
 }
@@ -97,6 +101,32 @@ private func accountsSample() -> some View {
         .frame(height: nil)
         Text("Lower numbers are tried first. Dragging renumbers every account from 1.")
             .font(.caption).foregroundStyle(.secondary)
+    }
+    .padding(20)
+}
+
+/// The four icons with a hover label held open on each in turn, and the states that put a reason in
+/// the label: the account in use (Switch off), a busy app (Re-sign and Remove off), and the account
+/// whose sign-in ended. Hovering one icon at a time is what a person does; the rows below are four
+/// separate stills of it.
+@MainActor
+private func iconLabelsSample() -> some View {
+    let work = Account(email: "work@example.com", displayName: "Work", isActive: true, customLabel: "Work", priority: 1)
+    let studio = Account(email: "studio@example.com", displayName: "Studio", priority: 2)
+    let team = Account(email: "claude@bespokewoodcraftstudio.test", displayName: "Team", priority: nil)
+    return VStack(alignment: .leading, spacing: 10) {
+        SampleList(rows: [
+            row(studio, defaults: defaultsEqual, previewLabel: .switchTo),
+            row(studio, defaults: defaultsEqual, previewLabel: .resign),
+            row(studio, defaults: defaultsEqual, previewLabel: .editLabel),
+            row(studio, defaults: defaultsEqual, previewLabel: .remove),
+            // The account in use: Switch is off and says why.
+            row(work, defaults: defaultsEqual, active: true, label: "Work", previewLabel: .switchTo),
+            // A switch or sign-in is running: Re-sign and Remove say to wait.
+            row(studio, defaults: defaultsEqual, busy: true, previewLabel: .remove),
+            // Its sign-in ended: Re-sign in the warning colour, Switch off with its reason.
+            row(team, defaults: defaultsEqual, signInEnded: true, previewLabel: .switchTo),
+        ])
     }
     .padding(20)
 }
@@ -183,6 +213,7 @@ enum SettingsRenders {
                 // 932 wide: the Settings window (940) less its padding and the list's insets.
                 writePNG(accountsSample(), width: 932, dark: dark, language: language, to: "\(out)/settings-accounts-rows\(suffix)-\(name).png")
                 writePNG(splitDefaultsSample(), width: 932, dark: dark, language: language, to: "\(out)/settings-accounts-split-defaults\(suffix)-\(name).png")
+                writePNG(iconLabelsSample(), width: 932, dark: dark, language: language, to: "\(out)/settings-accounts-icon-labels\(suffix)-\(name).png")
                 if language == "en" {
                     writePNG(generalSample(session: 90, weekly: 50), width: 560, dark: dark, language: language, to: "\(out)/settings-general-defaults-split-\(name).png")
                     writePNG(generalSample(session: 98, weekly: 98), width: 560, dark: dark, language: language, to: "\(out)/settings-general-defaults-equal-\(name).png")

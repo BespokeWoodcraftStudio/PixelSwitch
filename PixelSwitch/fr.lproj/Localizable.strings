@@ -364,3 +364,5 @@
 "Remove %@?" = "Supprimer %@ ?";
 "PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account." = "PixelSwitch oublie ce compte et supprime sa connexion enregistrée. Si vous l'utilisez en ce moment, PixelSwitch vous bascule vers un autre compte.";
 "Usage last refreshed at %@. It refreshes on its own." = "Utilisation actualisée pour la dernière fois à %@. Elle s'actualise toute seule.";
+"Edit label for %@" = "Modifier le libellé de %@";
+"Remove account %@" = "Supprimer le compte %@";

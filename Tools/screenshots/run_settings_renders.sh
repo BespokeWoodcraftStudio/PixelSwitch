@@ -25,7 +25,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -swift-version 6 -target arm64-apple-macos14.0 -parse-as-library \
   -o "$APP/Contents/MacOS/pixelrenders" \
   PixelSwitch/Views/SettingsAccountRow.swift PixelSwitch/Views/SettingsThresholdDefaults.swift \
-  PixelSwitch/Views/Components/Badge.swift PixelSwitch/Models/AppStyle.swift \
+  PixelSwitch/Views/Components/Badge.swift PixelSwitch/Views/Components/HoverLabel.swift PixelSwitch/Models/AppStyle.swift \
   PixelSwitch/Models/Account.swift PixelSwitch/Models/AccountOrder.swift \
   PixelSwitch/Services/AutoSwitchEngine.swift PixelSwitch/Models/UsageData.swift \
   PixelSwitch/Models/String+Obfuscation.swift PixelSwitch/Services/L10n.swift \
