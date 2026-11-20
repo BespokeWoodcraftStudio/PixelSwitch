@@ -266,7 +266,16 @@ struct UsageDashboardView: View {
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 4)
-                    usageErrorActions(account, errorState)
+                    HStack(spacing: 8) {
+                        // The sign-in has ended: sign in again from right here.
+                        // Not for "no active subscription" (a lapsed plan, not a
+                        // sign-in problem: signing in again would not fix it).
+                        if errorState.isExpired && !errorState.isNoSubscription {
+                            resignButton(account)
+                        }
+                        usageErrorActions(account, errorState)
+                    }
+                    .fixedSize()
                 }
                 .padding(.top, 4)
             } else {
@@ -384,6 +393,7 @@ struct UsageDashboardView: View {
                     } label: {
                         Label(String(localized: "Retry", bundle: L10n.bundle), systemImage: "arrow.clockwise")
                             .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.brandText)
                     }
                     .buttonStyle(.borderless)
                     .focusable(false)
@@ -391,6 +401,31 @@ struct UsageDashboardView: View {
                 }
             }
         }
+        .fixedSize()
+    }
+
+    /// Re-sign: starts the same sign-in as the circle-arrows button on the
+    /// Accounts tab (`reauthenticateAccount`, with that button's icon and help).
+    /// A real borderless button like Retry, so a click on it never counts toward
+    /// the card's double-click-to-switch. Its label, like Retry's, is `.brandText`
+    /// (at least 4.5:1 on the card in light and dark; the system accent tint was
+    /// not measured and is about 2.7:1 on a dark card). Off while a sign-in or a
+    /// switch is running: a second click would only be refused ("A sign-in is
+    /// already in progress.").
+    private func resignButton(_ account: Account) -> some View {
+        Button {
+            appState.reauthenticateAccount(account)
+        } label: {
+            Label(String(localized: "Re-sign", bundle: L10n.bundle), systemImage: "arrow.triangle.2.circlepath")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.brandText)
+        }
+        .buttonStyle(.borderless)
+        .focusable(false)
+        .disabled(appState.isLoggingIn || appState.switchingTo != nil)
+        .help(String(localized: "Re-authenticate (fix stale token)", bundle: L10n.bundle))
+        .accessibilityLabel(String(format: String(localized: "Re-authenticate %@", bundle: L10n.bundle),
+                                   account.displayEmail(obfuscated: maskEmails)))
         .fixedSize()
     }
 
@@ -471,8 +506,10 @@ struct UsageDashboardView: View {
 
             Spacer()
 
-            if let sub = account.displaySubscriptionType {
-                Badge(text: sub, color: .brand)
+            // One colour per plan; "No plan" while the account has no active
+            // subscription, so the card never wears the last plan it had.
+            if let chip = account.planChip(noSubscription: appState.accountUsageErrors[account.id]?.isNoSubscription == true) {
+                Badge(text: chip.label, color: chip.tone.fill)
             }
         }
     }

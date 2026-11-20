@@ -14,10 +14,15 @@
 // engine's behaviour for it, the control protocol's account (one number for
 // such an account, the flag over the wire), the CLI's table, usage and threshold
 // replies, the menu bar modules, the widget's data, the plan backfill's
-// bookkeeping, a reply from an app that predates the field, and the wiring and
-// strings a view test cannot compile. Compiled into the unit harness by
-// Tests/run-unit-tests.sh and run from main.swift. Uses the global `check`.
+// bookkeeping, a reply from an app that predates the field, the plan chip (one
+// colour per plan, "No plan" for an account with no subscription, and the
+// contrast of every fill against the chip's text), and the wiring and strings a
+// view test cannot compile (including the Re-sign button on the Usage card).
+// Compiled into the unit harness by Tests/run-unit-tests.sh and run from
+// main.swift. Uses the global `check`.
+import AppKit
 import Foundation
+import SwiftUI
 
 @MainActor func runAccountPlanTests() {
     resolveTests()
@@ -35,6 +40,10 @@ import Foundation
     widgetTests()
     oldAppTests()
     wiringAndStringTests()
+    planChipTests()
+    planChipContrastTests()
+    resignAndChipWiringTests()
+    cardButtonTextTests()
 }
 
 // MARK: - Fixtures
@@ -800,4 +809,250 @@ private func planMember(_ source: String, startingAt signature: String) -> Strin
     check(tables[0][key] == key && zip(tables.dropFirst(), languages.dropFirst()).allSatisfy { $0.0[key] != key },
           "ultra strings: the English line is the key and de, fr, ja and zh-Hans are translated, not copied")
     check(tables.allSatisfy { Set($0.keys) == Set(tables[0].keys) }, "ultra strings: the five tables still have exactly the same keys")
+}
+
+// MARK: - The plan chip: one colour per plan
+
+@MainActor private func planChipTests() {
+    func chip(_ type: String?, _ tier: String?, observed: Bool = false, noSubscription: Bool = false) -> PlanChip? {
+        AccountPlan.chip(subscriptionType: type, planTier: tier, sessionObserved: observed, noSubscription: noSubscription)
+    }
+
+    // Every plan has its own label and tone.
+    check(chip("max", "max_20x") == PlanChip(label: "Ultra", tone: .ultra)
+          && chip("max", "default_claude_max_20x") == PlanChip(label: "Ultra", tone: .ultra),
+          "chip: Max 20x, in either tier spelling, is the Ultra chip")
+    check(chip("max", "max_5x") == PlanChip(label: "Max", tone: .max)
+          && chip("max", "default_claude_max_5x") == PlanChip(label: "Max", tone: .max),
+          "chip: Max 5x is the Max chip")
+    check(chip("max", nil) == PlanChip(label: "Max", tone: .max) && chip("max", "max_other") == PlanChip(label: "Max", tone: .max),
+          "chip: Max whose tier is not known still says Max, in the Max colour (the colour follows the label)")
+    check(chip("max", "max_20x", observed: true) == PlanChip(label: "Max", tone: .max),
+          "chip: a 20x tier the API still sends a 5-hour reading for is Max, as the resolver says")
+    check(chip("pro", "default_claude_ai") == PlanChip(label: "Pro", tone: .pro) && chip("pro", nil) == PlanChip(label: "Pro", tone: .pro)
+          && chip("pro", "max_20x") == PlanChip(label: "Pro", tone: .pro),
+          "chip: Pro is the Pro chip, whatever tier is stored")
+
+    // Team and Enterprise, from the raw strings the resolver sees as `.other(...)`.
+    check(chip("team", nil) == PlanChip(label: "Team", tone: .team) && chip(" TEAM ", nil) == PlanChip(label: "Team", tone: .team)
+          && chip("team", "max_20x") == PlanChip(label: "Team", tone: .team),
+          "chip: a team subscription is the Team chip (never Ultra, whatever tier is stored)")
+    check(chip("enterprise", nil) == PlanChip(label: "Enterprise", tone: .enterprise)
+          && chip("enterprise", "default_claude_max_20x") == PlanChip(label: "Enterprise", tone: .enterprise),
+          "chip: an enterprise subscription is the Enterprise chip")
+    check(chip("claude_team", nil) == PlanChip(label: "Team", tone: .team)
+          && chip("claude_enterprise", nil) == PlanChip(label: "Enterprise", tone: .enterprise),
+          "chip: a subscription type that contains team or enterprise (the organizationType spellings) is recognised")
+    check(chip(nil, "default_claude_team") == PlanChip(label: "Team", tone: .team)
+          && chip(nil, "default_claude_enterprise") == PlanChip(label: "Enterprise", tone: .enterprise)
+          && chip("business", "claude_team_standard") == PlanChip(label: "Team", tone: .team),
+          "chip: Team and Enterprise are also recognised from the stored tier when the subscription type does not say")
+    check(chip("max", "team_standard") == PlanChip(label: "Max", tone: .max) && chip("pro", "default_claude_team") == PlanChip(label: "Pro", tone: .pro),
+          "chip: a Max or Pro subscription is never relabelled by its tier")
+    check(chip("enterprise_team", nil) == PlanChip(label: "Enterprise", tone: .enterprise),
+          "chip: Enterprise is looked for before Team")
+
+    // Anything else, and nothing at all.
+    check(chip("business", nil) == PlanChip(label: "Business", tone: .other) && chip("free", "other") == PlanChip(label: "Free", tone: .other),
+          "chip: an unrecognised subscription type keeps its own words, in the neutral tone")
+    check(chip(nil, nil) == nil && chip("", "") == nil && chip("  ", nil) == nil && chip(nil, "max_other") == nil,
+          "chip: nothing known (or a tier that names no plan) is no chip, exactly as before")
+
+    // A card with no active subscription wears "No plan", not its stale tier.
+    let none = PlanChip(label: "No plan", tone: .noPlan)
+    check(chip("max", "max_20x", noSubscription: true) == none && chip("pro", nil, noSubscription: true) == none
+          && chip("team", nil, noSubscription: true) == none && chip("max", "max_5x", noSubscription: true) == none,
+          "chip: an account whose usage request says no active subscription is the No plan chip, whatever plan it last had")
+    check(chip(nil, nil, noSubscription: true) == none && chip("business", nil, noSubscription: true) == none,
+          "chip: No plan is shown even when no plan was ever known")
+    check(chip("max", "max_20x", noSubscription: false) == PlanChip(label: "Ultra", tone: .ultra),
+          "chip: the override is only for the no-subscription state")
+
+    // The chip and the badge text everywhere else (Accounts row, widget, CLI) never disagree.
+    let real: [Account] = [ultra(), max5x(),
+                           Account(email: "a@x.com", displayName: "A", subscriptionType: "max"),
+                           Account(email: "b@x.com", displayName: "B", subscriptionType: "pro", planTier: "default_claude_ai"),
+                           Account(email: "c@x.com", displayName: "C", subscriptionType: "team"),
+                           Account(email: "d@x.com", displayName: "D", subscriptionType: "enterprise"),
+                           Account(email: "e@x.com", displayName: "E", subscriptionType: "business")]
+    check(real.allSatisfy { $0.planChip()?.label == $0.displaySubscriptionType },
+          "chip: for Ultra, Max, Pro, Team, Enterprise and any other plan the chip says what displaySubscriptionType says")
+    check(Account(email: "f@x.com", displayName: "F").planChip() == nil && Account(email: "f@x.com", displayName: "F").displaySubscriptionType == nil,
+          "chip: an account with no plan has no chip")
+    check(ultra().planChip(noSubscription: true) == none && ultra().planChip() == PlanChip(label: "Ultra", tone: .ultra),
+          "chip: Account.planChip passes the no-subscription state through")
+    var observed = ultra()
+    observed.sessionLimitObserved = true
+    check(observed.planChip() == PlanChip(label: "Max", tone: .max), "chip: Account.planChip passes the observed 5-hour reading through")
+
+    // Every tone is reachable, and each plan has a colour of its own.
+    let reached = Set([chip("max", "max_20x"), chip("max", "max_5x"), chip("pro", nil), chip("team", nil), chip("enterprise", nil),
+                       chip("business", nil), chip("max", "max_20x", noSubscription: true)].compactMap { $0?.tone })
+    check(reached == Set(PlanChipTone.allCases), "chip: Ultra, Max, Pro, Team, Enterprise, other and No plan are each reached by some account")
+    let named: [PlanChipTone] = [.ultra, .max, .pro, .team, .enterprise]
+    let lights = named.map { PlanChipPalette.fill(for: $0).light }, darks = named.map { PlanChipPalette.fill(for: $0).dark }
+    check(Set(lights).count == named.count && Set(darks).count == named.count,
+          "chip: the five named plans have five different fills in light and in dark")
+    check(PlanChipPalette.fill(for: .other) == PlanChipPalette.fill(for: .noPlan) && !named.contains { PlanChipPalette.fill(for: $0) == PlanChipPalette.fill(for: .other) },
+          "chip: an unrecognised plan and No plan share the neutral grey, which no named plan uses")
+}
+
+// MARK: - The plan chip: contrast of every fill against the chip's text
+
+/// WCAG relative luminance of a 0xRRGGBB colour.
+private func chipLuminance(_ rgb: UInt32) -> Double {
+    func channel(_ shift: UInt32) -> Double {
+        let value = Double((rgb >> shift) & 0xFF) / 255
+        return value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+    }
+    return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+}
+
+/// WCAG contrast ratio between two 0xRRGGBB colours.
+private func chipContrast(_ a: UInt32, _ b: UInt32) -> Double {
+    let la = chipLuminance(a), lb = chipLuminance(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+}
+
+private func chipHex(_ text: String?) -> UInt32? {
+    guard let text, text.hasPrefix("#") else { return nil }
+    return UInt32(text.dropFirst(), radix: 16)
+}
+
+/// The colour as a light or dark appearance resolves it, as "#RRGGBB".
+@MainActor private func chipResolvedHex(_ color: Color, dark: Bool) -> String? {
+    guard let appearance = NSAppearance(named: dark ? .darkAqua : .aqua) else { return nil }
+    var hex: String?
+    appearance.performAsCurrentDrawingAppearance { hex = color.hexRGB }
+    return hex
+}
+
+@MainActor private func planChipContrastTests() {
+    // The chip's text is the app's one fixed near-black.
+    let text = chipHex(Color.textOnFill.hexRGB)
+    check(text == 0x111111, "chip colours: the chip text is textOnFill, #111111", Color.textOnFill.hexRGB ?? "nil")
+    guard let text else { return }
+
+    // Each fill against that text, in both appearances: at least 4.5:1, and the number pinned so a
+    // changed hue shows up here. (tone, expected light ratio, expected dark ratio)
+    let pinned: [(PlanChipTone, Double, Double)] = [
+        (.ultra, 6.03, 6.03), (.max, 5.28, 6.84), (.pro, 6.71, 9.70),
+        (.team, 5.54, 7.19), (.enterprise, 5.28, 6.71), (.other, 5.79, 6.75), (.noPlan, 5.79, 6.75),
+    ]
+    check(Set(pinned.map { $0.0 }) == Set(PlanChipTone.allCases), "chip colours: every tone has its contrast pinned")
+    for (tone, light, dark) in pinned {
+        let fill = PlanChipPalette.fill(for: tone)
+        let lightRatio = chipContrast(fill.light, text), darkRatio = chipContrast(fill.dark, text)
+        check(lightRatio >= 4.5 && darkRatio >= 4.5, "chip colours: \(tone) holds 4.5:1 against the chip text in light and dark",
+              "light \(lightRatio), dark \(darkRatio)")
+        check(abs(lightRatio - light) < 0.006, "chip colours: \(tone) in light is \(light):1 against the chip text", "got \(lightRatio)")
+        check(abs(darkRatio - dark) < 0.006, "chip colours: \(tone) in dark is \(dark):1 against the chip text", "got \(darkRatio)")
+    }
+
+    // Ultra keeps today's brand orange.
+    check(PlanChipPalette.ultra.light == 0xE86D45 && PlanChipPalette.ultra.dark == 0xE86D45 && Color.brand.hexRGB == "#E86D45",
+          "chip colours: Ultra is the brand orange, #E86D45, in light and dark")
+
+    // The adaptive tokens the views draw are the table's numbers, in each appearance.
+    for tone in PlanChipTone.allCases {
+        let fill = PlanChipPalette.fill(for: tone)
+        let light = chipResolvedHex(tone.fill, dark: false), dark = chipResolvedHex(tone.fill, dark: true)
+        check(chipHex(light) == fill.light && chipHex(dark) == fill.dark,
+              "chip colours: the \(tone) token resolves to its palette numbers in light and in dark",
+              "light \(light ?? "nil") dark \(dark ?? "nil")")
+    }
+}
+
+// MARK: - Re-sign on the card, and the chip at both call sites (wiring a view test cannot compile)
+
+@MainActor private func resignAndChipWiringTests() {
+    let dashboard = planSource("PixelSwitch/Views/UsageDashboardView.swift")
+    let menu = planSource("PixelSwitch/Views/MainMenuView.swift")
+    let accounts = planSource("PixelSwitch/Views/AccountSwitcherView.swift")
+    check(!dashboard.isEmpty && !menu.isEmpty && !accounts.isEmpty, "resign pins: the view sources are found from the repo root")
+
+    // The chip at both call sites comes from the one function, with the no-subscription state.
+    let chipLine = "account.planChip(noSubscription: appState.accountUsageErrors[account.id]?.isNoSubscription == true)"
+    check(dashboard.components(separatedBy: chipLine).count == 2 && menu.components(separatedBy: chipLine).count == 2,
+          "chip pins: the Usage card and the popover header each ask Account.planChip, with the account's no-subscription state")
+    check(dashboard.components(separatedBy: "Badge(text: chip.label, color: chip.tone.fill)").count == 2
+          && menu.components(separatedBy: "Badge(text: chip.label, color: chip.tone.fill)").count == 2,
+          "chip pins: both draw the chip in its own tone's fill")
+    check(!dashboard.contains("Badge(text: sub, color: .brand)") && !menu.contains("Badge(text: sub, color: .brand)")
+          && !dashboard.contains("displaySubscriptionType") && !menu.contains("displaySubscriptionType"),
+          "chip pins: neither view draws a plan chip in the one brand colour any more")
+
+    // The Re-sign button.
+    let button = planMember(dashboard, startingAt: "private func resignButton(")
+    check(!button.isEmpty && button.contains("appState.reauthenticateAccount(account)"),
+          "resign pins: the button calls the same appState.reauthenticateAccount the Accounts tab calls")
+    check(button.contains("systemImage: \"arrow.triangle.2.circlepath\"") && accounts.contains("Image(systemName: \"arrow.triangle.2.circlepath\")")
+          && button.contains("String(localized: \"Re-authenticate (fix stale token)\", bundle: L10n.bundle)") && accounts.contains(".help(\"Re-authenticate (fix stale token)\")"),
+          "resign pins: it carries the Accounts tab's icon and help text")
+    check(button.contains("String(localized: \"Re-sign\", bundle: L10n.bundle)"), "resign pins: it has a short visible label, Re-sign")
+    check(button.contains(".buttonStyle(.borderless)") && button.contains(".focusable(false)"),
+          "resign pins: it is a real borderless button like Retry, so a click never counts toward the card's double-click to switch")
+    check(button.contains(".disabled(appState.isLoggingIn || appState.switchingTo != nil)"),
+          "resign pins: it is disabled while a sign-in or a switch is running")
+    check(button.contains(".accessibilityLabel(") && button.contains("String(localized: \"Re-authenticate %@\", bundle: L10n.bundle)"),
+          "resign pins: it has a spoken label naming the account")
+
+    // Only on a card with no reading whose sign-in has ended; never on no-subscription.
+    check(dashboard.components(separatedBy: "resignButton(account)").count == 2, "resign pins: resignButton is used in exactly one place")
+    check(dashboard.contains("if errorState.isExpired && !errorState.isNoSubscription {\n                            resignButton(account)"),
+          "resign pins: it shows only when the card says the sign-in has ended, and never for no active subscription")
+    if let noReading = dashboard.range(of: "} else if let errorState = appState.accountUsageErrors[account.id] {"),
+       let waiting = dashboard.range(of: "Waiting for usage data..."),
+       let use = dashboard.range(of: "resignButton(account)"),
+       let bars = dashboard.range(of: "usageBars(usage, showsSession: account.hasSessionLimit)") {
+        check(bars.lowerBound < noReading.lowerBound && noReading.lowerBound < use.lowerBound && use.lowerBound < waiting.lowerBound,
+              "resign pins: the button sits in the no-reading branch, not in the branch that keeps a last reading")
+    } else {
+        check(false, "resign pins: the card's branches are found")
+    }
+
+    // The strings: both new keys are in all five tables, translated.
+    let languages = ["en", "de", "fr", "ja", "zh-Hans"]
+    let tables = languages.map { NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String] ?? [:] }
+    for key in ["Re-sign", "No plan"] {
+        check(tables.allSatisfy { ($0[key] ?? "").isEmpty == false }, "resign strings: '\(key)' is in all five tables")
+        check(tables[0][key] == key && zip(tables.dropFirst(), languages.dropFirst()).allSatisfy { $0.0[key] != key },
+              "resign strings: the English line of '\(key)' is the key and de, fr, ja and zh-Hans are translated, not copied")
+    }
+    check(tables.allSatisfy { ($0["Re-authenticate (fix stale token)"] ?? "").isEmpty == false && ($0["Re-authenticate %@"] ?? "").isEmpty == false },
+          "resign strings: the help and spoken label it reuses are in all five tables")
+    check(tables.allSatisfy { Set($0.keys) == Set(tables[0].keys) }, "resign strings: the five tables still have exactly the same keys")
+}
+
+// MARK: - The text of the card's Retry and Re-sign buttons
+
+/// Both buttons are borderless and label themselves in `.brandText`, the app's
+/// accent-text token, instead of the system tint (the AccentColor asset is about
+/// 2.7:1 on a dark card). Measured on the card fills, in light and dark.
+@MainActor private func cardButtonTextTests() {
+    // (fill name, token, expected light ratio, expected dark ratio)
+    let fills: [(String, Color, Double, Double)] = [("cardFill", .cardFill, 5.18, 6.02), ("cardFillStrong", .cardFillStrong, 5.18, 5.36)]
+    for (name, fill, light, dark) in fills {
+        for (isDark, expected) in [(false, light), (true, dark)] {
+            let appearance = isDark ? "dark" : "light"
+            if let text = chipHex(chipResolvedHex(.brandText, dark: isDark)), let surface = chipHex(chipResolvedHex(fill, dark: isDark)) {
+                let ratio = chipContrast(text, surface)
+                check(ratio >= 4.5, "button text: brandText holds 4.5:1 on \(name) in \(appearance)", "got \(ratio)")
+                check(abs(ratio - expected) < 0.006, "button text: brandText on \(name) in \(appearance) is \(expected):1", "got \(ratio)")
+            } else {
+                check(false, "button text: brandText and \(name) resolve in \(appearance)")
+            }
+        }
+    }
+
+    let dashboard = planSource("PixelSwitch/Views/UsageDashboardView.swift")
+    let retry = planMember(dashboard, startingAt: "private func usageErrorActions(")
+    let resign = planMember(dashboard, startingAt: "private func resignButton(")
+    let label = ".font(.caption2.weight(.semibold))\n                            .foregroundStyle(.brandText)"
+    check(retry.contains("String(localized: \"Retry\", bundle: L10n.bundle)") && retry.contains(label) && retry.contains(".buttonStyle(.borderless)"),
+          "button text pins: Retry is borderless and its label is .brandText")
+    check(resign.contains(".font(.caption2.weight(.semibold))\n                .foregroundStyle(.brandText)") && resign.contains(".buttonStyle(.borderless)"),
+          "button text pins: Re-sign is borderless and its label is .brandText, like Retry")
+    check(dashboard.components(separatedBy: ".foregroundStyle(.brandText)").count - 1 >= 2 && !dashboard.contains("Color(red: 0.502"),
+          "button text pins: the two buttons share one style and use no literal colour")
 }

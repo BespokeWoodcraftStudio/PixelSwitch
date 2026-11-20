@@ -23,6 +23,7 @@
 //     PixelSwitch/Models/MenuBarConfig.swift PixelSwitch/Models/MenuBarModule.swift \
 //     PixelSwitch/Models/AppStyle.swift PixelSwitch/Models/BrandColor.swift \
 //     PixelSwitch/Models/AccountPalette.swift PixelSwitch/Services/L10n.swift \
+//     PixelSwitch/Services/AutoSwitchEngine.swift \
 //     Tools/screenshots/make_screenshots.swift && /tmp/pixelshots assets/screenshots
 import SwiftUI
 import AppKit
@@ -30,7 +31,9 @@ import AppKit
 private struct SampleAccount {
     let email: String
     let swatch: Int
-    let plan: String
+    /// The plan chip, from the real `Account.planChip` (see `chip(_:_:noSubscription:)`),
+    /// so the colours here are the ones the app draws. nil draws no chip.
+    let chip: PlanChip?
     let active: Bool
     let session: Double
     let weekly: Double
@@ -39,6 +42,18 @@ private struct SampleAccount {
     let weekReset: String
     /// False for an account on a plan with no 5-hour limit (Ultra): no Session row.
     var hasSessionLimit = true
+    /// A usage request that left no reading: the sign-in ended (the card offers
+    /// Re-sign) or the account has no active subscription (it offers nothing).
+    var problem: Problem?
+
+    enum Problem { case expired, noSubscription, unreachable }
+}
+
+/// The chip for an account on this plan, built through the real `Account` so the
+/// label, the tone and the "No plan" override are the app's own code.
+private func chip(_ subscriptionType: String?, _ planTier: String? = nil, noSubscription: Bool = false) -> PlanChip? {
+    Account(email: "plan@example.com", displayName: "Plan", subscriptionType: subscriptionType, planTier: planTier)
+        .planChip(noSubscription: noSubscription)
 }
 
 // Invented accounts on example.com, the domain reserved for documentation
@@ -46,13 +61,13 @@ private struct SampleAccount {
 // repository: the first version of these screenshots did, and it had to be
 // replaced.
 private let sample: [SampleAccount] = [
-    .init(email: "work@example.com", swatch: 0, plan: "Max", active: false,
+    .init(email: "work@example.com", swatch: 0, chip: chip("max", "max_5x"), active: false,
           session: 98, weekly: 62, fable: 87, sessionReset: "21 min", weekReset: "Mon 11:00 AM"),
-    .init(email: "personal@example.com", swatch: 3, plan: "Max", active: true,
+    .init(email: "personal@example.com", swatch: 3, chip: chip("max", "max_5x"), active: true,
           session: 15, weekly: 6, fable: 8, sessionReset: "2 hr 57 min", weekReset: "Mon 9:00 AM"),
-    .init(email: "studio@example.com", swatch: 5, plan: "Max", active: false,
+    .init(email: "studio@example.com", swatch: 5, chip: chip("max", "max_5x"), active: false,
           session: 4, weekly: 94, fable: 60, sessionReset: "4 hr 02 min", weekReset: "Fri 9:00 AM"),
-    .init(email: "side-project@example.com", swatch: 8, plan: "Pro", active: false,
+    .init(email: "side-project@example.com", swatch: 8, chip: chip("pro", "default_claude_ai"), active: false,
           session: 40, weekly: 30, fable: 20, sessionReset: "1 hr 10 min", weekReset: "Wed 8:00 AM"),
 ]
 
@@ -60,10 +75,37 @@ private let sample: [SampleAccount] = [
 /// whether it has a Session row come from `AccountPlan`, the same code the app runs.
 private let ultraSample: SampleAccount = {
     let account = Account(email: "ultra@example.com", displayName: "Ultra", subscriptionType: "max", planTier: "max_20x")
-    return SampleAccount(email: account.email, swatch: 2, plan: account.displaySubscriptionType ?? "", active: false,
+    return SampleAccount(email: account.email, swatch: 2, chip: account.planChip(), active: false,
                          session: 0, weekly: 42, fable: 74, sessionReset: "", weekReset: "Fri 9:00 AM",
                          hasSessionLimit: account.hasSessionLimit)
 }()
+
+/// One account per plan the chip colours tell apart: Ultra, Max, Pro, Team, Enterprise and an
+/// unrecognised plan. The subscription strings are the raw ones the app stores.
+private let planSamples: [SampleAccount] = [
+    ("ultra@example.com", chip("max", "max_20x"), 2, false),
+    ("max@example.com", chip("max", "max_5x"), 4, true),
+    ("pro@example.com", chip("pro", "default_claude_ai"), 8, true),
+    ("team@example.com", chip("team", nil), 6, true),
+    ("enterprise@example.com", chip("enterprise", nil), 1, true),
+    ("business@example.com", chip("business", nil), 9, true),
+].map { email, chip, swatch, hasSession in
+    SampleAccount(email: email, swatch: swatch, chip: chip, active: false,
+                  session: 22, weekly: 38, fable: 51, sessionReset: "3 hr 12 min", weekReset: "Fri 9:00 AM",
+                  hasSessionLimit: hasSession)
+}
+
+/// A card whose sign-in has ended (Re-sign), one for an account with no active
+/// subscription ("No plan", nothing to click) and an expired Ultra one.
+private let expiredSample = SampleAccount(email: "expired@example.com", swatch: 3, chip: chip("max", "max_5x"), active: false,
+                                          session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", problem: .expired)
+private let expiredUltraSample = SampleAccount(email: "expired-ultra@example.com", swatch: 2, chip: chip("max", "max_20x"), active: false,
+                                               session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", hasSessionLimit: false,
+                                               problem: .expired)
+private let unreachableSample = SampleAccount(email: "offline@example.com", swatch: 7, chip: chip("max", "max_5x"), active: false,
+                                              session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", problem: .unreachable)
+private let lapsedSample = SampleAccount(email: "lapsed@example.com", swatch: 5, chip: chip("max", "max_20x", noSubscription: true), active: false,
+                                         session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", problem: .noSubscription)
 
 private struct Card: View {
     let account: SampleAccount
@@ -102,13 +144,47 @@ private struct Card: View {
                         Badge(text: "Active", color: .green)
                     }
                     Spacer(minLength: 4)
-                    Badge(text: account.plan, color: .brand)
+                    if let chip = account.chip {
+                        Badge(text: chip.label, color: chip.tone.fill)
+                    }
                 }
-                if account.hasSessionLimit {
-                    row(.session, "Session", account.session, account.sessionReset)
+                if let problem = account.problem {
+                    // Hand copy of the Usage card's no-reading branch (UsageDashboardView):
+                    // keep it in step by hand. Re-sign only when the sign-in has ended.
+                    HStack(alignment: .top) {
+                        Image(systemName: problem == .expired ? "exclamationmark.triangle" : "xmark.circle")
+                            .foregroundStyle(problem == .expired ? .limitWarn : .limitCrit)
+                        Text(problem == .expired ? "Session expired. Re-authenticate (↻) to fix."
+                             : (problem == .noSubscription ? "No active subscription on this account (OAuth not allowed)."
+                                                           : "Can't reach Anthropic right now; PixelSwitch keeps trying."))
+                            .font(.caption)
+                            .foregroundStyle(.textSecondary)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 4)
+                        // The app's buttons are real borderless Buttons; ImageRenderer cannot
+                        // draw a Button (it paints a prohibition sign), so these are their look:
+                        // the same Label and font, in `.brandText` as the app sets it.
+                        if problem == .expired {
+                            Label("Re-sign", systemImage: "arrow.triangle.2.circlepath")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.brandText)
+                                .fixedSize()
+                        } else if problem == .unreachable {
+                            Label("Retry", systemImage: "arrow.clockwise")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.brandText)
+                                .fixedSize()
+                        }
+                    }
+                    .padding(.top, 4)
+                } else {
+                    if account.hasSessionLimit {
+                        row(.session, "Session", account.session, account.sessionReset)
+                    }
+                    row(.weekly, "Weekly", account.weekly, account.weekReset)
+                    row(.fable, "Fable", account.fable, account.weekReset)
                 }
-                row(.weekly, "Weekly", account.weekly, account.weekReset)
-                row(.fable, "Fable", account.fable, account.weekReset)
 
                 HStack(spacing: 6) {
                     HStack(spacing: 3) {
@@ -169,10 +245,10 @@ private func write<V: View>(_ view: V, width: CGFloat, scheme: ColorScheme, to p
 /// that has run out of Fable, and the one PixelSwitch moves to.
 @MainActor
 private func autoSwitch(config: MenuBarConfig, logo: Image, scheme: ColorScheme) -> some View {
-    let exhausted = SampleAccount(email: "work@example.com", swatch: 0, plan: "Max", active: true,
+    let exhausted = SampleAccount(email: "work@example.com", swatch: 0, chip: chip("max", "max_5x"), active: true,
                             session: 12, weekly: 64, fable: 100,
                             sessionReset: "3 hr 40 min", weekReset: "Mon 11:00 AM")
-    let chosen = SampleAccount(email: "studio@example.com", swatch: 5, plan: "Max", active: false,
+    let chosen = SampleAccount(email: "studio@example.com", swatch: 5, chip: chip("max", "max_5x"), active: false,
                          session: 8, weekly: 41, fable: 23,
                          sessionReset: "4 hr 02 min", weekReset: "Fri 9:00 AM")
 
@@ -255,7 +331,7 @@ private struct Chrome: View {
         VStack(spacing: 12) {
             HStack(spacing: 6) {
                 Text(verbatim: "work@example.com").font(.headline)
-                Badge(text: "Max", color: .brand)
+                Badge(text: "Max", color: PlanChipTone.max.fill)
                 Spacer()
             }
             HStack {
@@ -351,6 +427,48 @@ enum Screenshots {
                         Card(account: sample[1], config: config, logo: logo)
                       },
                       width: 380, scheme: scheme, to: "\(out)/ultra-\(name).png")
+
+                // Every plan's chip, drawn the way a card and the popover header draw it: on
+                // the card fill and on the popover background, then one card per plan.
+                write(VStack(alignment: .leading, spacing: 12) {
+                        Text("Plan chips: Ultra, Max, Pro, Team, Enterprise, other, No plan")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        ForEach([PlanChipTone.ultra, .max, .pro, .team, .enterprise, .other, .noPlan], id: \.self) { tone in
+                            let sampleChip: PlanChip? = {
+                                switch tone {
+                                case .ultra: return chip("max", "max_20x")
+                                case .max: return chip("max", "max_5x")
+                                case .pro: return chip("pro")
+                                case .team: return chip("team")
+                                case .enterprise: return chip("enterprise")
+                                case .other: return chip("business")
+                                case .noPlan: return chip("max", "max_20x", noSubscription: true)
+                                }
+                            }()
+                            HStack(spacing: 10) {
+                                if let sampleChip { Badge(text: sampleChip.label, color: sampleChip.tone.fill) }
+                                HStack { Spacer(); if let sampleChip { Badge(text: sampleChip.label, color: sampleChip.tone.fill) } }
+                                    .padding(8).frame(width: 110)
+                                    .background(RoundedRectangle(cornerRadius: 8).fill(.cardFill).strokeBorder(.cardBorder, lineWidth: 1))
+                                Spacer()
+                            }
+                        }
+                        ForEach(0..<planSamples.count, id: \.self) { Card(account: planSamples[$0], config: config, logo: logo) }
+                      },
+                      width: 380, scheme: scheme, to: "\(out)/plans-\(name).png")
+
+                // The Usage card when its sign-in has ended: Re-sign beside the message. The
+                // no-subscription card has no button and says No plan.
+                write(VStack(alignment: .leading, spacing: 12) {
+                        Text("Sign-in ended: Re-sign").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Card(account: expiredSample, config: config, logo: logo)
+                        Card(account: expiredUltraSample, config: config, logo: logo)
+                        Text("Usage service unreachable: Retry").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Card(account: unreachableSample, config: config, logo: logo)
+                        Text("No active subscription: no button").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Card(account: lapsedSample, config: config, logo: logo)
+                      },
+                      width: 380, scheme: scheme, to: "\(out)/resign-\(name).png")
 
                 write(autoSwitch(config: config, logo: logo, scheme: scheme),
                       width: 420, scheme: scheme, to: "\(out)/auto-switch-\(name).png")

@@ -354,3 +354,7 @@
 "Sign out" = "退出登录";
 "This window is signed in as %1$@, not %2$@. Sign out here and sign in as %2$@." = "此窗口登录的是 %1$@，而不是 %2$@。请在此退出，再以 %2$@ 登录。";
 "PixelSwitch could not remove this sign-in. Quit and reopen PixelSwitch, then try again." = "PixelSwitch 无法移除此登录。请退出并重新打开 PixelSwitch，然后重试。";
+
+/* 2.2: Re-sign on a Usage card whose sign-in has ended; the plan chip of an account with no active subscription */
+"Re-sign" = "重新登录";
+"No plan" = "无套餐";

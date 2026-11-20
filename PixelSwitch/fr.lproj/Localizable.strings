@@ -354,3 +354,7 @@
 "Sign out" = "Se déconnecter";
 "This window is signed in as %1$@, not %2$@. Sign out here and sign in as %2$@." = "Cette fenêtre est connectée en tant que %1$@, et non %2$@. Déconnectez-vous ici, puis connectez-vous en tant que %2$@.";
 "PixelSwitch could not remove this sign-in. Quit and reopen PixelSwitch, then try again." = "PixelSwitch n’a pas pu supprimer cette connexion. Quittez PixelSwitch, rouvrez-le, puis réessayez.";
+
+/* 2.2: Re-sign on a Usage card whose sign-in has ended; the plan chip of an account with no active subscription */
+"Re-sign" = "Se reconnecter";
+"No plan" = "Aucun forfait";

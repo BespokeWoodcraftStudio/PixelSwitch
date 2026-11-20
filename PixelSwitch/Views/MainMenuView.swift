@@ -262,8 +262,8 @@ struct MainMenuView: View {
                         }
                         Text(account.effectiveDisplayName(obfuscated: maskEmails))
                             .font(.headline)
-                        if let sub = account.displaySubscriptionType {
-                            Badge(text: sub, color: .brand)
+                        if let chip = account.planChip(noSubscription: appState.accountUsageErrors[account.id]?.isNoSubscription == true) {
+                            Badge(text: chip.label, color: chip.tone.fill)
                         }
                     }
                     Text(account.displayEmail(obfuscated: maskEmails))
