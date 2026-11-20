@@ -361,8 +361,18 @@
 "Sign in to this account again before you switch to it." = "Sign in to this account again before you switch to it.";
 "Wait for the current switch or sign-in to finish." = "Wait for the current switch or sign-in to finish.";
 "Save label" = "Save label";
-"More actions" = "More actions";
-"More actions for %@" = "More actions for %@";
 "Remove %@?" = "Remove %@?";
 "PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account." = "PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account.";
 "Usage last refreshed at %@. It refreshes on its own." = "Usage last refreshed at %@. It refreshes on its own.";
+"Edit label for %@" = "Edit label for %@";
+"Remove account %@" = "Remove account %@";
+
+/* 2.4: the per-account Chrome profile choice for Limit resets (PixelSwitch/Views/Components/ChromeProfileChoice.swift) */
+"Its own PixelSwitch Chrome profile" = "Its own PixelSwitch Chrome profile";
+"The Chrome profile signed in as %@" = "The Chrome profile signed in as %@";
+"The Chrome profile folder %@" = "The Chrome profile folder %@";
+"Choose this only if Chrome has a profile signed in with this address. Otherwise Chrome opens whichever profile you used last." = "Choose this only if Chrome has a profile signed in with this address. Otherwise Chrome opens whichever profile you used last.";
+"Chrome profile for Limit resets" = "Chrome profile for Limit resets";
+"Automatic (a matching Chrome profile, else its own PixelSwitch profile)" = "Automatic (a matching Chrome profile, else its own PixelSwitch profile)";
+"Chrome profile for Limit resets: %@" = "Chrome profile for Limit resets: %@";
+"Chrome profile for Limit resets of %@" = "Chrome profile for Limit resets of %@";
