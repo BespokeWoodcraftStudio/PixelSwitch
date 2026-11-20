@@ -13,7 +13,7 @@
 
 **Architecture & Files**:
 - **Docs**: `ARCHITECTURE.md` (token flow), `BUILD_GUIDE.md`, `project.yml` (Xcode config).
-- **Entry**: `PixelSwitchApp.swift` (MenuBarExtra, lifecycle), `AppState.swift` (@MainActor state).
+- **Entry**: `PixelSwitchApp.swift` (lifecycle; the menu bar popover is an `NSPopover`, not a `MenuBarExtra`), `AppState.swift` (@MainActor state).
 - **Services**: 
   - `ClaudeService.swift`: Wraps `claude` CLI (auth/status).
   - `KeychainService.swift`: Manages OAuth tokens via `/usr/bin/security`.
@@ -28,8 +28,9 @@ with rollback). It must behave exactly like the Mac on the shared rules: `Tests/
 runs on both engines. Start at `linux/README.md`; tests `python3 -m unittest discover -s linux/tests -t linux`.
 Contract for both platforms: `docs/superpowers/specs/2026-10-24-2.0-spec.md`.
 
-**Rules learned in 2.0** (details in `docs/SESSION-HANDOVER.md` gotchas): this Mac cannot compile SwiftUI view files, so a
-view change needs a CI branch build before main; wait on CI with an exit status that follows the run's conclusion and
-poll no faster than every 120 s (the GitHub API quota is shared with the founder's other sessions); never install,
-upgrade or relink software on the founder's machines; test Linux changes on his laptop only under spec section 5.7
-(scratch HOME, test mode, fabricated logins).
+**Rules learned in 2.0 and 2.1** (details in `docs/SESSION-HANDOVER.md` gotchas): Xcode 27.2 is installed on this Mac and
+builds the whole app, SwiftUI views included (`xcodegen generate`, then `xcodebuild ... CODE_SIGNING_ALLOWED=NO build`, line in
+the handover), so a view change is proven by that real build; the unit harness and the typecheck scripts skip views. Wait on
+CI with an exit status that follows the run's conclusion and poll no faster than every 120 s (the GitHub API quota is shared
+with the founder's other sessions); never install, upgrade or relink software on the founder's machines; test Linux changes
+on his laptop only under spec section 5.7 (scratch HOME, test mode, fabricated logins).
