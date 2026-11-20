@@ -80,6 +80,18 @@ class AccountTextTests(unittest.TestCase):
         waiting = {"email": "x", "isSwitchable": True, "usage": {"error": "Waiting for Claude Code to renew this login. It renews the next time a session runs."}}
         self.assertFalse(model.can_retry(waiting))
         self.assertFalse(model.needs_resign(waiting))
+
+    def test_both_re_sign_sentences_need_a_sign_in_even_when_the_account_is_switchable(self):
+        # What the daemon sends (usagecycle) must be recognised by the face, as the Mac's card says "Click Re-sign to fix."
+        from pixelswitch.usagecycle import MESSAGE_BELONGED, MESSAGE_RESIGN
+
+        for message in (MESSAGE_RESIGN, MESSAGE_BELONGED,
+                        "Session expired. Click Re-sign to fix.",
+                        "Its saved login belonged to another account and was removed. Click Re-sign to fix."):
+            info = {"email": "x@y.z", "isSwitchable": True, "usage": {"error": message}}
+            self.assertTrue(model.needs_resign(info), message)
+            self.assertFalse(model.can_retry(info), message)
+            self.assertEqual(model.message_of(info), message)
         # The daemon's own sentence for an unexpected failure offers Retry too (usagecycle: canRetry)
         unexpected = {"email": "x", "isSwitchable": True, "usage": {"error": "Could not fetch usage: JSONDecodeError"}}
         self.assertTrue(model.can_retry(unexpected))

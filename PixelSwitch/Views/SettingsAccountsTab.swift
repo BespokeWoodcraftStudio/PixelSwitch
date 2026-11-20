@@ -85,7 +85,15 @@ struct SettingsAccountsTab: View {
             titleVisibility: .visible,
             presenting: pendingRemoval
         ) { account in
-            Button("Remove account", role: .destructive) { appState.removeAccount(account) }
+            Button("Remove account", role: .destructive) {
+                // Asked when the dialog was already up: a switch or a sign-in may have started
+                // since, and the control API refuses a removal then, so this does too.
+                guard SwitchAvailability.canAddOrRemove(isSwitching: appState.switchingTo != nil, isLoggingIn: appState.isLoggingIn) else {
+                    appState.errorMessage = String(localized: "A switch or sign-in is in progress. Try again in a moment.", bundle: L10n.bundle)
+                    return
+                }
+                appState.removeAccount(account)
+            }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
             Text("PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account.")
@@ -118,7 +126,7 @@ struct SettingsAccountsTab: View {
             customLabel: account.customLabel ?? "",
             needsResign: signInEnded(account),
             switchOffReason: switchOffReason(for: account),
-            actionsBusy: !SwitchAvailability.canResign(isSwitching: appState.switchingTo != nil, isLoggingIn: appState.isLoggingIn),
+            actionsBusy: !SwitchAvailability.canAddOrRemove(isSwitching: appState.switchingTo != nil, isLoggingIn: appState.isLoggingIn),
             onPriority: { appState.setPriority($0, for: account) },
             onSession: { choose($0, window: .session, for: account) },
             onWeekly: { choose($0, window: .weekly, for: account) },
@@ -135,15 +143,13 @@ struct SettingsAccountsTab: View {
     /// signing in again does not fix).
     private func signInEnded(_ account: Account) -> Bool {
         let state = appState.accountUsageErrors[account.id]
-        return state?.isExpired == true && state?.isNoSubscription != true
+        return SwitchAvailability.signInEnded(isExpired: state?.isExpired == true, isNoSubscription: state?.isNoSubscription == true)
     }
 
     /// Why Switch is off for this account, in the language in use, or nil while it is on.
     private func switchOffReason(for account: Account) -> String? {
-        switch SwitchAvailability.of(isActive: account.isActive,
-                                     signInEnded: signInEnded(account),
-                                     isSwitching: appState.switchingTo != nil,
-                                     isLoggingIn: appState.isLoggingIn) {
+        // The same rule a double-click on a Usage card follows.
+        switch appState.switchAvailability(for: account) {
         case .available: return nil
         case .alreadyActive: return String(localized: "You're using this account now.", bundle: L10n.bundle)
         case .needsSignIn: return String(localized: "Sign in to this account again before you switch to it.", bundle: L10n.bundle)

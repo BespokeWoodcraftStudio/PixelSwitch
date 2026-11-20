@@ -565,8 +565,10 @@ private struct HeaderFixtures: View {
                       account: account("team@example.com", org: "Example Woodcraft Studio", plan: "team", tier: nil), priority: 2)
             HeaderRow(caption: "A custom label: label over the address",
                       account: account("work@example.com", org: "work@example.com's Organization", label: "Work"))
-            HeaderRow(caption: "The longest sensible address, with P1 and a Max chip",
-                      account: account("operations@example-woodcraft.com", org: "operations@example-woodcraft.com's Organization"), priority: 1)
+            // 33 characters with no hyphen (the founder's longest, claude@bespokewoodcraftstudio.com, is 33): it
+            // used to break mid-word with no line limit. .test is reserved (RFC 2606).
+            HeaderRow(caption: "A 33-character address with no hyphen, P1 and a Max chip: one line, shrunk, then middle-truncated",
+                      account: account("build@bespokewoodcraftstudio.test", org: "build@bespokewoodcraftstudio.test's Organization"), priority: 1)
             HeaderRow(caption: "Masking on, default organization name: masked address once",
                       account: account("personal@example.com", org: "personal@example.com's Organization"), masked: true)
             HeaderRow(caption: "Masking on, real organization name: both lines, address masked",
@@ -597,7 +599,8 @@ private struct FooterFixtures: View {
     }
 
     private func footer(error: String? = nil, loggingIn: Bool = false) -> PopoverFooter {
-        PopoverFooter(errorMessage: error, isLoggingIn: loggingIn,
+        PopoverFooter(errorMessage: error,
+                      busyReason: loggingIn ? "Wait for the current switch or sign-in to finish." : nil,
                       onAddCurrent: {}, onSignInNew: {}, onRefresh: {}, onSettings: {}, onQuit: {})
     }
 

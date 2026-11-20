@@ -7,11 +7,13 @@ import SwiftUI
 
 /// The footer: five icons, left to right: Add current account, Sign in a new account | Refresh,
 /// Settings, Quit. Each is a 28 pt target with a tooltip that says what it is for and a spoken
-/// label (`FooterIconButton`). The two add icons are off while a sign-in runs. A message
-/// from the app (an error) takes the room on the left.
+/// label (`FooterIconButton`). The two add icons are off while a switch or a sign-in runs
+/// (`busyReason` is non-nil, and is their tooltip then: the control API refuses both in that
+/// state). A message from the app (an error) takes the room on the left.
 struct PopoverFooter: View {
     var errorMessage: String?
-    var isLoggingIn = false
+    /// Why the two add icons are off, or nil while they work.
+    var busyReason: String?
     let onAddCurrent: () -> Void
     let onSignInNew: () -> Void
     let onRefresh: () -> Void
@@ -39,7 +41,7 @@ struct PopoverFooter: View {
                 symbol: "plus.circle",
                 help: String(localized: "Add current account: save the one Claude Code is signed in to now", bundle: L10n.bundle),
                 label: String(localized: "Add Current Account", bundle: L10n.bundle),
-                isDisabled: isLoggingIn,
+                disabledHelp: busyReason,
                 action: onAddCurrent
             )
 
@@ -47,7 +49,7 @@ struct PopoverFooter: View {
                 symbol: "person.badge.plus",
                 help: String(localized: "Sign in a new account: open the sign-in window", bundle: L10n.bundle),
                 label: String(localized: "Sign In New Account", bundle: L10n.bundle),
-                isDisabled: isLoggingIn,
+                disabledHelp: busyReason,
                 action: onSignInNew
             )
 
@@ -107,28 +109,36 @@ struct FooterIconLabel: View {
 }
 
 /// One icon in the popover's footer: `FooterIconLabel` in a plain button, with a tooltip that
-/// says what it is for and a spoken label for VoiceOver.
+/// says what it is for and a spoken label for VoiceOver. With `disabledHelp` set the icon is off,
+/// dimmed, and the tooltip says why instead. The tooltip is on a wrapper around the button, not
+/// the button: macOS may not show a tooltip on a disabled control.
 struct FooterIconButton: View {
     let symbol: String
     /// The tooltip: what the icon is for.
     let help: String
     /// What VoiceOver reads.
     let label: String
-    var isDisabled = false
+    /// Non-nil turns the icon off and is its tooltip then.
+    var disabledHelp: String?
     let action: () -> Void
 
     @State private var hovering = false
 
+    private var isDisabled: Bool { disabledHelp != nil }
+
     var body: some View {
-        Button(action: action) {
-            FooterIconLabel(symbol: symbol, hovering: hovering, isDisabled: isDisabled)
+        HStack(spacing: 0) {
+            Button(action: action) {
+                FooterIconLabel(symbol: symbol, hovering: hovering, isDisabled: isDisabled)
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .disabled(isDisabled)
+            .onHover { hovering = $0 }
+            .accessibilityLabel(label)
         }
-        .buttonStyle(.plain)
-        .focusable(false)
-        .disabled(isDisabled)
-        .onHover { hovering = $0 }
-        .help(help)
-        .accessibilityLabel(label)
+        .contentShape(Rectangle())
+        .help(disabledHelp ?? help)
     }
 }
 

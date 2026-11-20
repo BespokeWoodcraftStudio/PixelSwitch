@@ -371,10 +371,13 @@ struct UsageDashboardView: View {
         return account.isActive ? .activeAccountRing : .cardBorder
     }
 
-    /// True when a double-click on this card would actually do something: not
-    /// the account already live, and nothing else mid-switch.
+    /// True when a double-click on this card would actually do something. The rule is
+    /// the one Settings' Switch button follows (`AppState.switchAvailability`): not the
+    /// account already live, not one whose sign-in ended (Re-sign is its fix), and nothing
+    /// else mid-switch or mid-sign-in. When it is false the card's pointing-hand cursor,
+    /// "Double-click to switch" tooltip and hover hint are all off, since they ask this.
     private func canSwitch(to account: Account) -> Bool {
-        !account.isActive && appState.switchingTo == nil && !appState.isLoggingIn
+        appState.switchAvailability(for: account).isAvailable
     }
 
     private func switchByDoubleClick(to account: Account) {

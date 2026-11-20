@@ -998,7 +998,7 @@ private func chipHex(_ text: String?) -> UInt32? {
           "resign pins: Settings -> Accounts calls the same appState.reauthenticateAccount from each row's Re-sign")
     check(button.contains("systemImage: \"arrow.triangle.2.circlepath\"") && settingsRow.contains("Image(systemName: \"arrow.triangle.2.circlepath\")")
           && button.contains("String(localized: \"Re-authenticate (fix stale token)\", bundle: L10n.bundle)")
-          && settingsRow.contains(".help(Text(\"Re-authenticate (fix stale token)\"))"),
+          && settingsRow.contains("Text(\"Re-authenticate (fix stale token)\")"),
           "resign pins: the card's Re-sign and the Settings row's carry the same icon and help text")
     check(button.contains("String(localized: \"Re-sign\", bundle: L10n.bundle)"), "resign pins: it has a short visible label, Re-sign")
     check(button.contains(".buttonStyle(.borderless)") && button.contains(".focusable(false)"),

@@ -29,11 +29,24 @@ enum SwitchAvailability: Equatable {
 
     var isAvailable: Bool { self == .available }
 
-    /// Whether Re-sign works: off while a switch or a sign-in is running, as on the
-    /// Usage card, because a second sign-in would only be refused ("A sign-in is
-    /// already in progress."). Never off for being the active or an expired account:
-    /// those are the very accounts it is for.
-    static func canResign(isSwitching: Bool, isLoggingIn: Bool) -> Bool {
-        !isSwitching && !isLoggingIn
+    /// A switch or a sign-in is running. The control API refuses its own switch, sign-in,
+    /// add and remove requests in this state (`AppController.refuseWhileBusy`), so every
+    /// button that does one of those waits too.
+    static func isBusy(isSwitching: Bool, isLoggingIn: Bool) -> Bool {
+        isSwitching || isLoggingIn
+    }
+
+    /// Whether Re-sign, Add current account, Sign in a new account and Remove account work:
+    /// the control API's own rule, so a button never does what the API refuses. (A second
+    /// sign-in would only be refused with "A sign-in is already in progress.") Being the
+    /// active or an expired account never turns Re-sign off: those are the accounts it is for.
+    static func canAddOrRemove(isSwitching: Bool, isLoggingIn: Bool) -> Bool {
+        !isBusy(isSwitching: isSwitching, isLoggingIn: isLoggingIn)
+    }
+
+    /// The card says the sign-in ended: its login expired, which signing in again fixes.
+    /// "No active subscription" is not this: signing in again does not help.
+    static func signInEnded(isExpired: Bool, isNoSubscription: Bool) -> Bool {
+        isExpired && !isNoSubscription
     }
 }

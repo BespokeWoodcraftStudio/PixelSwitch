@@ -29,6 +29,9 @@ struct SettingsSignInButtons: View {
                     }
                 }
             } else {
+                // Off while a switch runs (a sign-in running swaps these for its state above): the
+                // control API refuses both then. The tooltip is on the wrapper, not the disabled buttons.
+                let switching = appState.switchingTo != nil
                 HStack(spacing: 12) {
                     Button("Add Current Account") {
                         confirmingAddCurrent = true
@@ -39,6 +42,9 @@ struct SettingsSignInButtons: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.brand)
                 }
+                .disabled(switching)
+                .contentShape(Rectangle())
+                .help(switching ? String(localized: "Wait for the current switch or sign-in to finish.", bundle: L10n.bundle) : "")
             }
         }
         .confirmationDialog(
@@ -47,6 +53,11 @@ struct SettingsSignInButtons: View {
             titleVisibility: .visible
         ) {
             Button("Add Account") {
+                // A switch may have started while the question was up.
+                guard SwitchAvailability.canAddOrRemove(isSwitching: appState.switchingTo != nil, isLoggingIn: appState.isLoggingIn) else {
+                    appState.errorMessage = String(localized: "A switch or sign-in is in progress. Try again in a moment.", bundle: L10n.bundle)
+                    return
+                }
                 Task { await appState.addAccount() }
             }
             Button("Cancel", role: .cancel) {}

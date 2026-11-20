@@ -45,9 +45,16 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
           "switch rule: the first reason that applies wins, and being on the account comes first")
     check(of(ended: true, switching: true) == .needsSignIn, "switch rule: an ended sign-in is named before a busy app")
 
-    check(SwitchAvailability.canResign(isSwitching: false, isLoggingIn: false), "switch rule: Re-sign is on when nothing is running")
-    check(!SwitchAvailability.canResign(isSwitching: true, isLoggingIn: false) && !SwitchAvailability.canResign(isSwitching: false, isLoggingIn: true),
-          "switch rule: Re-sign waits for a running switch or sign-in, as the Usage card's does")
+    check(!SwitchAvailability.isBusy(isSwitching: false, isLoggingIn: false) && SwitchAvailability.isBusy(isSwitching: true, isLoggingIn: false)
+          && SwitchAvailability.isBusy(isSwitching: false, isLoggingIn: true) && SwitchAvailability.isBusy(isSwitching: true, isLoggingIn: true),
+          "busy rule: busy means a switch or a sign-in is running")
+    check(SwitchAvailability.canAddOrRemove(isSwitching: false, isLoggingIn: false), "busy rule: Add, Sign in, Re-sign and Remove are on when nothing is running")
+    check(!SwitchAvailability.canAddOrRemove(isSwitching: true, isLoggingIn: false) && !SwitchAvailability.canAddOrRemove(isSwitching: false, isLoggingIn: true),
+          "busy rule: they all wait for a running switch or sign-in, as the control API's own requests do")
+    check(SwitchAvailability.signInEnded(isExpired: true, isNoSubscription: false)
+          && !SwitchAvailability.signInEnded(isExpired: true, isNoSubscription: true)
+          && !SwitchAvailability.signInEnded(isExpired: false, isNoSubscription: false),
+          "switch rule: a sign-in has ended when the card says expired, and not for no active subscription (signing in again does not fix that)")
 }
 
 // MARK: - The popover has no Accounts tab
@@ -79,6 +86,15 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     let shots = tidySource("Tools/screenshots/make_screenshots.swift")
     check(!shots.contains("tab(\"person.2\", \"Accounts\""), "tab pins: the screenshot harness's tab bar has no Accounts tab")
 
+    // The popover header keeps a long address on one line.
+    let header = tidySource("PixelSwitch/Views/Components/AccountIdentityHeader.swift")
+    let name = tidyBlock(header, from: "Text(identity.primary)", to: "if let chip {")
+    check(name.contains(".lineLimit(1)") && name.contains(".minimumScaleFactor(0.85)") && name.contains(".truncationMode(.middle)") && name.contains(".help(identity.primary)"),
+          "header pins: the popover header's name is one line, shrinks a little, loses its middle and has the whole address on hover")
+    let longAddress = "build@bespokewoodcraftstudio.test"
+    check(shots.contains("account(\"\(longAddress)\"") && longAddress.count == 33 && !longAddress.contains("-"),
+          "header pins: the screenshot harness draws a 33-character address with no hyphen in the header")
+
     // Settings opens on the tab last used.
     check(settings.contains("@AppStorage(\"settingsSelectedTab\") private var selectedTab: SettingsTab = .general")
           && settings.contains("TabView(selection: $selectedTab)") && tidyCount(settings, ".tag(SettingsTab.") == 5
@@ -109,8 +125,12 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     // Each has a tooltip and a spoken label; the one component applies both.
     check(tidyCount(footer, "help: String(localized:") == 5 && tidyCount(footer, "label: String(localized:") == 5,
           "footer pins: every footer icon is given a tooltip and a spoken label")
-    check(button.contains(".help(help)") && button.contains(".accessibilityLabel(label)"),
-          "footer pins: the component puts the tooltip on .help and the spoken label on .accessibilityLabel")
+    check(button.contains(".help(disabledHelp ?? help)") && button.contains(".accessibilityLabel(label)"),
+          "footer pins: the component puts the tooltip on .help (the reason it is off, else what it is for) and the spoken label on .accessibilityLabel")
+    // The tooltip is on a wrapper, not on the button: macOS may not show one on a disabled control.
+    let buttonOnly = tidyBlock(button, from: "Button(action: action) {", to: ".accessibilityLabel(label)")
+    check(!buttonOnly.isEmpty && !buttonOnly.contains(".help(") && button.contains("        }\n        .contentShape(Rectangle())\n        .help(disabledHelp ?? help)"),
+          "footer pins: the footer icon's tooltip sits on a wrapper around the button, so it shows while the icon is off")
     // Bigger and easier to hit: a 15 pt symbol in a 28 pt square, the whole square clickable, a hover state, the muted tone.
     check(look.contains(".font(.system(size: 15))") && look.contains(".frame(width: 28, height: 28)") && look.contains(".contentShape(Rectangle())"),
           "footer pins: each icon is a 15 pt symbol in a 28 x 28 pt target the whole of which is clickable")
@@ -122,10 +142,14 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     // The actions the icons run, and the two add icons off while a sign-in runs.
     let actions = tidyBlock(menu, from: "private var footerView: some View {", to: "// MARK: - Sign-in and add-account bars")
     check(actions.contains("appState.loginNewAccount()") && actions.contains("confirmingAddCurrent = true") && actions.contains("await appState.refresh()")
-          && actions.contains(".pixelswitchOpenSettings") && actions.contains("NSApplication.shared.terminate(nil)")
-          && actions.contains("isLoggingIn: appState.isLoggingIn"),
+          && actions.contains(".pixelswitchOpenSettings") && actions.contains("NSApplication.shared.terminate(nil)"),
           "footer pins: the icons start the sign-in, ask to add the current account, refresh, open Settings and quit")
-    check(tidyCount(footer, "isDisabled: isLoggingIn") == 2, "footer pins: both add icons are off while a sign-in runs")
+    check(tidyCount(footer, "disabledHelp: busyReason") == 2, "footer pins: both add icons are off, with the reason as their tooltip, while the popover says busy")
+    check(actions.contains("busyReason: addIconsBusy") && menu.contains("!SwitchAvailability.canAddOrRemove(isSwitching: appState.switchingTo != nil, isLoggingIn: appState.isLoggingIn)"),
+          "footer pins: the popover is busy while a switch or a sign-in runs, by the control API's own rule")
+    let controller = tidySource("PixelSwitch/Control/AppController.swift")
+    check(controller.contains("if appState.isSwitching || appState.isLoggingIn {") && controller.contains("throw ControlError(.busy, \"A switch or sign-in is in progress."),
+          "footer pins: the control API still refuses while a switch or a sign-in runs, the rule the buttons copy")
 
     // The confirmation the popover's Add Current Account always had, and the sign-in state, are in the popover.
     let confirm = tidyBlock(file, from: "struct AddCurrentConfirmBar: View {", to: "\n}\n")
@@ -134,6 +158,11 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     let addBar = tidyBlock(menu, from: "private var addCurrentConfirmBar: some View {", to: "\n}\n")
     check(addBar.contains("await appState.addAccount()") && addBar.contains("confirmingAddCurrent = false"),
           "footer pins: Add current account is only done after the confirmation, which only its Add Account button gives")
+    if let guardRange = addBar.range(of: "guard !addIconsBusy else {"), let add = addBar.range(of: "await appState.addAccount()") {
+        check(guardRange.lowerBound < add.lowerBound, "footer pins: the confirmation re-checks busy before it adds the account")
+    } else {
+        check(false, "footer pins: the confirmation re-checks busy before it adds the account")
+    }
     check(!actions.contains("addAccount()"), "footer pins: the icon alone never adds the account")
     let signingIn = tidyBlock(file, from: "struct SigningInBar: View {", to: "/// The confirmation \"Add current account\" always had")
     check(signingIn.contains("Text(\"Signing in…\")") && signingIn.contains("Finish in the sign-in window.")
@@ -163,6 +192,15 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     check(row.contains("Button { onSwitch() } label: { Text(\"Switch\") }") && row.contains(".disabled(switchOffReason != nil)")
           && row.contains(".help(switchOffReason.map { Text(verbatim: $0) } ?? Text(\"Switch to this account\"))"),
           "row pins: the row has a Switch button that is off with its reason as the tooltip")
+    // The tooltip is on a wrapper around each disabled-able button: macOS may not show one on a disabled control.
+    let switchButton = tidyBlock(row, from: "Button { onSwitch() } label: { Text(\"Switch\") }", to: ".accessibilityInputLabels([Text(\"Switch\")])")
+    let resignButton = tidyBlock(row, from: "Button { onResign() } label: {", to: ".accessibilityInputLabels([Text(\"Re-sign\")])")
+    check(!switchButton.isEmpty && !switchButton.contains(".help(") && !resignButton.isEmpty && !resignButton.contains(".help(")
+          && row.contains("            }\n            .contentShape(Rectangle())\n            // The reason it is off, else what it does.\n            .help(switchOffReason")
+          && row.contains("                .contentShape(Rectangle())\n                .help(actionsBusy ? Text(\"Wait for the current switch or sign-in to finish.\")"),
+          "row pins: Switch's reason and Re-sign's tooltip sit on wrappers around their buttons, so they show while the button is off")
+    let removeItem = tidyBlock(row, from: "Button(\"Remove account\", role: .destructive) { onRemove() }", to: "} label: {")
+    check(removeItem.contains(".disabled(actionsBusy)"), "row pins: Remove account is off while a switch or a sign-in runs")
     check(row.contains("Button { onResign() }") && row.contains("Image(systemName: \"arrow.triangle.2.circlepath\")") && row.contains(".disabled(actionsBusy)"),
           "row pins: the row has Re-sign, with the card's icon, off while a switch or sign-in runs")
     check(row.contains("Button(\"Edit label\") { beginEditing() }") && row.contains("TextField(\"Custom label\", text: draftStorage.projectedValue)")
@@ -183,11 +221,17 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     check(tab.contains("onSwitch: { Task { await appState.switchTo(account) } }"), "row pins: Switch calls appState.switchTo")
     check(tab.contains("onResign: { appState.reauthenticateAccount(account) }"), "row pins: Re-sign calls appState.reauthenticateAccount")
     check(tab.contains("onLabel: { appState.updateAccountLabel(account, label: $0) }"), "row pins: Edit label saves through appState.updateAccountLabel")
-    check(tab.contains("onRemove: { pendingRemoval = account }") && tab.contains("Button(\"Remove account\", role: .destructive) { appState.removeAccount(account) }")
-          && tab.contains(".confirmationDialog("),
+    check(tab.contains("onRemove: { pendingRemoval = account }") && tab.contains("Button(\"Remove account\", role: .destructive) {")
+          && tidyCount(tab, "appState.removeAccount(account)") == 1 && tab.contains(".confirmationDialog("),
           "row pins: Remove asks first and only the confirmation calls appState.removeAccount")
-    check(tab.contains("SwitchAvailability.of(isActive: account.isActive,") && tab.contains("SwitchAvailability.canResign("),
+    check(tab.contains("switch appState.switchAvailability(for: account) {") && tab.contains("SwitchAvailability.canAddOrRemove("),
           "row pins: the tab turns the pure Switch rule into the row's inputs")
+    let confirmAction = tidyBlock(tab, from: "Button(\"Remove account\", role: .destructive) {", to: "Button(\"Cancel\", role: .cancel) {}")
+    check(confirmAction.contains("guard SwitchAvailability.canAddOrRemove(isSwitching: appState.switchingTo != nil, isLoggingIn: appState.isLoggingIn) else {")
+          && confirmAction.contains("appState.removeAccount(account)")
+          && (confirmAction.range(of: "guard SwitchAvailability")?.lowerBound ?? confirmAction.endIndex) < (confirmAction.range(of: "appState.removeAccount(account)")?.lowerBound ?? confirmAction.startIndex),
+          "row pins: the Remove confirmation re-checks busy before it removes, like the control API")
+    check(tab.contains("actionsBusy: !SwitchAvailability.canAddOrRemove("), "row pins: Re-sign and Remove are off by the same busy rule")
     check(tab.contains("onPriority:") && tab.contains(".onMove {") && tab.contains("onSession:") && tab.contains("onWeekly:") && tab.contains("SettingsSignInButtons()"),
           "row pins: priority, drag reorder, thresholds and the add buttons are all still there")
 
@@ -195,6 +239,27 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     check(buttons.contains("if appState.isLoggingIn {") && buttons.contains("Text(\"Signing in…\")") && buttons.contains("Button(\"Show sign-in window\")")
           && buttons.contains(".pixelswitchShowSignIn"),
           "row pins: while signing in, Settings shows Signing in… and a button back to the sign-in window")
+    check(buttons.contains("let switching = appState.switchingTo != nil") && buttons.contains(".disabled(switching)")
+          && buttons.contains(".help(switching ? String(localized: \"Wait for the current switch or sign-in to finish.\", bundle: L10n.bundle) : \"\")"),
+          "row pins: while a switch runs, Settings' two add buttons are off and the wrapper says why")
+    if let guardRange = buttons.range(of: "guard SwitchAvailability.canAddOrRemove("), let add = buttons.range(of: "await appState.addAccount()") {
+        check(guardRange.lowerBound < add.lowerBound, "row pins: Settings' Add Account confirmation re-checks busy before it adds the account")
+    } else {
+        check(false, "row pins: Settings' Add Account confirmation re-checks busy before it adds the account")
+    }
+
+    // One rule for Switch and the card's double-click.
+    let dashboard = tidySource("PixelSwitch/Views/UsageDashboardView.swift")
+    let canSwitch = tidyBlock(dashboard, from: "private func canSwitch(to account: Account) -> Bool {", to: "\n    }\n")
+    check(canSwitch.contains("appState.switchAvailability(for: account).isAvailable") && !canSwitch.contains("account.isActive"),
+          "row pins: a double-click on a Usage card follows the rule Settings' Switch follows, so an expired account cannot be switched to by double-click")
+    check(dashboard.contains(".help(canSwitch(to: account) ? String(localized: \"Double-click to switch\", bundle: L10n.bundle) : \"\")"),
+          "row pins: the card's Double-click to switch tooltip appears only when the double-click would work")
+    let app = tidySource("PixelSwitch/AppState.swift")
+    let rule = tidyBlock(app, from: "func switchAvailability(for account: Account) -> SwitchAvailability {", to: "\n    }\n")
+    check(rule.contains("SwitchAvailability.of(") && rule.contains("isSwitching: switchingTo != nil") && rule.contains("isLoggingIn: isLoggingIn")
+          && rule.contains("SwitchAvailability.signInEnded(isExpired: card?.isExpired == true, isNoSubscription: card?.isNoSubscription == true)"),
+          "row pins: AppState answers Switch from what it publishes, the card's state and the busy flags")
 }
 
 // MARK: - The expired message
@@ -261,6 +326,7 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     }
     check(tables.allSatisfy { $0["Each account gets a colored edge and icon on the Usage and Accounts tabs, so you can tell whose numbers you are looking at. Turn it off for plain cards."] == nil },
           "tidy strings: the old Usage and Accounts tabs line is gone from all five tables")
+    check(tables.allSatisfy { $0["Login New Account"] == nil }, "tidy strings: the orphaned Login New Account key (only the deleted Accounts tab used it) is gone from all five tables")
     check(tables.allSatisfy { Set($0.keys) == Set(tables[0].keys) }, "tidy strings: the five tables still have exactly the same keys")
 
     // The words the new row and footer reuse are in the tables.

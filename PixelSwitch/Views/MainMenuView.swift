@@ -357,7 +357,9 @@ struct MainMenuView: View {
     private var footerView: some View {
         PopoverFooter(
             errorMessage: appState.errorMessage,
-            isLoggingIn: appState.isLoggingIn,
+            busyReason: addIconsBusy
+                ? String(localized: "Wait for the current switch or sign-in to finish.", bundle: L10n.bundle)
+                : nil,
             onAddCurrent: {
                 withAnimation(.easeInOut(duration: 0.15)) { confirmingAddCurrent = true }
             },
@@ -395,8 +397,18 @@ struct MainMenuView: View {
             },
             onAdd: {
                 confirmingAddCurrent = false
+                // A switch may have started while the question was up; the control API refuses then.
+                guard !addIconsBusy else {
+                    appState.errorMessage = String(localized: "A switch or sign-in is in progress. Try again in a moment.", bundle: L10n.bundle)
+                    return
+                }
                 Task { await appState.addAccount() }
             }
         )
+    }
+
+    /// A switch or a sign-in is running: the two add icons wait (`SwitchAvailability`, the control API's rule).
+    private var addIconsBusy: Bool {
+        !SwitchAvailability.canAddOrRemove(isSwitching: appState.switchingTo != nil, isLoggingIn: appState.isLoggingIn)
     }
 }

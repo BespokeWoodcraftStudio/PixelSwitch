@@ -105,7 +105,8 @@ struct SettingsAccountRow: View {
     var needsResign = false
     /// nil while Switch is on; otherwise why it is off, which is also its tooltip.
     var switchOffReason: String?
-    /// A switch or a sign-in is running: Re-sign waits too (the Usage card's rule).
+    /// A switch or a sign-in is running: Re-sign and Remove account wait too (the Usage card's
+    /// rule, and the control API's).
     var actionsBusy = false
 
     let onPriority: @MainActor (Int?) -> Void
@@ -245,37 +246,49 @@ struct SettingsAccountRow: View {
 
     /// Switch over two small icons, Re-sign and a "..." menu (Edit label, Remove account), in one
     /// narrow column at the row's end. Stacked rather than side by side because the row has no
-    /// width to spare: Settings is 940 pt wide and the address must keep as much of it as it can.
+    /// width to spare: the address must keep as much of the row as it can.
     /// Switch and Re-sign are one click; the two that change the account itself are one menu away.
+    /// Switch, Re-sign and Remove wait while a switch or a sign-in runs (the control API refuses
+    /// them then too).
+    ///
+    /// The tooltips sit on a plain wrapper around each button, not on the button: macOS may not
+    /// show a tooltip on a disabled control, and the tooltip is how Switch says why it is off.
     private var actions: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            Button { onSwitch() } label: { Text("Switch") }
-                .controlSize(.small)
-                .disabled(switchOffReason != nil)
-                // The reason it is off, else what it does.
-                .help(switchOffReason.map { Text(verbatim: $0) } ?? Text("Switch to this account"))
-                .accessibilityLabel(Text("Switch to \(title)"))
-                // Voice Control: "Click Switch" still works with the spoken label naming the account.
-                .accessibilityInputLabels([Text("Switch")])
+            HStack(spacing: 0) {
+                Button { onSwitch() } label: { Text("Switch") }
+                    .controlSize(.small)
+                    .disabled(switchOffReason != nil)
+                    .accessibilityLabel(Text("Switch to \(title)"))
+                    // Voice Control: "Click Switch" still works with the spoken label naming the account.
+                    .accessibilityInputLabels([Text("Switch")])
+            }
+            .contentShape(Rectangle())
+            // The reason it is off, else what it does.
+            .help(switchOffReason.map { Text(verbatim: $0) } ?? Text("Switch to this account"))
 
             HStack(spacing: 4) {
                 // The Usage card's Re-sign icon and tooltip, so it is the same button everywhere.
-                Button { onResign() } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .foregroundStyle(needsResign ? Color.limitWarn : Color.textSecondary)
-                        .frame(width: 24, height: 20)
-                        .contentShape(Rectangle())
+                HStack(spacing: 0) {
+                    Button { onResign() } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(needsResign ? Color.limitWarn : Color.textSecondary)
+                            .frame(width: 24, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(actionsBusy)
+                    .accessibilityLabel(Text("Re-authenticate \(title)"))
+                    .accessibilityInputLabels([Text("Re-sign")])
                 }
-                .buttonStyle(.plain)
-                .disabled(actionsBusy)
-                .help(Text("Re-authenticate (fix stale token)"))
-                .accessibilityLabel(Text("Re-authenticate \(title)"))
-                .accessibilityInputLabels([Text("Re-sign")])
+                .contentShape(Rectangle())
+                .help(actionsBusy ? Text("Wait for the current switch or sign-in to finish.") : Text("Re-authenticate (fix stale token)"))
 
                 Menu {
                     Button("Edit label") { beginEditing() }
                     Divider()
                     Button("Remove account", role: .destructive) { onRemove() }
+                        .disabled(actionsBusy)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .foregroundStyle(Color.textSecondary)

@@ -434,7 +434,7 @@ final class AppState: ObservableObject {
         let message: String
     }
 
-    /// The popover's and Settings' "Add Current Account".
+    /// The popover footer's and Settings' "Add Current Account".
     func addAccount() async {
         do {
             _ = try await performAddCurrentAccount()
@@ -555,7 +555,7 @@ final class AppState: ObservableObject {
         return session
     }
 
-    /// The popover's "Login New Account" and Settings' "Sign In New Account".
+    /// The popover footer's "Sign in a new account" icon and Settings' "Sign In New Account".
     func loginNewAccount() {
         log.info("[loginNewAccount] ===== Starting login new account flow =====")
         do {
@@ -1218,7 +1218,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// The popover's Switch and double-click, and auto-switch.
+    /// Settings' Switch, a Usage card's double-click, and auto-switch.
     func switchTo(_ account: Account) async {
         do {
             try await performSwitch(to: account)
@@ -1729,6 +1729,19 @@ final class AppState: ObservableObject {
             backupToken: keychain.getAccountBackup(forAccountId: account.id.uuidString)?.token,
             needsReauth: requestGuard.isNeedsReauth(account.id),
             cardSaysLoginExpired: accountUsageErrors[account.id]?.isExpired == true)
+    }
+
+    /// Whether Settings' Switch button and a double-click on a Usage card may switch to
+    /// `account` now, and if not why (`SwitchAvailability`). Reads only what is published,
+    /// never the Keychain, so a view can ask on every redraw; `performSwitch` still refuses
+    /// an unusable saved login when a switch is made.
+    func switchAvailability(for account: Account) -> SwitchAvailability {
+        let card = accountUsageErrors[account.id]
+        return SwitchAvailability.of(
+            isActive: account.isActive,
+            signInEnded: SwitchAvailability.signInEnded(isExpired: card?.isExpired == true, isNoSubscription: card?.isNoSubscription == true),
+            isSwitching: switchingTo != nil,
+            isLoggingIn: isLoggingIn)
     }
 
     /// Whether the account's last usage request was refused for want of an
