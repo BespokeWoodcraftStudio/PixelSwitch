@@ -359,7 +359,7 @@
 "Re-sign" = "Neu anmelden";
 "No plan" = "Kein Tarif";
 
-/* 2.2: Resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
-"Resets" = "Limit-Resets";
-"Resets for %@" = "Limit-Resets für %@";
+/* 2.2: Limit resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+"Limit resets" = "Limit-Resets";
+"Limit resets for %@" = "Limit-Resets für %@";
 "Open this account's claude.ai usage page to use a reset" = "Die claude.ai-Nutzungsseite dieses Kontos öffnen, um einen Reset zu nutzen";

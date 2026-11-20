@@ -18,6 +18,7 @@
 //     PixelSwitch/Views/Components/UsageLimitRow.swift \
 //     PixelSwitch/Views/Components/AccountGlyph.swift \
 //     PixelSwitch/Views/Components/Badge.swift \
+//     PixelSwitch/Views/Components/CardFooterRow.swift \
 //     PixelSwitch/Models/Account.swift PixelSwitch/Models/AccountPlan.swift PixelSwitch/Models/UsageData.swift \
 //     PixelSwitch/Models/String+Obfuscation.swift \
 //     PixelSwitch/Models/MenuBarConfig.swift PixelSwitch/Models/MenuBarModule.swift \
@@ -45,7 +46,7 @@ private struct SampleAccount {
     /// A usage request that left no reading: the sign-in ended (the card offers
     /// Re-sign) or the account has no active subscription (it offers nothing).
     var problem: Problem?
-    /// Whether the card offers Resets. True for an account with a plan; the
+    /// Whether the card offers Limit resets. True for an account with a plan; the
     /// no-subscription sample sets it from the real `Account.showsResetsButton`.
     var showsResets = true
 
@@ -109,10 +110,106 @@ private let unreachableSample = SampleAccount(email: "offline@example.com", swat
                                               session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", problem: .unreachable)
 private let lapsedSample = SampleAccount(email: "lapsed@example.com", swatch: 5, chip: chip("max", "max_20x", noSubscription: true), active: false,
                                          session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", problem: .noSubscription,
-                                         // The real rule decides: a lapsed account has no Resets button.
+                                         // The real rule decides: a lapsed account has no Limit resets button.
                                          showsResets: Account(email: "lapsed@example.com", displayName: "Lapsed",
                                                               subscriptionType: "max", planTier: "max_20x")
                                              .showsResetsButton(noSubscription: true))
+
+/// The footer's words in one language, read from that language's own Localizable.strings
+/// (run from the repo root), so the German and French pictures use the shipped translations.
+/// "Double-click to switch" and "Switching…" are in no table, so the app shows them in English
+/// in every language, and so does this.
+private struct FooterStrings {
+    let code: String
+    let bundle: Bundle
+    /// What `Text(date, style: .relative)` prints for a long and for a short age. The system
+    /// formats these, so they are written out here as that language prints them.
+    let longAge: String
+    let shortAge: String
+    /// An invented age longer than the app is likely to show, only to prove the last fallback.
+    let stressAge: String
+
+    init(_ code: String, longAge: String, shortAge: String, stressAge: String) {
+        self.code = code
+        self.longAge = longAge
+        self.shortAge = shortAge
+        self.stressAge = stressAge
+        self.bundle = Bundle(path: "PixelSwitch/\(code).lproj") ?? .main
+    }
+
+    func t(_ key: String) -> String { bundle.localizedString(forKey: key, value: key, table: nil) }
+    func age(_ relative: String) -> String { String(format: t("Updated %@ ago"), relative) }
+    var resets: String { t("Limit resets") }
+    var manualOnly: String { t("Manual only") }
+
+    static let en = FooterStrings("en", longAge: "12 hr, 59 min", shortAge: "4 min", stressAge: "1 day, 23 hr, 59 min")
+    static let de = FooterStrings("de", longAge: "12 Std., 59 Min.", shortAge: "4 Min.", stressAge: "1 Tag, 23 Std., 59 Min.")
+    static let fr = FooterStrings("fr", longAge: "12 h, 59 min", shortAge: "4 min", stressAge: "1 j, 23 h, 59 min")
+    static let ja = FooterStrings("ja", longAge: "12時間59分", shortAge: "4分", stressAge: "1日23時間59分")
+    static let zh = FooterStrings("zh-Hans", longAge: "12小时59分钟", shortAge: "4分钟", stressAge: "1天23小时59分钟")
+    static let all = [en, de, fr, ja, zh]
+}
+
+/// The pieces of a card's footer as the app draws them, as looks (ImageRenderer cannot draw a
+/// real Button). The layout rule is the app's own `CardFooterRow`.
+private struct FooterLine: View {
+    let strings: FooterStrings
+    /// The relative age ("4 min"); nil draws no age, as for a fresh reading.
+    var relative: String?
+    var showsResets = true
+    var hover = false
+    var switching = false
+    var manualOnly = false
+
+    private func resets(iconOnly: Bool) -> some View {
+        Group {
+            if showsResets {
+                Group {
+                    if iconOnly {
+                        Label(strings.resets, systemImage: "arrow.counterclockwise.circle").labelStyle(.iconOnly)
+                    } else {
+                        Label(strings.resets, systemImage: "arrow.counterclockwise.circle")
+                    }
+                }
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.brandText)
+            }
+        }
+    }
+
+    var body: some View {
+        CardFooterRow(
+            age: Group {
+                if let relative {
+                    HStack(spacing: 3) {
+                        Image(systemName: "clock").font(.caption2)
+                        Text(verbatim: strings.age(relative)).font(.caption2).lineLimit(1)
+                    }
+                    .foregroundStyle(.textSecondary)
+                }
+            },
+            reset: resets(iconOnly: false),
+            resetIconOnly: resets(iconOnly: true),
+            status: Group {
+                if switching {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.2.circlepath").font(.caption2)
+                        Text("Switching…").font(.caption2.weight(.semibold))
+                    }
+                    .foregroundStyle(Color.brandText)
+                } else if manualOnly && !hover {
+                    Label(strings.manualOnly, systemImage: "hand.raised")
+                        .font(.caption2).foregroundStyle(.textSecondary).lineLimit(1)
+                }
+            },
+            hint: Group {
+                if hover && !switching {
+                    Text("Double-click to switch").font(.caption2).foregroundStyle(.textSecondary).lineLimit(1)
+                }
+            }
+        )
+    }
+}
 
 private struct Card: View {
     let account: SampleAccount
@@ -122,14 +219,15 @@ private struct Card: View {
     /// "", "hover" or "switching": the three states a card can be in once
     /// double-click-to-switch exists.
     var interaction: String = ""
-    /// The footer's age text. The app prints "Updated <relative time> ago" and only
+    /// The footer's relative age. The app prints "Updated <relative time> ago" and only
     /// once a reading is 90 seconds old; a long one is the tightest case for the row.
-    var updated: String = "Updated 1 min ago"
+    var relative: String = "1 min"
+    var strings = FooterStrings.en
 
-    /// The app's Resets button, as a look (see the note beside Re-sign below):
+    /// The app's Limit resets button, as a look (see the note beside Re-sign below):
     /// the same Label, symbol and font, in `.brandText`.
     private var resetsLabel: some View {
-        Label("Resets", systemImage: "arrow.counterclockwise.circle")
+        Label(strings.resets, systemImage: "arrow.counterclockwise.circle")
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.brandText)
             .fixedSize()
@@ -170,7 +268,7 @@ private struct Card: View {
                 if let problem = account.problem {
                     // Hand copy of the Usage card's no-reading branch (UsageDashboardView):
                     // keep it in step by hand. Re-sign only when the sign-in has ended.
-                    // Like the app's, this kind of card has no footer: Resets sits in a row
+                    // Like the app's, this kind of card has no footer: Limit resets sits in a row
                     // of its own under the message, and only when `showsResets`.
                     HStack(alignment: .top) {
                         Image(systemName: problem == .expired ? "exclamationmark.triangle" : "xmark.circle")
@@ -208,31 +306,9 @@ private struct Card: View {
                 }
 
                 if account.problem == nil {
-                    // The footer row of a card with a reading: the age, Resets beside it,
-                    // and what clicking would do on the right (as UsageDashboardView.cardFooter).
-                    HStack(spacing: 6) {
-                        HStack(spacing: 3) {
-                            Image(systemName: "clock").font(.caption2)
-                            Text(updated).font(.caption2).lineLimit(1)
-                        }
-                        .foregroundStyle(.textSecondary)
-                        if account.showsResets { resetsLabel }
-                        Spacer(minLength: 4)
-                        if interaction == "switching" {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.triangle.2.circlepath").font(.caption2)
-                                Text("Switching…").font(.caption2.weight(.semibold))
-                            }
-                            .foregroundStyle(Color.brandText)
-                        } else if interaction == "hover" {
-                            Text("Double-click to switch")
-                                .font(.caption2)
-                                .foregroundStyle(.textSecondary)
-                                .lineLimit(1)
-                                .fixedSize()
-                        }
-                    }
-                    .frame(minHeight: 14)
+                    // The footer row of a card with a reading (the app's `CardFooterRow`).
+                    FooterLine(strings: strings, relative: relative, showsResets: account.showsResets,
+                               hover: interaction == "hover", switching: interaction == "switching")
                 } else if account.showsResets {
                     HStack(spacing: 6) {
                         resetsLabel
@@ -421,6 +497,57 @@ private struct Chrome: View {
     }
 }
 
+/// One footer line inside the card's own chrome (swatch, padding, border), so the line is given exactly
+/// the width a real card gives it: a 328 pt card leaves 290 pt.
+private struct FooterCard: View {
+    let line: FooterLine
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous).fill(AccountPalette.color(3)).frame(width: 4).frame(maxHeight: .infinity)
+            line
+        }
+        .cardStyle()
+    }
+}
+
+private struct FooterMatrix: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(FooterStrings.all, id: \.code) { strings in
+                Text(verbatim: strings.code).font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                FooterCard(line: FooterLine(strings: strings, relative: strings.shortAge, hover: true))
+                FooterCard(line: FooterLine(strings: strings, relative: strings.longAge, hover: true))
+                FooterCard(line: FooterLine(strings: strings, relative: strings.longAge, manualOnly: true))
+                FooterCard(line: FooterLine(strings: strings, relative: strings.stressAge, hover: true))
+            }
+        }
+    }
+}
+
+/// Prints each piece's natural width as SwiftUI lays it out, per language, against the 290 pt a
+/// card gives the line, and which variant of `CardFooterRow` that picks (the same order it tries).
+@MainActor
+private func reportFooterWidths() {
+    func width<V: View>(_ view: V) -> CGFloat { NSHostingView(rootView: view.fixedSize()).fittingSize.width }
+    let hint = width(Text("Double-click to switch").font(.caption2))
+    let available: CGFloat = 328 - 2 * AppStyle.cardPadding - 14
+    print("footer widths (points); the line gets \(available) pt; spacing 6, spacer 4; hint \(hint)")
+    for strings in FooterStrings.all {
+        for (name, relative) in [("long age", strings.longAge), ("short age", strings.shortAge), ("stress age", strings.stressAge)] {
+            let age = width(HStack(spacing: 3) { Image(systemName: "clock").font(.caption2)
+                                                  Text(verbatim: strings.age(relative)).font(.caption2) })
+            let full = width(Label(strings.resets, systemImage: "arrow.counterclockwise.circle").font(.caption2.weight(.semibold)))
+            let icon = width(Label(strings.resets, systemImage: "arrow.counterclockwise.circle").labelStyle(.iconOnly).font(.caption2.weight(.semibold)))
+            let withHint = age + 6 + full + 6 + 4 + 6 + hint
+            let noHint = age + 6 + full + 6 + 4
+            let iconOnly = age + 6 + icon + 6 + 4
+            let pick = withHint <= available ? "hint + words" : (noHint <= available ? "words, hint dropped" : "icon only")
+            print(String(format: "  %@ %@: age %.0f, button %.0f (icon %.0f); with hint %.0f, without %.0f, icon-only %.0f -> %@",
+                         strings.code, name, age, full, icon, withHint, noHint, iconOnly, pick))
+        }
+    }
+}
+
 @main
 enum Screenshots {
     static func main() {
@@ -437,6 +564,7 @@ enum Screenshots {
         let logo = Image(nsImage: logoImage)
 
         MainActor.assumeIsolated {
+            reportFooterWidths()
             let config = MenuBarConfig.shared
             // The stock palette, so the pictures match a fresh install.
             config.customizesLimitBarColors = false
@@ -504,25 +632,32 @@ enum Screenshots {
                       },
                       width: 380, scheme: scheme, to: "\(out)/resign-\(name).png")
 
-                // The Resets button at the popover's real width (a 360 pt popover leaves a card
+                // The Limit resets button at the popover's real width (a 360 pt popover leaves a card
                 // 328 pt wide; the pictures above are wider): a normal card, an expired card with
-                // Re-sign beside the message and Resets under it, and the lapsed card with neither.
+                // Re-sign beside the message and Limit resets under it, and the lapsed card with neither.
                 write(VStack(alignment: .leading, spacing: 12) {
-                        Text("Normal card: Resets beside the age").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
-                        Card(account: sample[1], config: config, logo: logo, updated: "Updated 4 min ago")
-                        Text("Sign-in ended: Re-sign stays, Resets under it").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Text("Normal card: Limit resets beside the age").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Card(account: sample[1], config: config, logo: logo, relative: "4 min")
+                        Text("Sign-in ended: Re-sign stays, Limit resets under it").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
                         Card(account: expiredSample, config: config, logo: logo)
-                        Text("No active subscription: no Resets").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Text("No active subscription: no Limit resets").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
                         Card(account: lapsedSample, config: config, logo: logo)
                       },
                       width: 356, scheme: scheme, to: "\(out)/resets-\(name).png")
 
-                // The tightest the footer gets: the longest age text and the pointer over the card.
-                write(VStack(alignment: .leading, spacing: 12) {
-                        Text("Pointer over a card, oldest age text").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
-                        Card(account: sample[2], config: config, logo: logo, interaction: "hover", updated: "Updated 1 hr, 5 min ago")
-                      },
-                      width: 356, scheme: scheme, to: "\(out)/resets-hover-\(name).png")
+                // The tightest the footer gets: the longest age text, the pointer over the card, at the
+                // real card width, in English, German and French (their own shipped strings).
+                for strings in [FooterStrings.en, .de, .fr] {
+                    write(VStack(alignment: .leading, spacing: 12) {
+                            Text("Pointer over a card, longest age (\(strings.code))").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                            Card(account: sample[2], config: config, logo: logo, interaction: "hover", relative: strings.longAge, strings: strings)
+                          },
+                          width: 356, scheme: scheme, to: "\(out)/resets-hover-\(strings.code)-\(name).png")
+                }
+
+                // Every state of the footer line in every language, at the real card width: the age
+                // is whole in every row; the hint goes first, then the words of the button.
+                write(FooterMatrix(), width: 356, scheme: scheme, to: "\(out)/footer-matrix-\(name).png")
 
                 write(autoSwitch(config: config, logo: logo, scheme: scheme),
                       width: 420, scheme: scheme, to: "\(out)/auto-switch-\(name).png")

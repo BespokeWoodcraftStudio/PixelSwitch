@@ -359,7 +359,7 @@
 "Re-sign" = "Se reconnecter";
 "No plan" = "Aucun forfait";
 
-/* 2.2: Resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
-"Resets" = "Réinitialisations";
-"Resets for %@" = "Réinitialisations pour %@";
+/* 2.2: Limit resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+"Limit resets" = "Réinit. des limites";
+"Limit resets for %@" = "Réinitialisation des limites pour %@";
 "Open this account's claude.ai usage page to use a reset" = "Ouvrir la page d'utilisation claude.ai de ce compte pour utiliser une réinitialisation";

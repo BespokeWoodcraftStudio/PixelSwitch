@@ -359,7 +359,7 @@
 "Re-sign" = "重新登录";
 "No plan" = "无套餐";
 
-/* 2.2: Resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
-"Resets" = "重置";
-"Resets for %@" = "%@ 的重置";
+/* 2.2: Limit resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+"Limit resets" = "限额重置";
+"Limit resets for %@" = "%@ 的限额重置";
 "Open this account's claude.ai usage page to use a reset" = "打开此账户的 claude.ai 用量页面以使用重置";

@@ -1059,15 +1059,15 @@ private func chipHex(_ text: String?) -> UInt32? {
           "button text pins: the two buttons share one style and use no literal colour")
 }
 
-// MARK: - The Resets button: who gets it
+// MARK: - The Limit resets button: who gets it
 
 /// The founder (2026-11-19, "go with option A") chose a claude.ai window per account, opened
-/// from a Resets button on the Usage card, so he can click claude.ai's own "Reset for free"
+/// from a Limit resets button on the Usage card, so he can click claude.ai's own "Reset for free"
 /// for the right account himself. These tests pin who is offered the button. The wiring (what
 /// the button calls, where it sits, that nothing is clicked on claude.ai) is pinned below.
 @MainActor private func resetsRuleTests() {
     func account(_ subscription: String?, _ tier: String?, provider: AIProviderType = .claudeCode) -> Account {
-        Account(email: "resets@x.com", displayName: "Resets", provider: provider, subscriptionType: subscription, planTier: tier)
+        Account(email: "resets@x.com", displayName: "Limit resets", provider: provider, subscriptionType: subscription, planTier: tier)
     }
     let withAPlan: [(String, Account)] = [
         ("Max 5x", account("max", "max_5x")), ("Ultra", account("max", "max_20x")), ("Max with no tier", account("max", nil)),
@@ -1076,7 +1076,7 @@ private func chipHex(_ text: String?) -> UInt32? {
     ]
     for (name, plan) in withAPlan {
         check(plan.showsResetsButton() && plan.showsResetsButton(noSubscription: false),
-              "resets rule: a \(name) account is offered Resets")
+              "resets rule: a \(name) account is offered Limit resets")
         check(!plan.showsResetsButton(noSubscription: true),
               "resets rule: a \(name) account that has lapsed (no active subscription) is not")
     }
@@ -1085,20 +1085,20 @@ private func chipHex(_ text: String?) -> UInt32? {
     // sign-in is its own, separate from Claude Code's. Expiry is not an input to the rule,
     // so the only way off is the no-subscription flag (the view passes nothing else; pinned below).
     let expired = account("max", "max_5x")
-    check(expired.showsResetsButton(), "resets rule: an account whose Claude Code sign-in has expired keeps Resets (only no-subscription removes it)")
+    check(expired.showsResetsButton(), "resets rule: an account whose Claude Code sign-in has expired keeps Limit resets (only no-subscription removes it)")
     check(AccountPlan.chip(subscriptionType: "max", planTier: "max_20x", noSubscription: true)?.tone == .noPlan
           && !account("max", "max_20x").showsResetsButton(noSubscription: true),
-          "resets rule: the card whose chip says No plan has no Resets button")
+          "resets rule: the card whose chip says No plan has no Limit resets button")
 
     check(!account(nil, nil).showsResetsButton() && !account("", "").showsResetsButton() && !account("  ", nil).showsResetsButton(),
-          "resets rule: an account whose plan is not known yet has no Resets button until it is read")
+          "resets rule: an account whose plan is not known yet has no Limit resets button until it is read")
     check(!account("pro", nil, provider: .gemini).showsResetsButton() && !account("pro", nil, provider: .codex).showsResetsButton(),
           "resets rule: only a Claude account has a claude.ai page, so another provider's account never gets it")
     check(withAPlan.allSatisfy { $0.1.showsResetsButton() == ($0.1.planChip() != nil) },
           "resets rule: it agrees with the plan chip, an account that wears a plan chip has the button")
 }
 
-// MARK: - The Resets button: what it calls and where it sits (wiring a view test cannot compile)
+// MARK: - The Limit resets button: what it calls and where it sits (wiring a view test cannot compile)
 
 @MainActor private func resetsWiringTests() {
     let dashboard = planSource("PixelSwitch/Views/UsageDashboardView.swift")
@@ -1117,16 +1117,19 @@ private func chipHex(_ text: String?) -> UInt32? {
           "resets pins: the Usage card never scripts, clicks, submits or sends anything on claude.ai (no web view, request or script call in it)")
     check(button.contains(".buttonStyle(.borderless)") && button.contains(".focusable(false)"),
           "resets pins: Resets is a real borderless button, so a click on it never counts toward the card's double-click to switch")
-    check(button.contains("String(localized: \"Resets\", bundle: L10n.bundle), systemImage: \"arrow.counterclockwise.circle\")")
-          && button.contains(".font(.caption2.weight(.semibold))\n                .foregroundStyle(.brandText)"),
-          "resets pins: its label is Resets with the limits-refilling symbol, in the same caption font and .brandText as Retry and Re-sign")
+    check(button.contains("String(localized: \"Limit resets\", bundle: L10n.bundle), systemImage: \"arrow.counterclockwise.circle\")")
+          && button.contains(".font(.caption2.weight(.semibold))\n            .foregroundStyle(.brandText)"),
+          "resets pins: its label is Limit resets (claude.ai's own heading, not the rows' Resets in) with the limits-refilling symbol, in the same caption font and .brandText as Retry and Re-sign")
+    check(button.contains("iconOnly: Bool") && button.contains(".labelStyle(.iconOnly)") && button.contains(".help(String(localized: \"Open this account's")
+          && button.contains(".accessibilityLabel("),
+          "resets pins: the icon-only form keeps the tooltip and the spoken label, so the button is still named when it has no words")
     check(button.contains(".help(String(localized: \"Open this account's claude.ai usage page to use a reset\", bundle: L10n.bundle))"),
           "resets pins: its help text says it opens the account's claude.ai usage page")
-    check(button.contains(".accessibilityLabel(String(format: String(localized: \"Resets for %@\", bundle: L10n.bundle),")
+    check(button.contains(".accessibilityLabel(String(format: String(localized: \"Limit resets for %@\", bundle: L10n.bundle),")
           && button.contains("account.displayEmail(obfuscated: maskEmails)"),
           "resets pins: its spoken label names the account (masked when masking is on)")
-    check(button.contains(".accessibilityInputLabels([String(localized: \"Resets\", bundle: L10n.bundle)])"),
-          "resets pins: Voice Control can say Resets")
+    check(button.contains(".accessibilityInputLabels([String(localized: \"Limit resets\", bundle: L10n.bundle)])"),
+          "resets pins: Voice Control can say Limit resets")
     check(!button.contains(".disabled("), "resets pins: it is not disabled during a sign-in or a switch (opening a web page touches neither)")
 
     // Re-sign keeps its place and gains the Voice Control name.
@@ -1143,26 +1146,50 @@ private func chipHex(_ text: String?) -> UInt32? {
           && !visible.contains("isExpired"),
           "resets pins: the card asks Account.showsResetsButton with its no-subscription state and never gates on the sign-in having expired")
 
-    // Where it sits: in the footer next to the age, and in a row of its own on a card with no reading.
+    // Where it sits: in the footer next to the age (through the shared CardFooterRow), and in a row of its own on a card with no reading.
     let footer = planMember(dashboard, startingAt: "private func cardFooter(")
-    if let age = footer.range(of: "sampleAgeLabel(account)"), let use = footer.range(of: "resetsButton(account)"),
-       let spacer = footer.range(of: "Spacer(minLength: 4)") {
-        check(age.lowerBound < use.lowerBound && use.lowerBound < spacer.lowerBound && footer.contains("if resetsVisible(account) {"),
-              "resets pins: in the footer row Resets sits right after \"Updated ... ago\", on the left, behind the visibility rule")
-    } else {
-        check(false, "resets pins: the footer row's parts are found")
-    }
+    let footerResets = planMember(dashboard, startingAt: "private func footerResets(")
+    check(footer.contains("CardFooterRow(") && footer.contains("age: sampleAgeLabel(account)")
+          && footer.contains("reset: footerResets(account, iconOnly: false)") && footer.contains("resetIconOnly: footerResets(account, iconOnly: true)")
+          && footer.contains("status: footerStatus(account)") && footer.contains("hint: footerHint(account)"),
+          "resets pins: the footer is the shared CardFooterRow: the age, Limit resets in both forms, the status and the hint")
+    check(footerResets.contains("if resetsVisible(account) {") && footerResets.contains("resetsButton(account, iconOnly: iconOnly)"),
+          "resets pins: the footer's Limit resets is behind the visibility rule, in either form")
     if let waiting = dashboard.range(of: "Waiting for usage data..."), let row = dashboard.range(of: "if usage == nil, resetsVisible(account) {"),
        let chain = dashboard.range(of: "resignButton(account)") {
         check(chain.lowerBound < waiting.lowerBound && waiting.lowerBound < row.lowerBound,
-              "resets pins: a card with no reading gets Resets in a row of its own after the message and Re-sign, not inside them")
+              "resets pins: a card with no reading gets Limit resets in a row of its own after the message and Re-sign, not inside them")
     } else {
         check(false, "resets pins: the no-reading card's row is found")
     }
-    check(dashboard.components(separatedBy: "resetsButton(account)").count == 3,
+    check(dashboard.components(separatedBy: "resetsButton(account").count == 3,
           "resets pins: resetsButton is used in exactly two places, the footer and the no-reading row")
-    check(footer.contains("Text(\"Double-click to switch\")") && footer.contains(".lineLimit(1)\n                    .fixedSize()"),
-          "resets pins: the hover hint cannot wrap, so the footer stays one line with Resets beside the age")
+
+    // The footer's give-way order, in the one shared layout: the age is never cut, the hint goes first, then the words.
+    let row = planSource("PixelSwitch/Views/Components/CardFooterRow.swift")
+    check(!row.isEmpty && row.contains("ViewThatFits(in: .horizontal)"), "footer pins: CardFooterRow picks the first variant that fits the card (ViewThatFits)")
+    if let all = row.range(of: "line(reset, hint: hint)"), let noHint = row.range(of: "line(reset, hint: EmptyView())"),
+       let icon = row.range(of: "line(resetIconOnly, hint: EmptyView())") {
+        check(all.lowerBound < noHint.lowerBound && noHint.lowerBound < icon.lowerBound,
+              "footer pins: the variants are tried in this order: all of it, then without the hint, then the button icon-only")
+    } else {
+        check(false, "footer pins: the three variants are found")
+    }
+    check(row.contains("age.fixedSize()") && !row.contains("minimumScaleFactor") && !row.contains("truncationMode") && !row.contains("layoutPriority(-"),
+          "footer pins: the age is fixedSize in every variant, and nothing in the row can shrink or truncate it")
+    check(row.components(separatedBy: "age.fixedSize()").count == 2 && row.components(separatedBy: "line(").count == 4,
+          "footer pins: one line builder holds the age, and every variant is built from it")
+    let age = planMember(dashboard, startingAt: "private func sampleAgeLabel(")
+    check(age.contains(".lineLimit(1)") && !age.contains("minimumScaleFactor") && !age.contains("truncationMode"),
+          "footer pins: the age text is one line and never scaled")
+    let hint = planMember(dashboard, startingAt: "private func footerHint(")
+    check(hint.contains("Text(\"Double-click to switch\")") && dashboard.components(separatedBy: "Text(\"Double-click to switch\")").count == 2,
+          "footer pins: the hover hint lives in footerHint only, the piece the row drops first")
+    let status = planMember(dashboard, startingAt: "private func footerStatus(")
+    check(status.contains("Text(\"Switching…\")") && status.contains("Label(\"Manual only\"") && !status.contains("Double-click"),
+          "footer pins: Switching and Manual only are the status, kept in every variant")
+    check(dashboard.contains("hoveredAccount == account.id && canSwitch(to: account)") && status.contains("!showsSwitchHint(account)"),
+          "footer pins: the hover hint still takes the place of the Manual only note while the pointer is over a switchable card")
 
     // Removing an account takes its claude.ai sign-in with it, once, on the one removal path.
     let remove = planMember(app, startingAt: "func removeAccount(_ account: Account) {")
@@ -1179,20 +1206,23 @@ private func chipHex(_ text: String?) -> UInt32? {
           "resets pins: there is one place an account is deleted from the list, so no removal skips the sign-in")
 
     // The screenshot harness asks the real rule for the lapsed card.
-    check(shots.contains(".showsResetsButton(noSubscription: true)") && shots.contains("arrow.counterclockwise.circle"),
-          "resets pins: the screenshot fixtures draw Resets from the real rule, with the same symbol")
+    check(shots.contains(".showsResetsButton(noSubscription: true)") && shots.contains("arrow.counterclockwise.circle")
+          && shots.contains("CardFooterRow(") && shots.contains("PixelSwitch/Views/Components/CardFooterRow.swift"),
+          "resets pins: the screenshot fixtures draw Limit resets from the real rule, with the same symbol and the app's own footer layout")
 
     // The strings: the three new keys are in all five tables, translated.
     let languages = ["en", "de", "fr", "ja", "zh-Hans"]
     let tables = languages.map { NSDictionary(contentsOfFile: "PixelSwitch/\($0).lproj/Localizable.strings") as? [String: String] ?? [:] }
-    let keys = ["Resets", "Resets for %@", "Open this account's claude.ai usage page to use a reset"]
+    let keys = ["Limit resets", "Limit resets for %@", "Open this account's claude.ai usage page to use a reset"]
+    check(tables.allSatisfy { $0["Resets"] == nil && $0["Resets for %@"] == nil },
+          "resets strings: the first draft's keys, Resets and Resets for %@, are gone from all five tables (no orphans)")
     for key in keys {
         check(tables.allSatisfy { ($0[key] ?? "").isEmpty == false }, "resets strings: '\(key)' is in all five tables")
         check(tables[0][key] == key && zip(tables.dropFirst(), languages.dropFirst()).allSatisfy { $0.0[key] != key },
               "resets strings: the English line of '\(key)' is the key and de, fr, ja and zh-Hans are translated, not copied")
         check(tables.allSatisfy { !($0[key] ?? "").contains("\u{2014}") }, "resets strings: '\(key)' has no em dash in any language")
     }
-    check(tables.dropFirst().allSatisfy { ($0["Resets for %@"] ?? "").contains("%@") },
+    check(tables.dropFirst().allSatisfy { ($0["Limit resets for %@"] ?? "").contains("%@") },
           "resets strings: every translation of the spoken label keeps the account's %@")
     check(tables.allSatisfy { Set($0.keys) == Set(tables[0].keys) }, "resets strings: the five tables still have exactly the same keys")
 }

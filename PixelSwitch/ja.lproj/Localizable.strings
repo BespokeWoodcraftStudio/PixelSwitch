@@ -359,7 +359,7 @@
 "Re-sign" = "再サインイン";
 "No plan" = "プランなし";
 
-/* 2.2: Resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
-"Resets" = "リセット";
-"Resets for %@" = "%@ のリセット";
+/* 2.2: Limit resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+"Limit resets" = "制限リセット";
+"Limit resets for %@" = "%@ の制限リセット";
 "Open this account's claude.ai usage page to use a reset" = "このアカウントの claude.ai 使用状況ページを開いてリセットを使う";
