@@ -43,6 +43,7 @@ import SwiftUI
     planChipTests()
     planChipContrastTests()
     resignAndChipWiringTests()
+    cardButtonTextTests()
 }
 
 // MARK: - Fixtures
@@ -1021,4 +1022,37 @@ private func chipHex(_ text: String?) -> UInt32? {
     check(tables.allSatisfy { ($0["Re-authenticate (fix stale token)"] ?? "").isEmpty == false && ($0["Re-authenticate %@"] ?? "").isEmpty == false },
           "resign strings: the help and spoken label it reuses are in all five tables")
     check(tables.allSatisfy { Set($0.keys) == Set(tables[0].keys) }, "resign strings: the five tables still have exactly the same keys")
+}
+
+// MARK: - The text of the card's Retry and Re-sign buttons
+
+/// Both buttons are borderless and label themselves in `.brandText`, the app's
+/// accent-text token, instead of the system tint (the AccentColor asset is about
+/// 2.7:1 on a dark card). Measured on the card fills, in light and dark.
+@MainActor private func cardButtonTextTests() {
+    // (fill name, token, expected light ratio, expected dark ratio)
+    let fills: [(String, Color, Double, Double)] = [("cardFill", .cardFill, 5.18, 6.02), ("cardFillStrong", .cardFillStrong, 5.18, 5.36)]
+    for (name, fill, light, dark) in fills {
+        for (isDark, expected) in [(false, light), (true, dark)] {
+            let appearance = isDark ? "dark" : "light"
+            if let text = chipHex(chipResolvedHex(.brandText, dark: isDark)), let surface = chipHex(chipResolvedHex(fill, dark: isDark)) {
+                let ratio = chipContrast(text, surface)
+                check(ratio >= 4.5, "button text: brandText holds 4.5:1 on \(name) in \(appearance)", "got \(ratio)")
+                check(abs(ratio - expected) < 0.006, "button text: brandText on \(name) in \(appearance) is \(expected):1", "got \(ratio)")
+            } else {
+                check(false, "button text: brandText and \(name) resolve in \(appearance)")
+            }
+        }
+    }
+
+    let dashboard = planSource("PixelSwitch/Views/UsageDashboardView.swift")
+    let retry = planMember(dashboard, startingAt: "private func usageErrorActions(")
+    let resign = planMember(dashboard, startingAt: "private func resignButton(")
+    let label = ".font(.caption2.weight(.semibold))\n                            .foregroundStyle(.brandText)"
+    check(retry.contains("String(localized: \"Retry\", bundle: L10n.bundle)") && retry.contains(label) && retry.contains(".buttonStyle(.borderless)"),
+          "button text pins: Retry is borderless and its label is .brandText")
+    check(resign.contains(".font(.caption2.weight(.semibold))\n                .foregroundStyle(.brandText)") && resign.contains(".buttonStyle(.borderless)"),
+          "button text pins: Re-sign is borderless and its label is .brandText, like Retry")
+    check(dashboard.components(separatedBy: ".foregroundStyle(.brandText)").count - 1 >= 2 && !dashboard.contains("Color(red: 0.502"),
+          "button text pins: the two buttons share one style and use no literal colour")
 }

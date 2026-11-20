@@ -46,7 +46,7 @@ private struct SampleAccount {
     /// Re-sign) or the account has no active subscription (it offers nothing).
     var problem: Problem?
 
-    enum Problem { case expired, noSubscription }
+    enum Problem { case expired, noSubscription, unreachable }
 }
 
 /// The chip for an account on this plan, built through the real `Account` so the
@@ -102,6 +102,8 @@ private let expiredSample = SampleAccount(email: "expired@example.com", swatch: 
 private let expiredUltraSample = SampleAccount(email: "expired-ultra@example.com", swatch: 2, chip: chip("max", "max_20x"), active: false,
                                                session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", hasSessionLimit: false,
                                                problem: .expired)
+private let unreachableSample = SampleAccount(email: "offline@example.com", swatch: 7, chip: chip("max", "max_5x"), active: false,
+                                              session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", problem: .unreachable)
 private let lapsedSample = SampleAccount(email: "lapsed@example.com", swatch: 5, chip: chip("max", "max_20x", noSubscription: true), active: false,
                                          session: 0, weekly: 0, fable: 0, sessionReset: "", weekReset: "", problem: .noSubscription)
 
@@ -153,19 +155,25 @@ private struct Card: View {
                         Image(systemName: problem == .expired ? "exclamationmark.triangle" : "xmark.circle")
                             .foregroundStyle(problem == .expired ? .limitWarn : .limitCrit)
                         Text(problem == .expired ? "Session expired. Re-authenticate (↻) to fix."
-                                                 : "No active subscription on this account (OAuth not allowed).")
+                             : (problem == .noSubscription ? "No active subscription on this account (OAuth not allowed)."
+                                                           : "Can't reach Anthropic right now; PixelSwitch keeps trying."))
                             .font(.caption)
                             .foregroundStyle(.textSecondary)
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 4)
+                        // The app's buttons are real borderless Buttons; ImageRenderer cannot
+                        // draw a Button (it paints a prohibition sign), so these are their look:
+                        // the same Label and font, in `.brandText` as the app sets it.
                         if problem == .expired {
-                            // The app's button is a real borderless Button; ImageRenderer cannot
-                            // draw a Button (it paints a prohibition sign), so this is its look:
-                            // the same Label and font, tinted with the AccentColor asset's value.
                             Label("Re-sign", systemImage: "arrow.triangle.2.circlepath")
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(Color(red: 0.502, green: 0.329, blue: 0.812))
+                                .foregroundStyle(.brandText)
+                                .fixedSize()
+                        } else if problem == .unreachable {
+                            Label("Retry", systemImage: "arrow.clockwise")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.brandText)
                                 .fixedSize()
                         }
                     }
@@ -455,6 +463,8 @@ enum Screenshots {
                         Text("Sign-in ended: Re-sign").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
                         Card(account: expiredSample, config: config, logo: logo)
                         Card(account: expiredUltraSample, config: config, logo: logo)
+                        Text("Usage service unreachable: Retry").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+                        Card(account: unreachableSample, config: config, logo: logo)
                         Text("No active subscription: no button").font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
                         Card(account: lapsedSample, config: config, logo: logo)
                       },

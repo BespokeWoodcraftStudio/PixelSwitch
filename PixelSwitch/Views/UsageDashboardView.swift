@@ -393,6 +393,7 @@ struct UsageDashboardView: View {
                     } label: {
                         Label(String(localized: "Retry", bundle: L10n.bundle), systemImage: "arrow.clockwise")
                             .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.brandText)
                     }
                     .buttonStyle(.borderless)
                     .focusable(false)
@@ -406,15 +407,18 @@ struct UsageDashboardView: View {
     /// Re-sign: starts the same sign-in as the circle-arrows button on the
     /// Accounts tab (`reauthenticateAccount`, with that button's icon and help).
     /// A real borderless button like Retry, so a click on it never counts toward
-    /// the card's double-click-to-switch. Off while a sign-in or a switch is
-    /// running: a second click would only be refused ("A sign-in is already in
-    /// progress.").
+    /// the card's double-click-to-switch. Its label, like Retry's, is `.brandText`
+    /// (at least 4.5:1 on the card in light and dark; the system accent tint was
+    /// not measured and is about 2.7:1 on a dark card). Off while a sign-in or a
+    /// switch is running: a second click would only be refused ("A sign-in is
+    /// already in progress.").
     private func resignButton(_ account: Account) -> some View {
         Button {
             appState.reauthenticateAccount(account)
         } label: {
             Label(String(localized: "Re-sign", bundle: L10n.bundle), systemImage: "arrow.triangle.2.circlepath")
                 .font(.caption2.weight(.semibold))
+                .foregroundStyle(.brandText)
         }
         .buttonStyle(.borderless)
         .focusable(false)
