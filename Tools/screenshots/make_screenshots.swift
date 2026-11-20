@@ -21,7 +21,7 @@
 //     PixelSwitch/Views/Components/CardFooterRow.swift \
 //     PixelSwitch/Views/Components/FooterAgeLabel.swift PixelSwitch/Models/FooterAge.swift \
 //     PixelSwitch/Views/Components/AccountIdentityHeader.swift PixelSwitch/Views/Components/PriorityTag.swift \
-//     PixelSwitch/Views/Components/PopoverFooter.swift \
+//     PixelSwitch/Views/Components/PopoverFooter.swift PixelSwitch/Views/Components/HoverLabel.swift \
 //     PixelSwitch/Models/Account.swift PixelSwitch/Models/AccountPlan.swift PixelSwitch/Models/UsageData.swift \
 //     PixelSwitch/Models/String+Obfuscation.swift \
 //     PixelSwitch/Models/MenuBarConfig.swift PixelSwitch/Models/MenuBarModule.swift \
@@ -581,15 +581,18 @@ private struct HeaderFixtures: View {
 /// and `FooterIconLabel` are the app's own views, compiled in), at the popover's 360 pt width with
 /// the divider the popover draws above it. Resting, with a message, while signing in (both add icons
 /// dimmed, the Signing in bar above) and with the add confirmation open, then the icons with the
-/// pointer over one. Tooltips cannot be shown in a still.
+/// app's own hover label (`HoverLabel.swift`) held open on the first, the last, a middle one and a
+/// disabled one, over a stand-in for the popover's content: the label rises out of the footer into
+/// that content, and the 360 pt frame is cut off at its edge exactly as the popover is, so a label
+/// the edge would clip shows clipped. A still has no pointer, so `previewLabel` holds each one open.
 private struct FooterFixtures: View {
     private func caption(_ text: String) -> some View {
         Text(verbatim: text).font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
     }
 
-    private func popover<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+    private func popover<C: View>(topDivider: Bool = true, @ViewBuilder _ content: () -> C) -> some View {
         VStack(spacing: 0) {
-            Divider()
+            if topDivider { Divider() }
             content()
         }
         .frame(width: 360)
@@ -598,10 +601,33 @@ private struct FooterFixtures: View {
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.cardBorder, lineWidth: 1))
     }
 
-    private func footer(error: String? = nil, loggingIn: Bool = false) -> PopoverFooter {
+    private func footer(error: String? = nil, loggingIn: Bool = false, previewLabel: FooterIcon? = nil) -> PopoverFooter {
         PopoverFooter(errorMessage: error,
                       busyReason: loggingIn ? "Wait for the current switch or sign-in to finish." : nil,
+                      previewLabel: previewLabel,
                       onAddCurrent: {}, onSignInNew: {}, onRefresh: {}, onSettings: {}, onQuit: {})
+    }
+
+    /// A stand-in for what sits above the footer in the popover (a Usage card), so a hover label
+    /// has something to rise over.
+    private var contentAbove: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(verbatim: "work@example.com").font(.callout.weight(.medium))
+            RoundedRectangle(cornerRadius: 3).fill(Color.rowTile).frame(height: 8)
+            RoundedRectangle(cornerRadius: 3).fill(Color.rowTile).frame(height: 8)
+            Text(verbatim: "Weekly resets Mon 11:00 AM").font(.caption).foregroundStyle(.textSecondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The footer at the bottom of a popover-sized frame, with `previewLabel` held open.
+    private func labelled(_ icon: FooterIcon, loggingIn: Bool = false) -> some View {
+        popover(topDivider: false) {
+            contentAbove
+            Divider()
+            footer(loggingIn: loggingIn, previewLabel: icon)
+        }
     }
 
     var body: some View {
@@ -625,20 +651,18 @@ private struct FooterFixtures: View {
                 footer()
             }
 
-            caption("Pointer over Refresh (the third icon)")
-            popover {
-                HStack(spacing: 2) {
-                    Spacer()
-                    FooterIconLabel(symbol: "plus.circle")
-                    FooterIconLabel(symbol: "person.badge.plus")
-                    Divider().frame(height: 16).padding(.horizontal, 4)
-                    FooterIconLabel(symbol: "arrow.clockwise", hovering: true)
-                    FooterIconLabel(symbol: "gear")
-                    FooterIconLabel(symbol: "power")
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-            }
+            caption("Hover label on the first icon (Add current account)")
+            labelled(.addCurrent)
+
+            caption("Hover label on the last icon (Quit), at the popover's right edge")
+            labelled(.quit)
+
+            caption("Hover label on Refresh and on Settings")
+            labelled(.refresh)
+            labelled(.settings)
+
+            caption("Hover label on an icon that is off: it says why")
+            labelled(.signInNew, loggingIn: true)
         }
     }
 }

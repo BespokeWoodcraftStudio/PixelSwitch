@@ -359,8 +359,8 @@
 "Sign in to this account again before you switch to it." = "切换之前，请先重新登录此账户。";
 "Wait for the current switch or sign-in to finish." = "请等待当前的切换或登录完成。";
 "Save label" = "保存标签";
-"More actions" = "更多操作";
-"More actions for %@" = "%@的更多操作";
 "Remove %@?" = "移除 %@？";
 "PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account." = "PixelSwitch 会忘记此账户并删除其保存的登录。如果你正在使用它，PixelSwitch 会切换到另一个账户。";
 "Usage last refreshed at %@. It refreshes on its own." = "用量最近一次刷新于 %@。它会自动刷新。";
+"Edit label for %@" = "编辑 %@ 的标签";
+"Remove account %@" = "移除账户 %@";

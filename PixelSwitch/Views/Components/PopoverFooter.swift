@@ -5,15 +5,23 @@ import SwiftUI
 // draws the very views the popover shows and nothing can drift; `MainMenuView` supplies the
 // state and the actions and measures each as chrome.
 
+/// The five footer icons, left to right.
+enum FooterIcon: Int {
+    case addCurrent, signInNew, refresh, settings, quit
+}
+
 /// The footer: five icons, left to right: Add current account, Sign in a new account | Refresh,
-/// Settings, Quit. Each is a 28 pt target with a tooltip that says what it is for and a spoken
-/// label (`FooterIconButton`). The two add icons are off while a switch or a sign-in runs
-/// (`busyReason` is non-nil, and is their tooltip then: the control API refuses both in that
-/// state). A message from the app (an error) takes the room on the left.
+/// Settings, Quit. Each is a 28 pt target with a hover label the app draws (`HoverLabel.swift`), the
+/// same words as a tooltip for accessibility tools, and a spoken label (`FooterIconButton`). The two
+/// add icons are off while a switch or a sign-in runs (`busyReason` is non-nil, and is their label
+/// then: the control API refuses both in that state). A message from the app (an error) takes the
+/// room on the left.
 struct PopoverFooter: View {
     var errorMessage: String?
     /// Why the two add icons are off, or nil while they work.
     var busyReason: String?
+    /// Holds one icon's hover label open, for the screenshot harness: a still has no pointer.
+    var previewLabel: FooterIcon?
     let onAddCurrent: () -> Void
     let onSignInNew: () -> Void
     let onRefresh: () -> Void
@@ -42,6 +50,7 @@ struct PopoverFooter: View {
                 help: String(localized: "Add current account: save the one Claude Code is signed in to now", bundle: L10n.bundle),
                 label: String(localized: "Add Current Account", bundle: L10n.bundle),
                 disabledHelp: busyReason,
+                labelShown: previewLabel == .addCurrent,
                 action: onAddCurrent
             )
 
@@ -50,6 +59,7 @@ struct PopoverFooter: View {
                 help: String(localized: "Sign in a new account: open the sign-in window", bundle: L10n.bundle),
                 label: String(localized: "Sign In New Account", bundle: L10n.bundle),
                 disabledHelp: busyReason,
+                labelShown: previewLabel == .signInNew,
                 action: onSignInNew
             )
 
@@ -62,13 +72,17 @@ struct PopoverFooter: View {
                 symbol: "arrow.clockwise",
                 help: String(localized: "Refresh", bundle: L10n.bundle),
                 label: String(localized: "Refresh", bundle: L10n.bundle),
+                labelShown: previewLabel == .refresh,
                 action: onRefresh
             )
 
+            // Settings and Quit are at the popover's right edge: their labels grow inward from it.
             FooterIconButton(
                 symbol: "gear",
                 help: String(localized: "Settings", bundle: L10n.bundle),
                 label: String(localized: "Settings", bundle: L10n.bundle),
+                anchor: .trailing,
+                labelShown: previewLabel == .settings,
                 action: onSettings
             )
 
@@ -76,6 +90,8 @@ struct PopoverFooter: View {
                 symbol: "power",
                 help: String(localized: "Quit", bundle: L10n.bundle),
                 label: String(localized: "Quit", bundle: L10n.bundle),
+                anchor: .trailing,
+                labelShown: previewLabel == .quit,
                 action: onQuit
             )
         }
@@ -108,28 +124,39 @@ struct FooterIconLabel: View {
     }
 }
 
-/// One icon in the popover's footer: `FooterIconLabel` in a plain button, with a tooltip that
-/// says what it is for and a spoken label for VoiceOver. With `disabledHelp` set the icon is off,
-/// dimmed, and the tooltip says why instead. The tooltip is on a wrapper around the button, not
-/// the button: macOS may not show a tooltip on a disabled control.
+/// One icon in the popover's footer: `FooterIconLabel` in a plain button, with a hover label the app
+/// draws (`HoverLabel.swift`: what it is for, after a 0.3 s pause), the same words as a tooltip for
+/// accessibility tools, and a spoken label for VoiceOver. With `disabledHelp` set the icon is off,
+/// dimmed, and the label says why instead. The label and the tooltip are on a wrapper around the
+/// button, not the button: a disabled control gets no pointer events, and the reason it is off is
+/// the very thing the label has to show.
 struct FooterIconButton: View {
     let symbol: String
-    /// The tooltip: what the icon is for.
+    /// The label and the tooltip: what the icon is for.
     let help: String
     /// What VoiceOver reads.
     let label: String
-    /// Non-nil turns the icon off and is its tooltip then.
+    /// Non-nil turns the icon off and is its label then.
     var disabledHelp: String?
+    /// Where the label sits against the icon: the icons at the popover's right edge grow it inward.
+    var anchor: HoverLabelAnchor = .center
+    /// Holds the label open, for the screenshot harness.
+    var labelShown = false
     let action: () -> Void
 
     @State private var hovering = false
+    /// Counts presses; the label hides when it changes, so a bar the press opens is not covered.
+    @State private var presses = 0
 
     private var isDisabled: Bool { disabledHelp != nil }
 
     var body: some View {
         HStack(spacing: 0) {
-            Button(action: action) {
-                FooterIconLabel(symbol: symbol, hovering: hovering, isDisabled: isDisabled)
+            Button {
+                presses += 1
+                action()
+            } label: {
+                FooterIconLabel(symbol: symbol, hovering: hovering || labelShown, isDisabled: isDisabled)
             }
             .buttonStyle(.plain)
             .focusable(false)
@@ -139,6 +166,8 @@ struct FooterIconButton: View {
         }
         .contentShape(Rectangle())
         .help(disabledHelp ?? help)
+        .hoverLabel(disabledHelp ?? help, anchor: anchor, maxWidth: 230, gap: -2,
+                    dismissTrigger: presses, alwaysShown: labelShown)
     }
 }
 

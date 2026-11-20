@@ -359,8 +359,8 @@
 "Sign in to this account again before you switch to it." = "切り替える前に、このアカウントでもう一度サインインしてください。";
 "Wait for the current switch or sign-in to finish." = "進行中の切り替えまたはサインインが終わるまでお待ちください。";
 "Save label" = "ラベルを保存";
-"More actions" = "その他の操作";
-"More actions for %@" = "%@のその他の操作";
 "Remove %@?" = "%@を削除しますか？";
 "PixelSwitch forgets this account and deletes its saved login. If you're using it now, PixelSwitch switches you to another account." = "PixelSwitch はこのアカウントを忘れ、保存されたログインを削除します。使用中のアカウントの場合は、別のアカウントに切り替えます。";
 "Usage last refreshed at %@. It refreshes on its own." = "使用状況は %@ に更新されました。自動的に更新されます。";
+"Edit label for %@" = "%@のラベルを編集";
+"Remove account %@" = "アカウント %@ を削除";

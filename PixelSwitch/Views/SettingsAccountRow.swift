@@ -61,8 +61,14 @@ enum WindowColumnMetrics {
     }
 }
 
+/// The row's four action icons, left to right.
+enum SettingsRowIcon {
+    case switchTo, resign, editLabel, remove
+}
+
 /// One account's row in Settings → Accounts: drag handle, Priority control,
-/// the account, and the Session and Weekly menus.
+/// the account, the Session and Weekly menus, and four icon buttons (Switch, Re-sign,
+/// Edit label, Remove account), each one click with a hover label the app draws.
 ///
 /// Plain inputs and closures only (no `AppState`, no `@AppStorage`), so the
 /// same view that Settings shows is rendered offscreen with sample data
@@ -108,6 +114,8 @@ struct SettingsAccountRow: View {
     /// A switch or a sign-in is running: Re-sign and Remove account wait too (the Usage card's
     /// rule, and the control API's).
     var actionsBusy = false
+    /// Holds one icon's hover label open, for the offscreen renders: a still has no pointer.
+    var previewLabel: SettingsRowIcon?
 
     let onPriority: @MainActor (Int?) -> Void
     let onSession: @MainActor (ThresholdMenuChoice) -> Void
@@ -244,61 +252,60 @@ struct SettingsAccountRow: View {
 
     // MARK: - Actions
 
-    /// Switch over two small icons, Re-sign and a "..." menu (Edit label, Remove account), in one
-    /// narrow column at the row's end. Stacked rather than side by side because the row has no
-    /// width to spare: the address must keep as much of the row as it can.
-    /// Switch and Re-sign are one click; the two that change the account itself are one menu away.
-    /// Switch, Re-sign and Remove wait while a switch or a sign-in runs (the control API refuses
-    /// them then too).
+    /// Four plain icon buttons at the row's end, one click each: Switch, Re-sign, Edit label and
+    /// Remove account. (A "..." menu held the last two in 2.3; a hand check asked why they were
+    /// behind three dots.) Each says what it does in a hover label the app draws (`HoverLabel.swift`),
+    /// with the same words on `.help` for accessibility tools.
     ///
-    /// The tooltips sit on a plain wrapper around each button, not on the button: macOS may not
-    /// show a tooltip on a disabled control, and the tooltip is how Switch says why it is off.
+    /// Switch is off for the account in use, for one whose sign-in ended, and while a switch or a
+    /// sign-in runs (`switchOffReason`, from `SwitchAvailability`); Re-sign and Remove wait while a
+    /// switch or a sign-in runs (`actionsBusy`, the control API's own rule). An icon that is off shows
+    /// its reason in the hover label. Remove still asks first: the row only calls `onRemove`.
     private var actions: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            HStack(spacing: 0) {
-                Button { onSwitch() } label: { Text("Switch") }
-                    .controlSize(.small)
-                    .disabled(switchOffReason != nil)
-                    .accessibilityLabel(Text("Switch to \(title)"))
-                    // Voice Control: "Click Switch" still works with the spoken label naming the account.
-                    .accessibilityInputLabels([Text("Switch")])
-            }
-            .contentShape(Rectangle())
-            // The reason it is off, else what it does.
-            .help(switchOffReason.map { Text(verbatim: $0) } ?? Text("Switch to this account"))
+        HStack(spacing: 0) {
+            RowIconButton(
+                symbol: "arrow.left.arrow.right",
+                hint: switchOffReason ?? String(localized: "Switch to this account", bundle: L10n.bundle),
+                spoken: Text("Switch to \(title)"),
+                // Voice Control: "Click Switch" still works with the spoken label naming the account.
+                inputLabel: Text("Switch"),
+                isDisabled: switchOffReason != nil,
+                labelShown: previewLabel == .switchTo,
+                action: onSwitch)
 
-            HStack(spacing: 4) {
-                // The Usage card's Re-sign icon and tooltip, so it is the same button everywhere.
-                HStack(spacing: 0) {
-                    Button { onResign() } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .foregroundStyle(needsResign ? Color.limitWarn : Color.textSecondary)
-                            .frame(width: 24, height: 20)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(actionsBusy)
-                    .accessibilityLabel(Text("Re-authenticate \(title)"))
-                    .accessibilityInputLabels([Text("Re-sign")])
-                }
-                .contentShape(Rectangle())
-                .help(actionsBusy ? Text("Wait for the current switch or sign-in to finish.") : Text("Re-authenticate (fix stale token)"))
+            // The Usage card's Re-sign icon and words, so it is the same button everywhere.
+            RowIconButton(
+                symbol: "arrow.triangle.2.circlepath",
+                tint: needsResign ? Color.limitWarn : Color.textSecondary,
+                hoverTint: needsResign ? Color.limitWarn : Color.textPrimary,
+                hint: actionsBusy ? String(localized: "Wait for the current switch or sign-in to finish.", bundle: L10n.bundle)
+                                  : String(localized: "Re-authenticate (fix stale token)", bundle: L10n.bundle),
+                spoken: Text("Re-authenticate \(title)"),
+                inputLabel: Text("Re-sign"),
+                isDisabled: actionsBusy,
+                labelShown: previewLabel == .resign,
+                action: onResign)
 
-                Menu {
-                    Button("Edit label") { beginEditing() }
-                    Divider()
-                    Button("Remove account", role: .destructive) { onRemove() }
-                        .disabled(actionsBusy)
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .foregroundStyle(Color.textSecondary)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help(Text("More actions"))
-                .accessibilityLabel(Text("More actions for \(title)"))
-            }
+            RowIconButton(
+                symbol: "square.and.pencil",
+                hint: String(localized: "Edit label", bundle: L10n.bundle),
+                spoken: Text("Edit label for \(title)"),
+                inputLabel: Text("Edit label"),
+                labelShown: previewLabel == .editLabel,
+                action: { beginEditing() })
+
+            // Quiet until the pointer is over it, then red: it deletes the saved login.
+            RowIconButton(
+                symbol: "trash",
+                hoverTint: Color.limitCrit,
+                hint: actionsBusy ? String(localized: "Wait for the current switch or sign-in to finish.", bundle: L10n.bundle)
+                                  : String(localized: "Remove account", bundle: L10n.bundle),
+                spoken: Text("Remove account \(title)"),
+                inputLabel: Text("Remove account"),
+                isDisabled: actionsBusy,
+                destructive: true,
+                labelShown: previewLabel == .remove,
+                action: onRemove)
         }
         .fixedSize()
     }
@@ -492,5 +499,72 @@ struct SettingsAccountRow: View {
         // down the list whether or not a row shows a stepper. It is measured for
         // the language in use (`WindowColumnMetrics`), so no label is clipped.
         .frame(width: width, alignment: .leading)
+    }
+}
+
+/// One of the row's four action icons: a 22 pt plain button in the quiet tone that takes the full
+/// text colour (or `hoverTint`) and a soft highlight under the pointer, dims when it is off, and
+/// says what it does, or why it is off, in a hover label the app draws.
+///
+/// The hover label and the tooltip sit on a wrapper around the button, not on the button: macOS may
+/// not show a tooltip on a disabled control, and an icon that is off has to say why.
+///
+/// `State` is written out instead of with `@State`, like the row itself (see its note).
+private struct RowIconButton: View {
+    let symbol: String
+    var tint: Color = Color.textSecondary
+    var hoverTint: Color = Color.textPrimary
+    /// The hover label and the tooltip: what it does, or why it is off.
+    let hint: String
+    /// What VoiceOver reads, naming the account.
+    let spoken: Text
+    /// What Voice Control can say to click it.
+    let inputLabel: Text
+    var isDisabled = false
+    /// Marks the button destructive for assistive tools (Remove account).
+    var destructive = false
+    /// Holds the hover label open, for the offscreen renders.
+    var labelShown = false
+    let action: @MainActor () -> Void
+
+    private let hoverStorage = State<Bool>(initialValue: false)
+    /// Counts presses; the hover label hides when it changes.
+    private let pressStorage = State<Int>(initialValue: 0)
+    private var hovering: Bool {
+        get { hoverStorage.wrappedValue }
+        nonmutating set { hoverStorage.wrappedValue = newValue }
+    }
+
+    var body: some View {
+        let lit = (hovering || labelShown) && !isDisabled
+        HStack(spacing: 0) {
+            Button(role: destructive ? .destructive : nil) {
+                pressStorage.wrappedValue += 1
+                action()
+            } label: {
+                Image(systemName: symbol)
+                    .font(.system(size: 13))
+                    .frame(width: 22, height: 22)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(lit ? Color.primary.opacity(0.10) : Color.clear)
+                    )
+                    .foregroundStyle(lit ? hoverTint : tint)
+                    .opacity(isDisabled ? 0.4 : 1)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .disabled(isDisabled)
+            .accessibilityLabel(spoken)
+            .accessibilityInputLabels([inputLabel])
+        }
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .help(Text(verbatim: hint))
+        // Right-aligned to the icon: the row's last icons sit at the window's edge, and the label
+        // grows toward the middle. It rises into the icon's own padding and the row's spare height.
+        .hoverLabel(hint, anchor: .trailing, maxWidth: 480, gap: -3, dismissTrigger: pressStorage.wrappedValue,
+                    alwaysShown: labelShown)
     }
 }
