@@ -1129,8 +1129,6 @@ final class AppState: ObservableObject {
                 proof: provenLiveLogin),
             existing: removedLoginFingerprints)
         keychain.removeAccountBackup(forAccountId: account.id.uuidString)
-        // Its claude.ai window and web sign-in (the Resets button's) go with it.
-        Task { await ClaudeWebWindows.shared.removeWebSignIn(accountID: account.id.uuidString) }
         accounts.removeAll { $0.id == account.id }
         // Drop every per-account cache too, or a re-added account inherits the
         // removed one's readings, error banner and rate-limit park.

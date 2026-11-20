@@ -338,35 +338,15 @@
 /* Ultra (Max 20x) has no 5-hour limit: what the Session column of its Settings row says */
 "No 5-hour limit" = "Kein 5-Stunden-Limit";
 
-/* Resets button: each account's own claude.ai window (PixelSwitch/ClaudeWeb) */
-"Back" = "Zurück";
-"Reload" = "Neu laden";
-"Open in browser" = "Im Browser öffnen";
-"Paste sign-in link" = "Anmeldelink einfügen";
-"Sign out of claude.ai here" = "Hier von claude.ai abmelden";
-"Sign in as %@" = "Melde dich als %@ an";
-"Paste the sign-in link from your email" = "Füge den Anmeldelink aus deiner E-Mail ein";
-"Load" = "Laden";
-"That is not one whole link. Paste the full link from your email." = "Das ist kein vollständiger Link. Füge den ganzen Link aus deiner E-Mail ein.";
-"Only a link on claude.ai loads here. Paste the sign-in link from your email." = "Hier werden nur Links auf claude.ai geladen. Füge den Anmeldelink aus deiner E-Mail ein.";
-"Sign out of claude.ai here?" = "Hier von claude.ai abmelden?";
-"This removes the claude.ai sign-in that PixelSwitch keeps for %@. Your browser and your other accounts are not affected." = "Dadurch wird die claude.ai-Anmeldung entfernt, die PixelSwitch für %@ speichert. Dein Browser und deine anderen Konten sind nicht betroffen.";
-"Sign out" = "Abmelden";
-"This window is signed in as %1$@, not %2$@. Sign out here and sign in as %2$@." = "Dieses Fenster ist als %1$@ angemeldet, nicht als %2$@. Melde dich hier ab und als %2$@ an.";
-"PixelSwitch could not remove this sign-in. Quit and reopen PixelSwitch, then try again." = "PixelSwitch konnte diese Anmeldung nicht entfernen. Beende PixelSwitch, öffne es erneut und versuche es dann noch einmal.";
-
 /* 2.2: Re-sign on a Usage card whose sign-in has ended; the plan chip of an account with no active subscription */
 "Re-sign" = "Neu anmelden";
 "No plan" = "Kein Tarif";
 
-/* 2.2: Limit resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+/* 2.3: Limit resets button on each Usage card: opens claude.ai's usage page in the account's own Chrome profile (PixelSwitch/ChromeProfiles) */
 "Limit resets" = "Limit-Resets";
 "Limit resets for %@" = "Limit-Resets für %@";
-"Open this account's claude.ai usage page to use a reset" = "Die claude.ai-Nutzungsseite dieses Kontos öffnen, um einen Reset zu nutzen";
+"Open this account's claude.ai usage page in Chrome to use a reset" = "Die claude.ai-Nutzungsseite dieses Kontos in Chrome öffnen, um einen Reset zu nutzen";
 
 /* 2.2: the Usage card footer's hover hint (also its tooltip) and its switch-in-progress text */
 "Double-click to switch" = "Doppelklick zum Wechseln";
 "Switching…" = "Wechsel läuft…";
-
-/* 2.2: the claude.ai window's bar when a page does not load (its button is the existing Reload) */
-"Couldn't load claude.ai. Check your connection." = "claude.ai konnte nicht geladen werden. Prüfe deine Verbindung.";

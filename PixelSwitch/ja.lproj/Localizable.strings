@@ -338,35 +338,15 @@
 /* Ultra (Max 20x) has no 5-hour limit: what the Session column of its Settings row says */
 "No 5-hour limit" = "5時間の上限なし";
 
-/* Resets button: each account's own claude.ai window (PixelSwitch/ClaudeWeb) */
-"Back" = "戻る";
-"Reload" = "再読み込み";
-"Open in browser" = "ブラウザで開く";
-"Paste sign-in link" = "サインインリンクを貼り付け";
-"Sign out of claude.ai here" = "ここで claude.ai からサインアウト";
-"Sign in as %@" = "%@ としてサインインしてください";
-"Paste the sign-in link from your email" = "メールのサインインリンクを貼り付けてください";
-"Load" = "読み込む";
-"That is not one whole link. Paste the full link from your email." = "リンクが完全ではありません。メールのリンク全体を貼り付けてください。";
-"Only a link on claude.ai loads here. Paste the sign-in link from your email." = "ここでは claude.ai のリンクだけが読み込まれます。メールのサインインリンクを貼り付けてください。";
-"Sign out of claude.ai here?" = "ここで claude.ai からサインアウトしますか？";
-"This removes the claude.ai sign-in that PixelSwitch keeps for %@. Your browser and your other accounts are not affected." = "PixelSwitch が %@ 用に保存している claude.ai のサインインを削除します。ブラウザやほかのアカウントには影響しません。";
-"Sign out" = "サインアウト";
-"This window is signed in as %1$@, not %2$@. Sign out here and sign in as %2$@." = "このウィンドウは %2$@ ではなく %1$@ としてサインインしています。ここでサインアウトし、%2$@ としてサインインしてください。";
-"PixelSwitch could not remove this sign-in. Quit and reopen PixelSwitch, then try again." = "PixelSwitch はこのサインインを削除できませんでした。PixelSwitch を終了して開き直し、もう一度お試しください。";
-
 /* 2.2: Re-sign on a Usage card whose sign-in has ended; the plan chip of an account with no active subscription */
 "Re-sign" = "再サインイン";
 "No plan" = "プランなし";
 
-/* 2.2: Limit resets button on each Usage card: opens the account's own claude.ai window (PixelSwitch/ClaudeWeb) */
+/* 2.3: Limit resets button on each Usage card: opens claude.ai's usage page in the account's own Chrome profile (PixelSwitch/ChromeProfiles) */
 "Limit resets" = "制限リセット";
 "Limit resets for %@" = "%@ の制限リセット";
-"Open this account's claude.ai usage page to use a reset" = "このアカウントの claude.ai 使用状況ページを開いてリセットを使う";
+"Open this account's claude.ai usage page in Chrome to use a reset" = "このアカウントの claude.ai 使用状況ページを Chrome で開いてリセットを使う";
 
 /* 2.2: the Usage card footer's hover hint (also its tooltip) and its switch-in-progress text */
 "Double-click to switch" = "ダブルクリックで切り替え";
 "Switching…" = "切り替え中…";
-
-/* 2.2: the claude.ai window's bar when a page does not load (its button is the existing Reload) */
-"Couldn't load claude.ai. Check your connection." = "claude.ai を読み込めませんでした。接続を確認してください。";
