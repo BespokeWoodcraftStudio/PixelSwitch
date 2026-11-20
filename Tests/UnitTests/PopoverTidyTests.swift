@@ -219,7 +219,7 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
           && !buttonOnly.contains(".help(") && !buttonOnly.contains(".hoverLabel("),
           "row pins: each icon is a Button with a spoken label and an off state, and carries no tooltip of its own")
     check(iconButton.contains("        }\n        .contentShape(Rectangle())\n        .help(Text(verbatim: hint))")
-          && iconButton.contains(".hoverLabel(hint, anchor: .trailing,") && iconButton.contains("onHover: { hovering = $0 }"),
+          && iconButton.contains(".hoverLabel(hint, maxWidth: 420,") && iconButton.contains("onHover: { hovering = $0 }, placement: .besideStrip(offset: position.stripOffset))"),
           "row pins: the hint is the tooltip and the hover label, both on a wrapper around the button")
     check(!iconButton.contains(".onHover") && !iconButton.contains(".onContinuousHover") && iconButton.contains("lit: (hovering || labelShown) && !isDisabled"),
           "row pins: an icon's highlight follows the hover label's tracking area (the pointer in any window state), not SwiftUI's onHover")
@@ -266,8 +266,8 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
     check(menuIcon.contains("Menu {") && menuIcon.contains("ChromeProfileChoiceControl(choice: choice, address: address, onChoose: onChoose)")
           && menuIcon.contains(".menuIndicator(.hidden)") && menuIcon.contains("RowIconGlyph(symbol: symbol, lit: hovering || labelShown)")
           && menuIcon.contains(".accessibilityLabel(spoken)") && menuIcon.contains(".accessibilityValue(value)")
-          && menuIcon.contains(".help(Text(verbatim: hint))") && menuIcon.contains(".hoverLabel(hint, anchor: .trailing, maxWidth: 480, gap: -3")
-          && menuIcon.contains("onHover: { hovering = $0 }") && !menuIcon.contains(".onHover"),
+          && menuIcon.contains(".help(Text(verbatim: hint))") && menuIcon.contains(".hoverLabel(hint, maxWidth: 420, alwaysShown: labelShown")
+          && menuIcon.contains("onHover: { hovering = $0 }, placement: .besideStrip(offset: position.stripOffset))") && !menuIcon.contains(".onHover"),
           "row pins: the Chrome profile icon is a menu of the control's items with the row's icon look, a tooltip, a hover label, an accessibility label and value, and the tracker's highlight")
     check(row.contains("var chromeChoice: ChromeProfileChoice?") && row.contains("var chromeAddress = \"\"")
           && row.contains("let onChromeChoice: @MainActor (ChromeProfileChoice?) -> Void") && row.contains("case switchTo, resign, editLabel, chromeProfile, remove"),
@@ -360,9 +360,16 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
           && tracking.contains("object: window)") && tracking.contains("@objc private func windowStoppedShowing(_ notification: Notification) { onChange?(false) }"),
           "hover label pins: the tracker reports \"outside\" when its window closes or resigns key or main")
     let leaving = tidyBlock(tracking, from: "override func viewWillMove(toWindow newWindow: NSWindow?) {", to: "super.viewWillMove(toWindow: newWindow)")
-    check(!leaving.isEmpty && leaving.contains("if window != nil, let report = onChange { Task { @MainActor in report(false) } }")
-          && leaving.contains("NotificationCenter.default.removeObserver(self)"),
-          "hover label pins: the tracker reports \"outside\" when its view leaves its window, and stops listening to the old window")
+    check(!leaving.isEmpty && leaving.contains("if let old = window {") && leaving.contains("if let report = onChange { Task { @MainActor in report(false) } }")
+          && leaving.contains("for name in Self.windowEndings { NotificationCenter.default.removeObserver(self, name: name, object: old) }")
+          && !leaving.contains("removeObserver(self)") && !hover.contains("removeObserver(self)\n")
+          && tracking.contains("private static let windowEndings = [NSWindow.willCloseNotification, NSWindow.didResignKeyNotification, NSWindow.didResignMainNotification]")
+          && tracking.contains("for name in Self.windowEndings {\n            NotificationCenter.default.addObserver(self, selector: #selector(windowStoppedShowing(_:)), name: name, object: window)"),
+          "hover label pins: the tracker reports \"outside\" when its view leaves its window and stops listening to the old window for exactly the three notifications it added, by name and object, never removeObserver(self)")
+    // A pointer already over the view when the areas are set up is reported on the next turn of the run loop, like the other reports made from layout.
+    let areas = tidyBlock(tracking, from: "override func updateTrackingAreas() {", to: "override func mouseEntered")
+    check(areas.contains("if bounds.contains(point) { Task { @MainActor [weak self] in self?.pointerIsOver() } }") && !areas.contains("{ pointerIsOver() }"),
+          "hover label pins: the pointer found over the view while its tracking areas are updated is reported on the next turn of the run loop, not inside layout")
     check(hover.contains(".onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in\n                quiet = true\n                disarm()\n            }"),
           "hover label pins: a menu opening hides the label until the pointer leaves")
     // Where there is no room above the icon (the first row, right under the scroll view's top edge) the label hangs below it.
@@ -373,9 +380,24 @@ private func tidyCount(_ source: String, _ needle: String) -> Int {
           && hover.contains("static func roomNeeded(for text: String, maxWidth: CGFloat, gap: CGFloat) -> CGFloat {\n        height(for: text, maxWidth: maxWidth) + gap + shadowMargin")
           && hover.contains("onRoomAbove: { room in roomAbove = room })"),
           "hover label pins: the label needs its own height (less what it tucks into the icon) plus a shadow margin above the icon, else it shows below")
-    check(hover.contains("if (shown || alwaysShown) && !text.isEmpty && !below {") && hover.contains("if (shown || alwaysShown) && !text.isEmpty && below {")
+    check(hover.contains("if (shown || alwaysShown) && !text.isEmpty && !below && stripOffset == nil {") && hover.contains("if (shown || alwaysShown) && !text.isEmpty && below && stripOffset == nil {")
+          && hover.contains("if (shown || alwaysShown) && !text.isEmpty, let offset = stripOffset {")
           && hover.contains(".overlay(alignment: .bottom) {") && hover.contains(".offset(y: gap)") && hover.contains(".offset(y: -gap)"),
-          "hover label pins: there is one label, hung above the icon or below it, never both")
+          "hover label pins: there is one label, hung above the icon, below it or beside the strip, never two")
+    // Row icons: the label sits to the left of the whole icon strip, centred on the icon and never taller than two lines, so it never leaves its row
+    // (a row of a real List is its own cell: a label rising out of it was cut off at the row's edge).
+    check(hover.contains("case besideStrip(offset: CGFloat)") && hover.contains(".offset(x: -(offset + HoverLabelMetrics.besideGap))")
+          && hover.contains("HoverLabelBubble(text: text, maxWidth: maxWidth, maxLines: HoverLabelMetrics.besideMaxLines)")
+          && hover.contains("static let besideMaxLines = 2") && hover.contains(".lineLimit(maxLines)") && hover.contains(".truncationMode(.tail)")
+          && hover.contains(".overlay(alignment: .leading) {\n                Color.clear\n                    .frame(width: 0)\n                    .overlay(alignment: .trailing) {"),
+          "hover label pins: a label beside a strip hangs from a zero-width strip at the icon's leading edge, is centred on the icon, takes at most two lines and is shifted left past the icons before it")
+    check(row.contains("enum SettingsRowIcon: Int {") && row.contains("var stripOffset: CGFloat { CGFloat(rawValue) * 22 }")
+          && row.contains("case switchTo, resign, editLabel, chromeProfile, remove")
+          && tidyCount(row, "placement: .besideStrip(offset: position.stripOffset)") == 2 && !row.contains("hoverLabel(hint, anchor:"),
+          "hover label pins: every icon of the Settings row puts its label left of the whole icon strip, by its place in the strip (22 pt each), so it never leaves its row")
+    for place in ["switchTo", "resign", "editLabel", "chromeProfile", "remove"] {
+        check(row.contains("position: .\(place),"), "hover label pins: the \(place) icon is told its place in the strip")
+    }
     check(tracking.contains("override func hitTest(_ point: NSPoint) -> NSView? { nil }") && hover.contains(".allowsHitTesting(false)\n            }"),
           "hover label pins: the tracking view returns nil from hitTest and is not hit-testable in SwiftUI, so a click still reaches the button under it")
     check(hover.contains(".overlay(alignment: .top) {") && hover.contains(".allowsHitTesting(false)") && hover.contains(".frame(height: 0)"),

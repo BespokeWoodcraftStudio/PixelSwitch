@@ -27,13 +27,15 @@ enum LegacyWebDataCleanup {
     }
 
     /// The data store identifiers 2.2 saved, each once, in a fixed order. A saved value that
-    /// is not a UUID, and the all-zero UUID, are left out.
+    /// is not a UUID, and the all-zero UUID, are left out. The mapping is read as `[String: Any]` and each
+    /// value is taken on its own, so one value of another type (a number, say) never makes the others
+    /// unreadable: only that one is skipped, and the leftover folders of the rest are still deleted.
     static func pendingIdentifiers(defaults: UserDefaults = .standard) -> [UUID] {
-        guard let stored = defaults.dictionary(forKey: defaultsKey) as? [String: String] else { return [] }
+        guard let stored = defaults.dictionary(forKey: defaultsKey) else { return [] }
         let zero = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         var seen = Set<UUID>()
         var result: [UUID] = []
-        for text in stored.values.sorted() {
+        for text in stored.values.compactMap({ $0 as? String }).sorted() {
             if let id = UUID(uuidString: text), id != zero, seen.insert(id).inserted { result.append(id) }
         }
         return result

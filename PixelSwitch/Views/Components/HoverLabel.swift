@@ -22,6 +22,10 @@ import AppKit
 // closes or stops being key or main, when the view leaves its window, and when any menu opens; and an
 // icon whose label would be cut off above (the first row of a scrolling list, where the scroll view
 // ends right above the row) shows it below the icon instead.
+//
+// The icons in a list row use `.besideStrip` instead: a row in a real List is its own table cell, and a
+// label that rises out of its row is cut off at the row's edge (or drawn under the row above), so
+// theirs sits to the left of the row's icon strip, centred on the icon, and never leaves the row.
 
 /// Where the label sits against the icon it names. An icon at the edge of its window uses `.trailing`
 /// (or `.leading`), so the label grows inward from that edge and is never cut off by it.
@@ -40,6 +44,17 @@ enum HoverLabelAnchor {
         case .trailing: .trailing
         }
     }
+}
+
+/// Where the label goes against the icon it names.
+enum HoverLabelPlacement: Equatable {
+    /// Above the icon, or below it when there is no room above it (the popover's footer).
+    case aboveOrBelow
+    /// To the left of the strip of icons this icon belongs to, centred vertically on the icon, so the label
+    /// never leaves the icon's own row (a row of a list is its own cell, and a label that rises out of it
+    /// is cut off or covered). `offset` is the distance from the strip's leading edge to this icon's leading
+    /// edge. The label may take two lines; a longer text is cut with an ellipsis, and the whole text is on `.help`.
+    case besideStrip(offset: CGFloat)
 }
 
 enum HoverLabelMetrics {
@@ -79,6 +94,11 @@ enum HoverLabelMetrics {
 
     static let shadowMargin: CGFloat = 4
 
+    /// Space between a label beside an icon strip and the strip.
+    static let besideGap: CGFloat = 6
+    /// The most lines a label beside a strip takes: two lines (about 34 pt) stay inside the shortest row.
+    static let besideMaxLines = 2
+
     /// True when the label should hang below the icon: there is not room for it above, inside what
     /// clips the icon (the scroll view's top edge, else the window's).
     static func showsBelow(roomAbove: CGFloat, text: String, maxWidth: CGFloat, gap: CGFloat) -> Bool {
@@ -90,6 +110,8 @@ enum HoverLabelMetrics {
 struct HoverLabelBubble: View {
     let text: String
     var maxWidth: CGFloat = 240
+    /// The most lines the text takes before it is cut with an ellipsis; nil for as many as it needs.
+    var maxLines: Int?
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -97,6 +119,8 @@ struct HoverLabelBubble: View {
             .font(.system(size: HoverLabelMetrics.fontSize))
             .foregroundStyle(Color.textPrimary)
             .multilineTextAlignment(.leading)
+            .lineLimit(maxLines)
+            .truncationMode(.tail)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, HoverLabelMetrics.horizontalPadding)
             .padding(.vertical, HoverLabelMetrics.verticalPadding)
@@ -155,9 +179,10 @@ final class HoverTrackingView: NSView {
         addTrackingArea(fresh)
         area = fresh
         // A pointer already over the view (the popover opened under it) sends no entry; ask where it is.
+        // Told on the next turn of the run loop, not now: AppKit may be updating areas inside SwiftUI's layout.
         if let window, window.isVisible {
             let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
-            if bounds.contains(point) { pointerIsOver() }
+            if bounds.contains(point) { Task { @MainActor [weak self] in self?.pointerIsOver() } }
         }
     }
 
@@ -172,11 +197,18 @@ final class HoverTrackingView: NSView {
 
     // MARK: - Leaving the window
 
+    /// The window notifications that end a hover: it closes, or stops being key or main.
+    private static let windowEndings = [NSWindow.willCloseNotification, NSWindow.didResignKeyNotification, NSWindow.didResignMainNotification]
+
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         // Going to another window, or to none (the view was removed): the pointer is no longer over
         // it. Told on the next turn of the run loop, not now, because SwiftUI may be updating.
-        if window != nil, let report = onChange { Task { @MainActor in report(false) } }
-        NotificationCenter.default.removeObserver(self)
+        if let old = window {
+            if let report = onChange { Task { @MainActor in report(false) } }
+            // Stop listening to the old window, and only for the three notifications added below
+            // (not every observation this view might have for any other reason).
+            for name in Self.windowEndings { NotificationCenter.default.removeObserver(self, name: name, object: old) }
+        }
         super.viewWillMove(toWindow: newWindow)
     }
 
@@ -184,7 +216,7 @@ final class HoverTrackingView: NSView {
         super.viewDidMoveToWindow()
         guard let window else { return }
         // The window closing, or no longer being key or main, ends the hover: nothing sends an exit for those.
-        for name in [NSWindow.willCloseNotification, NSWindow.didResignKeyNotification, NSWindow.didResignMainNotification] {
+        for name in Self.windowEndings {
             NotificationCenter.default.addObserver(self, selector: #selector(windowStoppedShowing(_:)), name: name, object: window)
         }
         reportRoomAbove()
@@ -254,6 +286,8 @@ struct HoverLabelModifier: ViewModifier {
     var alwaysShown = false
     /// Told whether the pointer is over the view, from the same tracking area.
     var onHover: (@MainActor (Bool) -> Void)?
+    /// Where the label goes against the view.
+    var placement: HoverLabelPlacement = .aboveOrBelow
 
     private let shownStorage = State<Bool>(initialValue: false)
     private let waitStorage = State<Task<Void, Never>?>(initialValue: nil)
@@ -278,9 +312,15 @@ struct HoverLabelModifier: ViewModifier {
         nonmutating set { if roomStorage.wrappedValue != newValue { roomStorage.wrappedValue = newValue } }
     }
 
-    /// Below the view when the label would not fit above it.
+    /// Below the view when the label would not fit above it (only for `.aboveOrBelow`).
     private var below: Bool {
         HoverLabelMetrics.showsBelow(roomAbove: roomAbove, text: text, maxWidth: maxWidth, gap: gap)
+    }
+
+    /// The distance from the strip's leading edge to this view's, for `.besideStrip`; nil for `.aboveOrBelow`.
+    private var stripOffset: CGFloat? {
+        if case .besideStrip(let offset) = placement { return offset }
+        return nil
     }
 
     func body(content: Content) -> some View {
@@ -323,7 +363,7 @@ struct HoverLabelModifier: ViewModifier {
                 Color.clear
                     .frame(height: 0)
                     .overlay(alignment: Alignment(horizontal: anchor.horizontal, vertical: .bottom)) {
-                        if (shown || alwaysShown) && !text.isEmpty && !below {
+                        if (shown || alwaysShown) && !text.isEmpty && !below && stripOffset == nil {
                             HoverLabelBubble(text: text, maxWidth: maxWidth)
                                 .offset(y: -gap)
                                 .allowsHitTesting(false)
@@ -336,9 +376,24 @@ struct HoverLabelModifier: ViewModifier {
                 Color.clear
                     .frame(height: 0)
                     .overlay(alignment: Alignment(horizontal: anchor.horizontal, vertical: .top)) {
-                        if (shown || alwaysShown) && !text.isEmpty && below {
+                        if (shown || alwaysShown) && !text.isEmpty && below && stripOffset == nil {
                             HoverLabelBubble(text: text, maxWidth: maxWidth)
                                 .offset(y: gap)
+                                .allowsHitTesting(false)
+                                .transition(.opacity)
+                        }
+                    }
+            }
+            // Beside the strip: a zero-width strip along the view's leading edge with the label hung from its
+            // trailing edge and centred on it, shifted left past the icons before this one. It stays within the
+            // row's height (two lines are shorter than any row), so nothing clips it and no neighbouring cell covers it.
+            .overlay(alignment: .leading) {
+                Color.clear
+                    .frame(width: 0)
+                    .overlay(alignment: .trailing) {
+                        if (shown || alwaysShown) && !text.isEmpty, let offset = stripOffset {
+                            HoverLabelBubble(text: text, maxWidth: maxWidth, maxLines: HoverLabelMetrics.besideMaxLines)
+                                .offset(x: -(offset + HoverLabelMetrics.besideGap))
                                 .allowsHitTesting(false)
                                 .transition(.opacity)
                         }
@@ -372,8 +427,9 @@ extension View {
     /// plain wrapper around a button, not on the button: a disabled control gets no pointer events.
     /// `onHover` receives the pointer reports of the same tracking area (for an icon's own highlight).
     func hoverLabel(_ text: String, anchor: HoverLabelAnchor = .center, maxWidth: CGFloat = 240, gap: CGFloat = 0,
-                    dismissTrigger: Int = 0, alwaysShown: Bool = false, onHover: (@MainActor (Bool) -> Void)? = nil) -> some View {
+                    dismissTrigger: Int = 0, alwaysShown: Bool = false, onHover: (@MainActor (Bool) -> Void)? = nil,
+                    placement: HoverLabelPlacement = .aboveOrBelow) -> some View {
         modifier(HoverLabelModifier(text: text, anchor: anchor, maxWidth: maxWidth, gap: gap,
-                                    dismissTrigger: dismissTrigger, alwaysShown: alwaysShown, onHover: onHover))
+                                    dismissTrigger: dismissTrigger, alwaysShown: alwaysShown, onHover: onHover, placement: placement))
     }
 }

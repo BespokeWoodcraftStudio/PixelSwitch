@@ -10,7 +10,7 @@ import SwiftUI
 /// back through `ChromeProfileChoiceStore` (`set`, or `clear` for Automatic).
 ///
 /// What each item means, and what is kept for it:
-/// - "Automatic (its own PixelSwitch profile)": nothing is kept (`choice` is nil). Limit resets uses a
+/// - "Automatic (a matching Chrome profile, else its own PixelSwitch profile)": nothing is kept (`choice` is nil). Limit resets uses a
 ///   Chrome profile Chrome's own list shows signed in to the account's address when it can read that
 ///   list, else a profile of PixelSwitch's own for the account. It is what an account starts with, and
 ///   it is a state of its own: it is NOT the same as picking the next item.
@@ -81,7 +81,7 @@ struct ChromeProfileChoiceControl: View {
     }
 
     static func automaticTitle() -> String {
-        String(localized: "Automatic (its own PixelSwitch profile)", bundle: L10n.bundle)
+        String(localized: "Automatic (a matching Chrome profile, else its own PixelSwitch profile)", bundle: L10n.bundle)
     }
 
     static func ownTitle() -> String {

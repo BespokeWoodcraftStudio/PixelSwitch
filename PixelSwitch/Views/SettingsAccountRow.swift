@@ -62,8 +62,12 @@ enum WindowColumnMetrics {
 }
 
 /// The row's five action icons, left to right.
-enum SettingsRowIcon {
+enum SettingsRowIcon: Int {
     case switchTo, resign, editLabel, chromeProfile, remove
+
+    /// Where this icon's leading edge is from the strip's: the icons are 22 pt wide with no gap between them,
+    /// which is how far its hover label is shifted to sit left of the whole strip.
+    var stripOffset: CGFloat { CGFloat(rawValue) * 22 }
 }
 
 /// One account's row in Settings → Accounts: drag handle, Priority control,
@@ -294,6 +298,7 @@ struct SettingsAccountRow: View {
                 inputLabel: Text("Switch"),
                 isDisabled: switchOffReason != nil,
                 labelShown: previewLabel == .switchTo,
+                position: .switchTo,
                 action: onSwitch)
 
             // The Usage card's Re-sign icon and words, so it is the same button everywhere.
@@ -307,6 +312,7 @@ struct SettingsAccountRow: View {
                 inputLabel: Text("Re-sign"),
                 isDisabled: actionsBusy,
                 labelShown: previewLabel == .resign,
+                position: .resign,
                 action: onResign)
 
             RowIconButton(
@@ -315,6 +321,7 @@ struct SettingsAccountRow: View {
                 spoken: Text("Edit label for \(title)"),
                 inputLabel: Text("Edit label"),
                 labelShown: previewLabel == .editLabel,
+                position: .editLabel,
                 action: { beginEditing() })
 
             // Which Chrome profile Limit resets opens for this account: a menu, not a click. The hover label
@@ -328,6 +335,7 @@ struct SettingsAccountRow: View {
                 choice: chromeChoice,
                 address: chromeAddress,
                 labelShown: previewLabel == .chromeProfile,
+                position: .chromeProfile,
                 onChoose: onChromeChoice)
 
             // Quiet until the pointer is over it, then red: it deletes the saved login.
@@ -341,6 +349,7 @@ struct SettingsAccountRow: View {
                 isDisabled: actionsBusy,
                 destructive: true,
                 labelShown: previewLabel == .remove,
+                position: .remove,
                 action: onRemove)
         }
         .fixedSize()
@@ -585,6 +594,8 @@ private struct RowIconButton: View {
     var destructive = false
     /// Holds the hover label open, for the offscreen renders.
     var labelShown = false
+    /// Which icon of the strip this is: its hover label sits left of the whole strip (`SettingsRowIcon.stripOffset`).
+    let position: SettingsRowIcon
     let action: @MainActor () -> Void
 
     private let hoverStorage = State<Bool>(initialValue: false)
@@ -612,11 +623,10 @@ private struct RowIconButton: View {
         }
         .contentShape(Rectangle())
         .help(Text(verbatim: hint))
-        // Right-aligned to the icon: the row's last icons sit at the window's edge, and the label
-        // grows toward the middle. It rises into the icon's own padding and the row's spare height, or
-        // hangs below the icon when there is no room above (the first row of the list).
-        .hoverLabel(hint, anchor: .trailing, maxWidth: 480, gap: -3, dismissTrigger: pressStorage.wrappedValue,
-                    alwaysShown: labelShown, onHover: { hovering = $0 })
+        // To the left of the whole icon strip, centred on the icon, so it never leaves the row: a row of the
+        // List is its own cell, and a label rising out of it was cut off at the row's edge.
+        .hoverLabel(hint, maxWidth: 420, dismissTrigger: pressStorage.wrappedValue,
+                    alwaysShown: labelShown, onHover: { hovering = $0 }, placement: .besideStrip(offset: position.stripOffset))
     }
 }
 
@@ -634,6 +644,7 @@ private struct RowIconMenu: View {
     let address: String
     /// Holds the hover label open, for the offscreen renders.
     var labelShown = false
+    let position: SettingsRowIcon
     let onChoose: @MainActor (ChromeProfileChoice?) -> Void
 
     private let hoverStorage = State<Bool>(initialValue: false)
@@ -660,6 +671,6 @@ private struct RowIconMenu: View {
         .contentShape(Rectangle())
         .help(Text(verbatim: hint))
         // Opening the menu hides the label (any menu opening does, see `HoverLabelModifier`).
-        .hoverLabel(hint, anchor: .trailing, maxWidth: 480, gap: -3, alwaysShown: labelShown, onHover: { hovering = $0 })
+        .hoverLabel(hint, maxWidth: 420, alwaysShown: labelShown, onHover: { hovering = $0 }, placement: .besideStrip(offset: position.stripOffset))
     }
 }

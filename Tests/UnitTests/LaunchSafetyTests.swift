@@ -60,6 +60,14 @@ import Foundation
     defaults.set(["x": "not-a-uuid", "y": "00000000-0000-0000-0000-000000000000"], forKey: W.defaultsKey)
     check(W.plan(defaults: defaults) == [.forgetSavedList], "launch safety plan: a list with no usable identifier is forgotten, with no folder removals")
 
+    // One saved value of another type (a number, a nested dictionary) is skipped by itself: the others are still planned.
+    defaults.set(["acct-a": a.uuidString, "acct-n": 7, "acct-x": ["nested": "y"], "acct-b": b.uuidString] as [String: Any], forKey: W.defaultsKey)
+    let mixed = W.plan(defaults: defaults)
+    check(mixed.first == .forgetSavedList && mixed.count == 3 && Set(mixed.dropFirst()) == [.removeStoreFolder(a), .removeStoreFolder(b)],
+          "launch safety plan: a number and a dictionary among the saved values are skipped, and the real identifiers still get their folder removals", "\(mixed)")
+    check(Set(W.pendingIdentifiers(defaults: defaults)) == [a, b] && W.pendingIdentifiers(defaults: defaults).count == 2,
+          "launch safety plan: the identifiers read are exactly the String values that are UUIDs")
+
     let library = URL(fileURLWithPath: "/Users/someone/Library", isDirectory: true)
     check(W.storesFolder(library: library, bundleIdentifier: "ai.pixelventures.pixelswitch").path
           == "/Users/someone/Library/WebKit/ai.pixelventures.pixelswitch/WebsiteDataStore",
@@ -224,6 +232,14 @@ private final class ProbeFileManager: FileManager, @unchecked Sendable {
     let idle = W.run(defaults: defaults, storesFolder: stores)
     check(idle == W.Outcome() && exists(unsaved), "launch safety run: with no saved list no folder is ever removed")
 
+    // F2. One saved value of another type does not stop the other stores' folders from being removed.
+    reset()
+    let mixedA = makeStore(a), mixedB = makeStore(b), mixedKept = makeStore(unrelated)
+    defaults.set(["acct-a": a.uuidString, "acct-n": 7, "acct-b": b.uuidString] as [String: Any], forKey: W.defaultsKey)
+    let mixedRun = W.run(defaults: defaults, storesFolder: stores)
+    check(mixedRun == W.Outcome(forgotSavedList: true, foldersRemoved: 2, foldersAbsent: 0, foldersLeft: 0) && !exists(mixedA) && !exists(mixedB) && exists(mixedKept) && !W.hasWork(defaults: defaults),
+          "launch safety run: a saved value of another type skips only itself; both real stores' folders are removed and an unrelated folder is untouched", "\(mixedRun)")
+
     // G. The launch entry point logs one line when it ran and none when it had nothing to do. It is always
     //    given a temporary stores folder here, never the real one, and it deletes only what is in that folder.
     reset()
@@ -260,6 +276,9 @@ private final class ProbeFileManager: FileManager, @unchecked Sendable {
           && cleanup.contains("let outcome = run(defaults: defaults, storesFolder: storesFolder)") && cleanup.components(separatedBy: "defaultStoresFolder()").count == 2,
           "launch safety wiring: the stores folder is a parameter of the launch entry point, with the real folder as its only default")
     let tests = (try? String(contentsOfFile: "Tests/UnitTests/LaunchSafetyTests.swift", encoding: .utf8)) ?? ""
+    check(cleanup.contains("guard let stored = defaults.dictionary(forKey: defaultsKey) else { return [] }") && cleanup.contains("stored.values.compactMap({ $0 as? String })")
+          && !cleanup.contains("as? [String: String]"),
+          "launch safety wiring: the saved mapping is read as [String: Any] and each value is taken on its own, so one bad value never hides the others")
     // Real calls start a line; the lines of this pin only mention the call inside quotes.
     let calls = tests.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
         .filter { $0.hasPrefix("W.runAtLaunch(") }

@@ -909,7 +909,7 @@ private func chromeSource(_ name: String) -> String {
     // Nothing kept is its own state, labelled Automatic, and picking the own profile is a different, kept choice.
     check(control.contains("case nil: return automaticTitle()") && control.contains(".tag(ChromeProfileChoice?.none)")
           && control.contains(".tag(Optional(ChromeProfileChoice.ownProfile))") && control.contains(".tag(Optional(ChromeProfileChoice.chromeProfileSignedInAs))")
-          && control.contains("String(localized: \"Automatic (its own PixelSwitch profile)\", bundle: L10n.bundle)"),
+          && control.contains("String(localized: \"Automatic (a matching Chrome profile, else its own PixelSwitch profile)\", bundle: L10n.bundle)"),
           "chrome pins: the menu has Automatic (nothing kept), its own profile (kept as own) and signed in as, each its own item")
     check(tab.contains("chromeChoicesRevision += 1") && !tab.contains("ChromeProfileChoiceStore.set(") && !tab.contains("ChromeProfileChoiceStore.clear("),
           "chrome pins: every pick goes through the store's apply, and any pick redraws the rows")
@@ -959,7 +959,7 @@ private func chromeSource(_ name: String) -> String {
     check(tables.allSatisfy { !($0[help] ?? "").contains("\u{2014}") }, "chrome strings: no em dash in any language")
     let choiceKeys = ["Its own PixelSwitch Chrome profile", "The Chrome profile signed in as %@", "The Chrome profile folder %@",
                       "Choose this only if Chrome has a profile signed in with this address. Otherwise Chrome opens whichever profile you used last.",
-                      "Chrome profile for Limit resets", "Automatic (its own PixelSwitch profile)",
+                      "Chrome profile for Limit resets", "Automatic (a matching Chrome profile, else its own PixelSwitch profile)",
                       "Chrome profile for Limit resets: %@", "Chrome profile for Limit resets of %@"]
     check(choiceKeys.allSatisfy { key in tables.allSatisfy { ($0[key] ?? "").isEmpty == false } },
           "chrome strings: the eight profile choice strings are in all five tables")
@@ -970,7 +970,13 @@ private func chromeSource(_ name: String) -> String {
     check(["The Chrome profile signed in as %@", "The Chrome profile folder %@", "Chrome profile for Limit resets: %@", "Chrome profile for Limit resets of %@"]
             .allSatisfy { key in tables.allSatisfy { ($0[key] ?? "").components(separatedBy: "%@").count == 2 } },
           "chrome strings: the four strings that take a name, an address or a choice keep exactly one %@ in every language")
-    check(tables.allSatisfy { !($0["Automatic (its own PixelSwitch profile)"] ?? "").contains("%") }
+    // Automatic says what it does: a matching Chrome profile first, else the account's own PixelSwitch profile (the old, shorter wording is gone).
+    let automatic = "Automatic (a matching Chrome profile, else its own PixelSwitch profile)"
+    check(tables.allSatisfy { $0["Automatic (its own PixelSwitch profile)"] == nil } && tables[0][automatic] == automatic
+          && tables.allSatisfy { ($0[automatic] ?? "").contains("Chrome") && ($0[automatic] ?? "").contains("PixelSwitch") }
+          && tables.dropFirst().allSatisfy { ($0[automatic] ?? "") != automatic },
+          "chrome strings: Automatic says what it does (a matching Chrome profile, else its own PixelSwitch profile) in all five tables, and the old wording is gone")
+    check(tables.allSatisfy { !($0["Automatic (a matching Chrome profile, else its own PixelSwitch profile)"] ?? "").contains("%") }
           && tables.allSatisfy { ($0["Chrome profile for Limit resets: %@"] ?? "").contains("Chrome") && ($0["Chrome profile for Limit resets of %@"] ?? "").contains("Chrome") },
           "chrome strings: Automatic has no placeholder, and both hover and spoken lines keep the name Chrome in every language")
     check(tables.allSatisfy { $0["Open this account's claude.ai usage page to use a reset"] == nil },

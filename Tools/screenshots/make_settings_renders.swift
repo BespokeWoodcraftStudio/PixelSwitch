@@ -160,25 +160,26 @@ private func chromeChoicesSample() -> some View {
 }
 
 /// A real scrolling List like Settings' (an inset list with alternating rows), so the label's room above is measured
-/// against the list's own clip view. A short first row has no room above its icon, so its label hangs below the icon; a
-/// row further down has room, so its label rises above. `which` holds the label open on that row only. `short` makes the
-/// first row a plain two-line row (no label under the address) as most rows are.
+/// against the list's own clip view and the label is drawn among real table cells. `which` holds the Chrome profile
+/// label open on that row only, with `chrome` as that row's kept choice (nil is Automatic, whose label is two lines).
+/// `longAt` is the row that has the 34-character address, which makes the signed-in-as label two lines as well and
+/// the row tall (the warning line shows). The label of a row below the first rises over the row above it.
 @MainActor
-private func listSample(which: Int, chrome: ChromeProfileChoice?, short: Bool) -> some View {
+private func listSample(which: Int, chrome: ChromeProfileChoice?, longAt: Int = 0) -> some View {
     let accounts = [
-        short ? Account(email: "claude@bespokewoodcraftstudio.test", displayName: "Team", priority: 1)
-              : Account(email: "work@example.com", displayName: "Work", isActive: true, customLabel: "Work", priority: 1),
-        Account(email: "studio@example.com", displayName: "Studio", priority: 2),
-        Account(email: "archive@example.com", displayName: "Archive", priority: 3),
-    ]
+        Account(email: "studio@example.com", displayName: "Studio", priority: 1),
+        Account(email: "archive@example.com", displayName: "Archive", priority: 2),
+        Account(email: "work@example.com", displayName: "Work", priority: 3),
+    ].enumerated().map { index, account in
+        index == longAt ? Account(email: "claude@bespokewoodcraftstudio.test", displayName: "Team", priority: account.priority) : account
+    }
     return List {
         ForEach(0..<accounts.count, id: \.self) { index in
-            row(accounts[index], defaults: defaultsEqual, active: !short && index == 0, label: !short && index == 0 ? "Work" : nil,
-                previewLabel: index == which ? .chromeProfile : nil, chrome: index == which ? chrome : nil)
+            row(accounts[index], defaults: defaultsEqual, previewLabel: index == which ? .chromeProfile : nil, chrome: index == which ? chrome : nil)
         }
     }
     .listStyle(.inset(alternatesRowBackgrounds: true))
-    .frame(height: 230)
+    .frame(height: 260)
     .padding(8)
 }
 
@@ -290,11 +291,14 @@ enum SettingsRenders {
                 writePNG(splitDefaultsSample(), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-split-defaults\(suffix)-\(name).png")
                 writePNG(iconLabelsSample(), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-icon-labels\(suffix)-\(name).png")
                 writePNG(chromeChoicesSample(), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-chrome-profile\(suffix)-\(name).png")
-                writePNG(listSample(which: 0, chrome: nil, short: true), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-list-first-row-label\(suffix)-\(name).png")
-                writePNG(listSample(which: 0, chrome: .chromeProfileSignedInAs, short: true), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-list-first-row-label-long\(suffix)-\(name).png")
+                // The label's room in the real List, first row, then the rows below it (two-line labels: Automatic, and signed in as a long address).
+                writePNG(listSample(which: 0, chrome: nil), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-list-first-row-label\(suffix)-\(name).png")
+                writePNG(listSample(which: 1, chrome: nil), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-list-second-row-label\(suffix)-\(name).png")
+                writePNG(listSample(which: 2, chrome: nil), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-list-third-row-label\(suffix)-\(name).png")
+                writePNG(listSample(which: 1, chrome: .chromeProfileSignedInAs, longAt: 1), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-list-second-row-label-long\(suffix)-\(name).png")
+                writePNG(listSample(which: 2, chrome: .chromeProfileSignedInAs, longAt: 2), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-list-third-row-label-long\(suffix)-\(name).png")
                 writePNG(scrollSample(chrome: nil), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-scroll-first-row-label\(suffix)-\(name).png")
                 writePNG(scrollSample(chrome: .chromeProfileSignedInAs), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-scroll-first-row-label-long\(suffix)-\(name).png")
-                writePNG(listSample(which: 1, chrome: nil, short: true), width: 972, dark: dark, language: language, to: "\(out)/settings-accounts-list-second-row-label\(suffix)-\(name).png")
                 if language == "en" {
                     writePNG(generalSample(session: 90, weekly: 50), width: 560, dark: dark, language: language, to: "\(out)/settings-general-defaults-split-\(name).png")
                     writePNG(generalSample(session: 98, weekly: 98), width: 560, dark: dark, language: language, to: "\(out)/settings-general-defaults-equal-\(name).png")
