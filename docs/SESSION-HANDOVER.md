@@ -22,6 +22,8 @@ Last updated 2026-11-20 (PST), at the close of 2.4 (launch-crash fix, Limit rese
   5. Delete the remote `ci/<version>-candidate` branch; `git rev-list origin/main..main` must be empty.
   6. The docs push after the release starts an ordinary main build: cancel it.
 
+**Release line (verified):** v2.4 (build 35), tag `v2.4`, bump commit `47d8137`, release CI run 44795143531 (success on a `gh run rerun --failed`: the first Release step died with `other side closed` while uploading appcast.xml, a transient upload error; published 2026-11-20T18:54:54Z, Latest). `scripts/verify-release.sh v2.4` exit 0 (appcast length = DMG 5085477, EdDSA verified, notarized, stapled, all Linux checks PASS). Live-launch proof before release: the built `bfd3cbe` with the 2.3 crash trigger planted stayed alive for 45 s, no new `.ips`, trigger key consumed, normal launch and `[webCleanup]` log lines. `ci/2.4-candidate` deleted. Next step is the founder's hand check, not a release.
+
 ## 2.3 (2026-11-20): released, but it crashed at launch; fixed in 2.4
 
 **State: RELEASED and verified.** v2.3 (build 34), tag `v2.3`, bump commit `41d1aa6`, release CI run 44777486368 (success, published 2026-11-20T16:56:54Z, Latest); `scripts/verify-release.sh v2.3` exit 0 (appcast 34 / 2.3, length = DMG 4979064, EdDSA verified, notarized, stapled, all Linux checks PASS). `ci/2.3-candidate` deleted. Next step is the founder's hand check, not a release. Contents (`git log v2.2..1aeb28a`; full entry WL-2026-11-20-001):
