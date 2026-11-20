@@ -59,12 +59,12 @@ swiftc -swift-version 6 \
   Tests/UnitTests/UsageGuardTests.swift \
   PixelSwitch/Services/AuthHealth.swift \
   Tests/UnitTests/AuthHealthTests.swift \
-  PixelSwitch/ClaudeWeb/ClaudeWebStoreMap.swift \
-  PixelSwitch/ClaudeWeb/ClaudeWebPolicy.swift \
-  PixelSwitch/ClaudeWeb/ClaudeWebAccountCheck.swift \
-  PixelSwitch/ClaudeWeb/ClaudeWebRemovalGate.swift \
-  PixelSwitch/ClaudeWeb/ClaudeWebLoadFailure.swift \
-  Tests/UnitTests/ClaudeWebTests.swift \
+  PixelSwitch/ChromeProfiles/ChromeLocalState.swift \
+  PixelSwitch/ChromeProfiles/ChromeProfileMatcher.swift \
+  PixelSwitch/ChromeProfiles/ChromeUsageLaunch.swift \
+  PixelSwitch/Services/LegacyWebDataCleanup.swift \
+  Tests/UnitTests/ChromeProfileTests.swift \
+  Tests/UnitTests/NoResetPinTests.swift \
   PixelSwitch/Models/FooterAge.swift \
   Tests/UnitTests/FooterAgeTests.swift \
   Shared/WidgetData.swift \
