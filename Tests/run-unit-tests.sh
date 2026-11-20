@@ -69,6 +69,7 @@ swiftc -swift-version 6 \
   Tests/UnitTests/FooterAgeTests.swift \
   Shared/WidgetData.swift \
   Tests/UnitTests/AccountPlanTests.swift \
+  Tests/UnitTests/AccountIdentityTests.swift \
   Tests/UnitTests/main.swift \
   -o "$OUT/pixelswitch-unit-tests"
 "$OUT/pixelswitch-unit-tests"

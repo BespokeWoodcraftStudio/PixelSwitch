@@ -603,6 +603,7 @@ runUsageErrorTests()
 runUsageGuardTests()
 runAuthHealthTests()
 runAccountPlanTests()
+runAccountIdentityTests()
 runClaudeWebTests()
 runFooterAgeTests()
 

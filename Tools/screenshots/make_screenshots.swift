@@ -20,6 +20,7 @@
 //     PixelSwitch/Views/Components/Badge.swift \
 //     PixelSwitch/Views/Components/CardFooterRow.swift \
 //     PixelSwitch/Views/Components/FooterAgeLabel.swift PixelSwitch/Models/FooterAge.swift \
+//     PixelSwitch/Views/Components/AccountIdentityHeader.swift PixelSwitch/Views/Components/PriorityTag.swift \
 //     PixelSwitch/Models/Account.swift PixelSwitch/Models/AccountPlan.swift PixelSwitch/Models/UsageData.swift \
 //     PixelSwitch/Models/String+Obfuscation.swift \
 //     PixelSwitch/Models/MenuBarConfig.swift PixelSwitch/Models/MenuBarModule.swift \
@@ -497,6 +498,64 @@ private struct Chrome: View {
     }
 }
 
+/// The popover header's name block for each way an account can be named. The accounts are real
+/// `Account` values and the lines come from the app's own `Account.identityLines`, so a picture
+/// here shows what the rule does, not a copy of it. The row around the block (icon, padding, a
+/// 360 pt popover; a square stands in for the app icon) is hand copied from `MainMenuView.headerView`: keep it in step by hand.
+/// Invented addresses on example.com; "Anthropic's default" is the name it gives a personal account.
+private struct HeaderRow: View {
+    let caption: String
+    let account: Account
+    var masked = false
+    var priority: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: caption).font(.caption.weight(.semibold)).foregroundStyle(.textSecondary)
+            HStack(spacing: 10) {
+                // Stands in for the app icon, which the header draws at 26 pt.
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.brand)
+                    .frame(width: 26, height: 26)
+                AccountIdentityHeader(identity: account.identityLines(obfuscated: masked),
+                                      priority: priority, chip: account.planChip())
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(width: 360)
+            .background(RoundedRectangle(cornerRadius: 8).fill(.cardFill).strokeBorder(.cardBorder, lineWidth: 1))
+        }
+    }
+}
+
+private struct HeaderFixtures: View {
+    private func account(_ email: String, org: String?, label: String? = nil, plan: String = "max", tier: String? = "max_5x") -> Account {
+        Account(email: email, displayName: org ?? email, orgName: org, subscriptionType: plan, customLabel: label, planTier: tier)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HeaderRow(caption: "Anthropic's default organization name: the address once",
+                      account: account("personal@example.com", org: "personal@example.com's Organization"), priority: 1)
+            HeaderRow(caption: "The same with a curly apostrophe and other case",
+                      account: account("side-project@example.com", org: "Side-Project@Example.com\u{2019}s Organization", plan: "pro", tier: "default_claude_ai"))
+            HeaderRow(caption: "No organization name: the address once",
+                      account: account("studio@example.com", org: nil))
+            HeaderRow(caption: "A real organization name: both lines",
+                      account: account("team@example.com", org: "Example Woodcraft Studio", plan: "team", tier: nil), priority: 2)
+            HeaderRow(caption: "A custom label: label over the address",
+                      account: account("work@example.com", org: "work@example.com's Organization", label: "Work"))
+            HeaderRow(caption: "The longest sensible address, with P1 and a Max chip",
+                      account: account("operations@example-woodcraft.com", org: "operations@example-woodcraft.com's Organization"), priority: 1)
+            HeaderRow(caption: "Masking on, default organization name: masked address once",
+                      account: account("personal@example.com", org: "personal@example.com's Organization"), masked: true)
+            HeaderRow(caption: "Masking on, real organization name: both lines, address masked",
+                      account: account("team@example.com", org: "Example Woodcraft Studio", plan: "team", tier: nil), masked: true)
+        }
+    }
+}
+
 /// One footer line inside the card's own chrome (swatch, padding, border), so the line is given exactly
 /// the width a real card gives it: a 328 pt card leaves 290 pt.
 private struct FooterCard: View {
@@ -579,6 +638,10 @@ enum Screenshots {
                       width: 380, scheme: scheme, to: "\(out)/limits-\(name).png")
 
                 write(Chrome(), width: 360, scheme: scheme, to: "\(out)/chrome-\(name).png")
+
+                // The popover header's name lines (the address is never on both): default organization
+                // name, no name, a real name, a custom label, a long address, and masking on.
+                write(HeaderFixtures(), width: 388, scheme: scheme, to: "\(out)/header-identity-\(name).png")
 
                 // Ultra has no 5-hour limit: its card has the Ultra badge and no Session row,
                 // next to a Max account that keeps one.

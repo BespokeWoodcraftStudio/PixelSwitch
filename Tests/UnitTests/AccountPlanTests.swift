@@ -977,8 +977,11 @@ private func chipHex(_ text: String?) -> UInt32? {
     let chipLine = "account.planChip(noSubscription: appState.accountUsageErrors[account.id]?.isNoSubscription == true)"
     check(dashboard.components(separatedBy: chipLine).count == 2 && menu.components(separatedBy: chipLine).count == 2,
           "chip pins: the Usage card and the popover header each ask Account.planChip, with the account's no-subscription state")
+    // The popover header hands its chip to AccountIdentityHeader (the header's name block), which draws it.
+    let identityHeader = planSource("PixelSwitch/Views/Components/AccountIdentityHeader.swift")
     check(dashboard.components(separatedBy: "Badge(text: chip.label, color: chip.tone.fill)").count == 2
-          && menu.components(separatedBy: "Badge(text: chip.label, color: chip.tone.fill)").count == 2,
+          && identityHeader.components(separatedBy: "Badge(text: chip.label, color: chip.tone.fill)").count == 2
+          && menu.contains("AccountIdentityHeader(") && menu.contains("chip: account.planChip(noSubscription:"),
           "chip pins: both draw the chip in its own tone's fill")
     check(!dashboard.contains("Badge(text: sub, color: .brand)") && !menu.contains("Badge(text: sub, color: .brand)")
           && !dashboard.contains("displaySubscriptionType") && !menu.contains("displaySubscriptionType"),

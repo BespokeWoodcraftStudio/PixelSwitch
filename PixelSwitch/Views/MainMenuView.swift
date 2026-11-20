@@ -254,22 +254,17 @@ struct MainMenuView: View {
                 .frame(width: 26, height: 26)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 3) {
-                if let account = appState.activeAccount {
-                    HStack(spacing: 6) {
-                        if let priority = AccountOrder.validPriority(account.priority) {
-                            PriorityTag(priority: priority)
-                        }
-                        Text(account.effectiveDisplayName(obfuscated: maskEmails))
-                            .font(.headline)
-                        if let chip = account.planChip(noSubscription: appState.accountUsageErrors[account.id]?.isNoSubscription == true) {
-                            Badge(text: chip.label, color: chip.tone.fill)
-                        }
-                    }
-                    Text(account.displayEmail(obfuscated: maskEmails))
-                        .font(.caption)
-                        .foregroundStyle(.textSecondary)
-                } else {
+            if let account = appState.activeAccount {
+                // One name line, plus the address under it only when it is not
+                // already the name (a personal account's default organization
+                // name is "<address>'s Organization"). See `identityLines`.
+                AccountIdentityHeader(
+                    identity: account.identityLines(obfuscated: maskEmails),
+                    priority: AccountOrder.validPriority(account.priority),
+                    chip: account.planChip(noSubscription: appState.accountUsageErrors[account.id]?.isNoSubscription == true)
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
                     Text("PixelSwitch")
                         .font(.headline)
                     Text("No account connected")
