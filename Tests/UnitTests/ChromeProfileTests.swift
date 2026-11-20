@@ -18,6 +18,8 @@ import Foundation
     chromeProfileMatcherTests()
     chromeOwnedProfileTests()
     chromeLaunchTests()
+    chromeRealShapeTests()
+    chromeReadFailureTests()
     chromeLegacyCleanupTests()
     chromeSourcePins()
     chromeStringTests()
@@ -279,6 +281,228 @@ private let sampleLocalState = """
           "chrome route: an account with no address and no saved profile gets one named from its id, and is never matched to a profile")
 }
 
+// MARK: - A Local State shaped exactly like a real one
+
+/// The shape of a real Chrome 158 `Local State` on the founder's Mac (read on 2026-11-20):
+/// the same field names and value types in `profile.info_cache` (floats, ints, bools, an
+/// empty string, a negative colour int, a dotted key), the same other keys under `profile`,
+/// and a PixelSwitch-made profile that is not signed in to a Google account (`user_name`
+/// empty), as Chrome writes one after `--profile-directory=PixelSwitch ...`. Every name,
+/// address and id here is made up; none of it is real data.
+private let realShapeLocalState = """
+{
+  "browser": {"enabled_labs_experiments": ["x@1"], "first_run_finished": true},
+  "profile": {
+    "info_cache": {
+      "Default": {
+        "active_time": 1792697420.316911, "ai_subscription_tier": 0, "avatar_icon": "chrome://theme/IDR_PROFILE_AVATAR_26",
+        "background_apps": false, "default_avatar_fill_color": -9761, "default_avatar_stroke_color": -20803,
+        "enterprise_label": "", "force_signin_profile_locked": false, "gaia_given_name": "Pat", "gaia_id": "100000000000000000001",
+        "gaia_name": "Pat Example", "gaia_picture_file_name": "Google Profile Picture.png", "hosted_domain": "NO_HOSTED_DOMAIN",
+        "is_consented_primary_account": true, "is_ephemeral": false, "is_glic_eligible": false, "is_managed": 0,
+        "is_using_default_avatar": true, "is_using_default_name": false,
+        "last_downloaded_gaia_picture_url_with_size": "https://lh3.googleusercontent.example/a/x=s256-c-ns",
+        "managed_user_id": "", "metrics_bucket_index": 1, "name": "Your Chrome", "profile_color_seed": -20803,
+        "profile_highlight_color": -9761, "signin.with_credential_provider": false, "user_name": "personal@example.com"
+      },
+      "PixelSwitch work@example.org": {
+        "active_time": 1792697400.5, "avatar_icon": "chrome://theme/IDR_PROFILE_AVATAR_5", "background_apps": false,
+        "default_avatar_fill_color": -9761, "default_avatar_stroke_color": -20803, "force_signin_profile_locked": false,
+        "gaia_id": "", "is_consented_primary_account": false, "is_ephemeral": false, "is_glic_eligible": false,
+        "is_using_default_avatar": true, "is_using_default_name": true, "managed_user_id": "", "metrics_bucket_index": 4,
+        "name": "Person 1", "profile_color_seed": -20803, "profile_highlight_color": -9761,
+        "signin.with_credential_provider": false, "user_name": ""
+      },
+      "Profile 1": {
+        "active_time": 1792697300.0, "ai_subscription_tier": 0, "avatar_icon": "chrome://theme/IDR_PROFILE_AVATAR_28",
+        "background_apps": false, "default_avatar_fill_color": -9761, "default_avatar_stroke_color": -20803,
+        "enterprise_label": "", "force_signin_profile_locked": false, "gaia_given_name": "Pat", "gaia_id": "100000000000000000002",
+        "gaia_name": "Pat Example", "gaia_picture_file_name": "Google Profile Picture.png", "hosted_domain": "example.org",
+        "is_consented_primary_account": true, "is_ephemeral": false, "is_glic_eligible": false, "is_managed": 1,
+        "is_using_default_avatar": true, "is_using_default_name": false,
+        "last_downloaded_gaia_picture_url_with_size": "https://lh3.googleusercontent.example/a/y=s256-c-ns",
+        "managed_user_id": "", "metrics_bucket_index": 2, "name": "work@example.org", "profile_color_seed": -20803,
+        "profile_highlight_color": -9761, "signin.with_credential_provider": false, "user_accepted_account_management": true,
+        "user_name": "work@example.org"
+      },
+      "Profile 2": {
+        "active_time": 1792697200.0, "ai_subscription_tier": 0, "avatar_icon": "chrome://theme/IDR_PROFILE_AVATAR_30",
+        "background_apps": false, "default_avatar_fill_color": -9761, "default_avatar_stroke_color": -20803,
+        "enterprise_label": "", "force_signin_profile_locked": false, "gaia_given_name": "Pat", "gaia_id": "100000000000000000003",
+        "gaia_name": "Pat Example", "gaia_picture_file_name": "Google Profile Picture.png", "hosted_domain": "example.net",
+        "is_consented_primary_account": true, "is_ephemeral": false, "is_glic_eligible": false, "is_managed": 1,
+        "is_using_default_avatar": true, "is_using_default_name": false,
+        "last_downloaded_gaia_picture_url_with_size": "https://lh3.googleusercontent.example/a/z=s256-c-ns",
+        "managed_user_id": "", "metrics_bucket_index": 3, "name": "shop@example.net", "profile_color_seed": -20803,
+        "profile_highlight_color": -9761, "signin.with_credential_provider": false, "user_accepted_account_management": true,
+        "user_name": "shop@example.net"
+      }
+    },
+    "last_active_profiles": ["Default", "Profile 2"],
+    "last_used": "Profile 2",
+    "metrics": {"next_bucket_index": 5},
+    "picker_shown": true,
+    "profile_counts_reported": "13439613247444598",
+    "profiles_created": 3,
+    "profiles_order": ["Default", "Profile 1", "Profile 2", "PixelSwitch work@example.org"]
+  },
+  "signin": {"active_accounts_last_emitted": "13439613247444598"},
+  "was": {"restarted": false}
+}
+"""
+
+@MainActor private func chromeRealShapeTests() {
+    typealias L = ChromeLocalState
+    typealias M = ChromeProfileMatcher
+    typealias C = ChromeUsageLaunch
+    let data = chromeJSON(realShapeLocalState)
+    let profiles = L.parseProfiles(data)
+
+    check(profiles.map(\.directory) == ["Default", "Profile 1", "Profile 2", "PixelSwitch work@example.org"],
+          "chrome real shape: all four profiles of a real-shaped file are read, in the fixed order", "\(profiles.map(\.directory))")
+    check(profiles.map(\.email) == ["personal@example.com", "work@example.org", "shop@example.net", ""],
+          "chrome real shape: Google addresses come from user_name; the PixelSwitch profile that is signed in to no account has none", "\(profiles.map(\.email))")
+    check(M.directory(forEmail: "personal@example.com", in: profiles) == "Default"
+          && M.directory(forEmail: "work@example.org", in: profiles) == "Profile 1"
+          && M.directory(forEmail: "shop@example.net", in: profiles) == "Profile 2",
+          "chrome real shape: each address finds its own profile (Default, Profile 1, Profile 2)")
+    check(M.directory(forEmail: "stranger@example.com", in: profiles) == nil,
+          "chrome real shape: an address no profile has still finds nothing")
+
+    // One bad entry never drops the rest, even among real-shaped ones: damage every field type in turn.
+    let damaged = realShapeLocalState
+        .replacingOccurrences(of: "\"user_name\": \"work@example.org\"", with: "\"user_name\": 12345")
+        .replacingOccurrences(of: "\"active_time\": 1792697200.0", with: "\"active_time\": \"not a number\"")
+        .replacingOccurrences(of: "\"is_managed\": 0", with: "\"is_managed\": null")
+    let afterDamage = L.parseProfiles(chromeJSON(damaged))
+    check(afterDamage.map(\.directory) == ["Default", "Profile 1", "Profile 2", "PixelSwitch work@example.org"]
+          && afterDamage.map(\.email) == ["personal@example.com", "", "shop@example.net", ""],
+          "chrome real shape: a number where an address should be, a string where a float should be and a null drop only that field, never a profile", "\(afterDamage)")
+    let oneObjectBroken = realShapeLocalState.replacingOccurrences(of: "\"Profile 2\": {", with: "\"Profile 2\": [{")
+        .replacingOccurrences(of: "\"user_name\": \"shop@example.net\"\n      }", with: "\"user_name\": \"shop@example.net\"\n      }]")
+    check(L.parseProfiles(chromeJSON(oneObjectBroken)).map(\.directory) == ["Default", "Profile 1", "PixelSwitch work@example.org"],
+          "chrome real shape: one entry of the wrong kind (a list, not an object) is skipped and the other three are kept")
+    // A byte-order mark, which some tools write, does not hide the file.
+    check(L.parseProfiles(Data([0xEF, 0xBB, 0xBF]) + data).count == 4,
+          "chrome real shape: a leading byte-order mark does not stop the profiles being read")
+
+    // The saved PixelSwitch folder for an account never beats a profile Chrome already has for the address.
+    let suite = "ai.pixelventures.pixelswitch.tests.chromeprecedence.\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suite) else { check(false, "chrome precedence: a throwaway defaults suite could not be made"); return }
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let id = "55555555-EEEE-4EEE-8EEE-555555555555"
+    defaults.set([id.lowercased(): "PixelSwitch work@example.org"], forKey: PixelSwitchChromeProfile.defaultsKey)
+    check(PixelSwitchChromeProfile.savedDirectory(forAccountID: id, defaults: defaults) == "PixelSwitch work@example.org",
+          "chrome precedence: setup, the account already has a saved PixelSwitch folder (as after the 2.3 run that found none)")
+    check(C.route(accountID: id, email: "work@example.org", localState: data, chromeInstalled: true, defaults: defaults)
+          == .chrome(profileDirectory: "Profile 1", source: .matched),
+          "chrome precedence: a profile Chrome has for the address wins over the saved PixelSwitch folder")
+    check(PixelSwitchChromeProfile.savedDirectory(forAccountID: id, defaults: defaults) == "PixelSwitch work@example.org",
+          "chrome precedence: and the saved folder is left as it was, not erased or rewritten")
+    check(C.route(accountID: id, email: "WORK@Example.org ", localState: data, chromeInstalled: true, defaults: defaults)
+          == .chrome(profileDirectory: "Profile 1", source: .matched),
+          "chrome precedence: it wins whatever the case or spacing of the address")
+    // Profile gone later: the saved folder is used again (it was never lost).
+    let withoutWork = data.withoutProfile("Profile 1")
+    check(C.route(accountID: id, email: "work@example.org", localState: withoutWork, chromeInstalled: true, defaults: defaults)
+          == .chrome(profileDirectory: "PixelSwitch work@example.org", source: .owned),
+          "chrome precedence: if the matching profile is later removed from Chrome the saved PixelSwitch folder is used again")
+    // The PixelSwitch folder itself signed in to the same address as a human profile: the human profile comes first.
+    let twinState = realShapeLocalState.replacingOccurrences(of: "\"user_name\": \"\"", with: "\"user_name\": \"work@example.org\"")
+    check(C.route(accountID: id, email: "work@example.org", localState: chromeJSON(twinState), chromeInstalled: true, defaults: defaults)
+          == .chrome(profileDirectory: "Profile 1", source: .matched),
+          "chrome precedence: with the PixelSwitch folder signed in to the same address too, the person's own profile still wins")
+    // With no human profile, a PixelSwitch folder that is signed in to the address is a match (it is a real profile Chrome has).
+    let onlyOwned = chromeJSON("""
+    {"profile": {"info_cache": {"PixelSwitch work@example.org": {"name": "Person 1", "user_name": "work@example.org"}}}}
+    """)
+    check(C.route(accountID: id, email: "work@example.org", localState: onlyOwned, chromeInstalled: true, defaults: defaults)
+          == .chrome(profileDirectory: "PixelSwitch work@example.org", source: .matched),
+          "chrome precedence: when only the PixelSwitch folder is signed in to the address, it matches like any other profile")
+}
+
+private extension Data {
+    /// This JSON with one `profile.info_cache` entry taken out, for tests.
+    func withoutProfile(_ directory: String) -> Data {
+        guard var root = (try? JSONSerialization.jsonObject(with: self)) as? [String: Any],
+              var profile = root["profile"] as? [String: Any],
+              var cache = profile["info_cache"] as? [String: Any] else { return self }
+        cache.removeValue(forKey: directory)
+        profile["info_cache"] = cache
+        root["profile"] = profile
+        return (try? JSONSerialization.data(withJSONObject: root)) ?? self
+    }
+}
+
+// MARK: - A Local State that could not be read
+
+@MainActor private func chromeReadFailureTests() {
+    typealias L = ChromeLocalState
+    typealias C = ChromeUsageLaunch
+
+    // The error pairs a refusal or a missing file arrives as.
+    check(L.readFailure(domain: NSCocoaErrorDomain, code: 257) == .accessDenied && L.readFailure(domain: NSPOSIXErrorDomain, code: 1) == .accessDenied
+          && L.readFailure(domain: NSPOSIXErrorDomain, code: 13) == .accessDenied,
+          "chrome read: no-permission, not-permitted and access-denied errors are a refusal")
+    check(L.readFailure(domain: NSCocoaErrorDomain, code: 260) == .notFound && L.readFailure(domain: NSCocoaErrorDomain, code: 4) == .notFound
+          && L.readFailure(domain: NSPOSIXErrorDomain, code: 2) == .notFound && L.readFailure(domain: NSPOSIXErrorDomain, code: 20) == .notFound,
+          "chrome read: no-such-file errors are a missing file")
+    check(L.readFailure(domain: NSCocoaErrorDomain, code: 256) == .other && L.readFailure(domain: NSPOSIXErrorDomain, code: 5) == .other
+          && L.readFailure(domain: "SomeOtherDomain", code: 1) == .other,
+          "chrome read: any other error is other, and a code only counts in its own domain")
+    // A Cocoa "no permission" error wraps the POSIX one: either layer is enough, and a refusal outranks a missing file.
+    let wrapped = NSError(domain: NSCocoaErrorDomain, code: 256,
+                          userInfo: [NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: 1)])
+    check(L.readFailure(from: wrapped) == .accessDenied, "chrome read: a refusal carried by the error underneath is still found")
+    let both = NSError(domain: NSCocoaErrorDomain, code: 260, userInfo: [NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: 13)])
+    check(L.readFailure(from: both) == .accessDenied, "chrome read: when a missing file and a refusal both show, the refusal is reported")
+
+    // Real errors from the real Foundation, on files made here.
+    let scratch = NSTemporaryDirectory() + "pixelswitch-chrome-read-\(UUID().uuidString)"
+    defer { try? FileManager.default.removeItem(atPath: scratch) }
+    do { try FileManager.default.createDirectory(atPath: scratch, withIntermediateDirectories: true) } catch {
+        check(false, "chrome read: could not make a scratch folder", "\(error)"); return
+    }
+    let locked = scratch + "/locked"
+    FileManager.default.createFile(atPath: locked, contents: Data("{}".utf8), attributes: [.posixPermissions: 0])
+    var lockedError: Error?
+    do { _ = try Data(contentsOf: URL(fileURLWithPath: locked)) } catch { lockedError = error }
+    // A process that is allowed to read anything (root) cannot make the refusal; say so instead of failing.
+    if let lockedError {
+        check(L.readFailure(from: lockedError) == .accessDenied, "chrome read: a real unreadable file's error is a refusal", "\(lockedError)")
+    } else {
+        check(true, "chrome read: this process can read a mode-0 file (root), so the real refusal cannot be made here")
+    }
+    var missingError: Error?
+    do { _ = try Data(contentsOf: URL(fileURLWithPath: scratch + "/Local State")) } catch { missingError = error }
+    check(missingError.map { L.readFailure(from: $0) } == .notFound, "chrome read: a real missing file's error is a missing file", "\(String(describing: missingError))")
+
+    // What the route does with it: the same folder as before, told apart only by its source.
+    let suite = "ai.pixelventures.pixelswitch.tests.chromereadfail.\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suite) else { check(false, "chrome read: a throwaway defaults suite could not be made"); return }
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let id = "44444444-DDDD-4DDD-8DDD-444444444444"
+    check(C.route(accountID: id, email: "u@example.com", localState: nil, chromeInstalled: true, localStateFailure: .accessDenied, defaults: defaults)
+          == .chrome(profileDirectory: "PixelSwitch u@example.com", source: .ownedProfileListUnreadable(.accessDenied)),
+          "chrome read route: a refused read opens the account's own folder and says the list was unreadable, not that nothing matched")
+    check(C.route(accountID: id, email: "u@example.com", localState: nil, chromeInstalled: true, localStateFailure: .other, defaults: defaults)
+          == .chrome(profileDirectory: "PixelSwitch u@example.com", source: .ownedProfileListUnreadable(.other)),
+          "chrome read route: any other failed read is reported as unreadable too")
+    check(C.route(accountID: id, email: "u@example.com", localState: nil, chromeInstalled: true, localStateFailure: .notFound, defaults: defaults)
+          == .chrome(profileDirectory: "PixelSwitch u@example.com", source: .owned),
+          "chrome read route: a missing Local State (Chrome never run) is the plain no-profile case")
+    check(C.route(accountID: id, email: "u@example.com", localState: nil, chromeInstalled: true, defaults: defaults)
+          == .chrome(profileDirectory: "PixelSwitch u@example.com", source: .owned),
+          "chrome read route: with no failure given the older behaviour is kept")
+    check(C.route(accountID: id, email: "work@example.org", localState: chromeJSON(realShapeLocalState), chromeInstalled: true,
+                  localStateFailure: .accessDenied, defaults: defaults) == .chrome(profileDirectory: "Profile 1", source: .matched),
+          "chrome read route: a failure that came with data (never happens) cannot beat a match")
+    check(C.route(accountID: id, email: "u@example.com", localState: nil, chromeInstalled: false, localStateFailure: .accessDenied, defaults: defaults) == .defaultBrowser,
+          "chrome read route: with Chrome not installed a failed read changes nothing")
+    check(PixelSwitchChromeProfile.savedDirectory(forAccountID: id, defaults: defaults) == "PixelSwitch u@example.com",
+          "chrome read route: the account's own folder is saved the same way as before")
+}
+
 // MARK: - The data the 2.2 window left behind
 
 @MainActor private func chromeLegacyCleanupTests() {
@@ -367,6 +591,13 @@ private func chromeSource(_ name: String) -> String {
     check(all.components(separatedBy: "claude.ai/").count == all.components(separatedBy: "claude.ai/settings/usage").count
           && all.components(separatedBy: "https://claude.ai").count == 2,
           "chrome pins: the only claude.ai address in the service is the usage page, written once")
+
+    // A refused read is told apart from "no profile matched", in the log and in the read.
+    check(page.contains("ChromeLocalState.readFailure(from: error)") && page.contains("localStateFailure: read.failure")
+          && page.contains("case .ownedProfileListUnreadable(.accessDenied):") && page.contains("macOS did not let PixelSwitch read Chrome's profile list"),
+          "chrome pins: a read macOS refused is logged as that, not as no profile being signed in")
+    check(page.components(separatedBy: "try? Data(contentsOf").count == 1,
+          "chrome pins: the read is never a try? that hides why it failed")
 
     // The log never carries an address.
     let logLines = page.components(separatedBy: "\n").filter { $0.contains("chromeLog.") }

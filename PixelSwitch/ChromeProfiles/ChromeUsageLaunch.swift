@@ -26,8 +26,15 @@ enum ChromeUsageLaunch {
     enum Source: Equatable {
         /// Chrome already had a profile signed in to the account's address.
         case matched
-        /// PixelSwitch's own folder for the account (Chrome makes it on first launch).
+        /// PixelSwitch's own folder for the account (Chrome makes it on first launch),
+        /// because Chrome's profile list was read and none of its profiles is signed in
+        /// to the account's address (or Chrome has no profile list yet).
         case owned
+        /// PixelSwitch's own folder for the account because Chrome's profile list could
+        /// NOT be read (macOS refused, or another error), so no match could be tried.
+        /// The folder is the same as `.owned`; the difference is only what gets logged,
+        /// so a refusal is never reported as "no profile is signed in".
+        case ownedProfileListUnreadable(ChromeLocalState.ReadFailure)
     }
 
     enum Route: Equatable {
@@ -45,9 +52,14 @@ enum ChromeUsageLaunch {
     }
 
     /// Where to open the account's page. With Chrome missing nothing is read or saved.
-    /// Otherwise the profile Chrome already has for the address wins; failing that, the
-    /// account's own PixelSwitch folder (made and saved on first use).
+    /// Otherwise the profile Chrome already has for the address wins, always, even when
+    /// the account already has a PixelSwitch folder saved (the saved one is left as it
+    /// is and is not even looked at); failing that, the account's own PixelSwitch
+    /// folder (made and saved on first use). `localStateFailure` is why `localState`
+    /// is nil when the read failed (nil when it did not fail): it only changes which
+    /// `Source` is reported, never the folder.
     static func route(accountID: String, email: String, localState: Data?, chromeInstalled: Bool,
+                      localStateFailure: ChromeLocalState.ReadFailure? = nil,
                       defaults: UserDefaults = .standard) -> Route {
         guard chromeInstalled else { return .defaultBrowser }
         let profiles = ChromeLocalState.parseProfiles(localState)
@@ -55,6 +67,9 @@ enum ChromeUsageLaunch {
             return .chrome(profileDirectory: directory, source: .matched)
         }
         let owned = PixelSwitchChromeProfile.directory(forAccountID: accountID, email: email, defaults: defaults)
+        if localState == nil, let failure = localStateFailure, failure != .notFound {
+            return .chrome(profileDirectory: owned, source: .ownedProfileListUnreadable(failure))
+        }
         return .chrome(profileDirectory: owned, source: .owned)
     }
 }

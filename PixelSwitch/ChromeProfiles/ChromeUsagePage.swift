@@ -23,8 +23,9 @@ enum ChromeUsagePage {
     /// and names a new one; it is never logged).
     static func open(accountID: String, email: String) {
         let tag = shortID(accountID)
-        let route = ChromeUsageLaunch.route(accountID: accountID, email: email, localState: readLocalState(),
-                                            chromeInstalled: isChromeInstalled())
+        let read = readLocalState()
+        let route = ChromeUsageLaunch.route(accountID: accountID, email: email, localState: read.data,
+                                            chromeInstalled: isChromeInstalled(), localStateFailure: read.failure)
         switch route {
         case .defaultBrowser:
             chromeLog.info("[chromeResets] account \(tag): Chrome is not installed, opening the usage page in the default browser")
@@ -35,6 +36,10 @@ enum ChromeUsagePage {
                 chromeLog.info("[chromeResets] account \(tag): opening the usage page in Chrome profile \"\(directory)\" (signed in to this account's address)")
             case .owned:
                 chromeLog.info("[chromeResets] account \(tag): no Chrome profile is signed in to this address, opening the usage page in this account's own PixelSwitch profile")
+            case .ownedProfileListUnreadable(.accessDenied):
+                chromeLog.warning("[chromeResets] account \(tag): macOS did not let PixelSwitch read Chrome's profile list (App Data access is denied), so no Chrome profile could be matched; opening the usage page in this account's own PixelSwitch profile")
+            case .ownedProfileListUnreadable:
+                chromeLog.warning("[chromeResets] account \(tag): Chrome's profile list could not be read, so no Chrome profile could be matched; opening the usage page in this account's own PixelSwitch profile")
             }
             launchChrome(profileDirectory: directory, tag: tag)
         }
@@ -42,12 +47,17 @@ enum ChromeUsagePage {
 
     // MARK: - Side effects
 
-    /// Chrome's `Local State`, the one file read from Chrome's folders (nil when it is
-    /// not there or not readable).
-    private static func readLocalState() -> Data? {
-        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+    /// Chrome's `Local State`, the one file read from Chrome's folders. `data` is nil when it
+    /// could not be read, and `failure` says why (a missing file, a refusal by macOS, or
+    /// anything else), so a refusal is told apart from "no profile matches".
+    private static func readLocalState() -> (data: Data?, failure: ChromeLocalState.ReadFailure?) {
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return (nil, .other) }
         let file = support.appendingPathComponent(ChromeLocalState.relativePath)
-        return try? Data(contentsOf: file)
+        do {
+            return (try Data(contentsOf: file), nil)
+        } catch {
+            return (nil, ChromeLocalState.readFailure(from: error))
+        }
     }
 
     private static func isChromeInstalled() -> Bool {
